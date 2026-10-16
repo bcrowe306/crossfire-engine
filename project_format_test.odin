@@ -1,3 +1,4 @@
+#+build !js
 package engine
 
 import "core:testing"

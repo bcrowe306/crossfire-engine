@@ -14,6 +14,7 @@ import e "odin_sdl_engine"   // or "../odin_sdl_engine" from a sibling package
 odin check . -no-entry-point -vet-unused    # type-check the library (it has no main)
 odin test . -vet-unused                     # unit tests (format parser, transforms, scripts)
 odin check player -vet-unused               # type-check the player program
+odin check . -no-entry-point -vet-unused -target:js_wasm32   # the browser build (web export)
 odin build player -out:player_bin           # build the player: player_bin <project folder>
 ```
 
@@ -49,8 +50,12 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `project_format.odin` | **Project/scene XML format spec** (doc comment) and parser: `ParseProject`, `ParseScene` → plain data (`ProjectData`, `SceneData`), no SDL |
 | `project_loader.odin` | Builds scenes from parsed data: `LoadProjectFile`, `Game_LoadProject`, `Scene_Build`; data-driven `Sprite` and `AnimatedSprite` nodes; menu actions `scene:<Name>` / `quit` |
 | `script.odin` | **Scripts**: Odin game code attached to nodes. `Script_Register`, the registry, exported fields (`export:""` tags) set from scene files by reflection, `Node_AttachScript`, `Script_DescribeJSON` |
-| `player.odin` | `Player_Run(args)`: the whole player program (`player <project folder>`, `player --describe-scripts`) |
-| `player/main.odin` | The **player** for projects without scripts: calls `Player_Run`. A project with scripts gets its own generated main that also imports its `scripts` package. Used by the editor's Play and, later, exports |
+| `player.odin` | `Player_Run(args)`: the whole player program (`player <project folder>`, `player --scene <name>`, `player --describe-scripts`); `Player_Setup`, shared with the web; with no folder, an exported game finds its project next to itself (`data/project.xml`) |
+| `platform_native.odin`, `platform_web.odin` | **Platform layer** (`#+build !js` / `#+build js`): memory arenas, reading files, the executable's folder, loading textures, audio. Code outside these files must not import `core:os`, `core:mem/virtual`, `core:path/filepath`, SDL_image or SDL_mixer: none of them build for the browser |
+| `player_web.odin` | The browser player: `odin_web_main` (called by `web/main.c`), `Web_Context` (Emscripten's malloc, a per-frame temp arena, console logger), `Player_StartWeb` (Emscripten's main loop drives `Application_Frame`) |
+| `web/` | Files the web export links: `main.c` (C `main`), `odin_env.js` and `odin_env_pre.js` (what Odin's js runtime imports from "odin_env") |
+| `paths.odin` | `JoinPath` ("/"-separated, works everywhere) |
+| `player/main.odin` | The **player** for projects without scripts: calls `Player_Main` (`Player_Run` with the command line; nothing in the browser). A project with scripts gets its own generated main that also imports its `scripts` package. Used by the editor's Play and, later, exports |
 | `script_test.odin` | Tests: script registration, fields and tags, lifecycle on a node, bad values, `Scene_FindNode` paths, format v3 scripts |
 | `project_format_test.odin`, `transform_test.odin` | Tests: parser and v1 migration; transform math, hierarchy, subtree removal, draw order/transform/tint/visibility, camera node |
 
@@ -67,10 +72,14 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 - `scene->removeNode(id)` is deferred. At the start of the next update the node gets `onExit`, then
   its `destroy` callback, then its arena is freed. Pointers to it are invalid after that. A node that
   subscribed to another object's events must unsubscribe in `destroy`.
-- `context.temp_allocator` is freed every frame (`Application_Run`). Only use it for data that dies
+- `context.temp_allocator` is freed every frame (`Application_Frame`). Only use it for data that dies
   within the frame.
 - A node arena's `Arena` struct lives inside its own memory: always destroy a **copy** (see
-  `Node_Destroy`).
+  `Node_Destroy`). Arenas are `MemoryArena` (platform layer): virtual memory on the desktop, a
+  growing block arena on the heap in the browser.
+- Contextless code (`@(init)`) gets its context from `Platform_DefaultContext`, never
+  `runtime.default_context()`: in the browser Odin's default allocator would grow the wasm memory
+  behind Emscripten's heap.
 
 **Transforms and hierarchy:**
 - Every node has `position`, `rotation` (degrees, clockwise) and `scale` **relative to its parent**.
@@ -190,14 +199,33 @@ Use Odin's generator, the one behind pkg.odin-lang.org (github.com/odin-lang/pkg
 The generator needs `vendor:commonmark` installed on Linux CI. `docs/`, the workflow and the README
 don't exist yet.
 
-## Known gaps (needed by the editor's export feature)
+## Web build (js_wasm32 + Emscripten)
 
-- `app.odin` hard-codes the `"opengl"` renderer. The web needs WebGL/GLES and macOS should use Metal,
-  so pass `nil` or choose per platform.
-- Asset paths are relative to the working directory. Exported games need a base path
-  (`sdl.GetBasePath()` or a configured asset root).
-- `Application_Run` blocks in a `for` loop. The web needs a callback-driven frame (SDL3 main callbacks
-  or Emscripten's main loop).
+The editor's Web export builds the player for `js_wasm32` with `-build-mode:obj` and links it with
+Emscripten (the editor pins emsdk as a submodule). The link line is in `player_web.odin`'s doc
+comment. What was needed, and why:
+- Odin's `vendor:sdl3` and `vendor:sdl3/ttf` link Emscripten's SDL3 and SDL3_ttf ports on wasm
+  (`-sUSE_SDL=3 -sUSE_SDL_TTF=3`). **There are no SDL3_image or SDL3_mixer ports**, so the web
+  loads images with SDL's own `SDL_LoadPNG` / `SDL_LoadBMP` (PNG and BMP only) and has no audio.
+- `js_wasm32` (not `freestanding`), because `core:log` and `core:fmt` need it. Its runtime imports
+  `write`, `rand_bytes` and some math from a JS module "odin_env": `web/odin_env.js` defines them
+  as an Emscripten library, and `web/odin_env_pre.js` passes Emscripten's imports under that name.
+- Memory comes from Emscripten's `malloc` (`Web_Context`; it honors alignments above 8 through
+  `aligned_alloc`, which Odin's maps need), and the temp allocator is an arena on it.
+- The browser can't block, so `Application_Run` is `for app.running do Application_Frame(app)`
+  and the web calls `Application_Frame` from `emscripten_set_main_loop`.
+- `SetRenderVSync` must come after the main loop exists (`Player_StartWeb`); before it, the first
+  `RenderPresent` blocks forever. The renderer is SDL's choice (WebGL) instead of "opengl".
+- Test in headless Chromium in **real time** (`timeout 8 chromium --headless=new
+  --use-angle=swiftshader --enable-unsafe-swiftshader --enable-logging=stderr <url>`, served by
+  `python3 -m http.server`), reading `CONSOLE` lines. `--virtual-time-budget` stops delivering
+  animation frames after a few. Rendering can be checked from inside the page by drawing the canvas
+  into a 2D canvas and counting colors (a `--post-js`); never by screenshots.
+
+## Known gaps
+
+- Asset paths are relative to the project folder given to the player (or found next to an
+  exported executable).
 - **Scene loading limits.** These are documented in `project_format.odin`, and the editor's
   writer must stay in sync with it.
   - Menus and labels in a scene with a camera are drawn through it, because scene files can't set

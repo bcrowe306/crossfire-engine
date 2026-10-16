@@ -1,8 +1,6 @@
 package engine
 
 import "core:log"
-import "core:os"
-import "core:path/filepath"
 import "core:strings"
 import sdl "vendor:sdl3"
 
@@ -37,8 +35,8 @@ Returns:
 - The project data, and .None or what went wrong
 */
 LoadProjectFile :: proc(path: string, allocator := context.allocator) -> (ProjectData, ProjectError) {
-	text, err := os.read_entire_file(path, context.temp_allocator)
-	if err != nil do return {}, .File_Not_Found
+	text, ok := Platform_ReadFile(path)
+	if !ok do return {}, .File_Not_Found
 	return ParseProject(string(text), allocator)
 }
 
@@ -53,8 +51,8 @@ Returns:
 - The scene data, and .None or what went wrong
 */
 LoadSceneFile :: proc(path: string, allocator := context.allocator) -> (SceneData, ProjectError) {
-	text, err := os.read_entire_file(path, context.temp_allocator)
-	if err != nil do return {}, .File_Not_Found
+	text, ok := Platform_ReadFile(path)
+	if !ok do return {}, .File_Not_Found
 	return ParseScene(string(text), allocator)
 }
 
@@ -84,7 +82,7 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 	ok := true
 
 	for ref in project.scenes {
-		path, _ := filepath.join({projectDir, ref.path}, context.temp_allocator)
+		path := JoinPath(projectDir, ref.path)
 		data, err := LoadSceneFile(path)
 		if err != .None {
 			log.errorf("Couldn't load scene '%s' from %s: %v", ref.name, path, err)
@@ -246,6 +244,6 @@ runMenuAction :: proc(menu: ^Menu, item: ^MenuItem) {
 @(private="file")
 loadAsset :: proc(rm: ^ResourceManager, projectDir, path: string) -> ^sdl.Texture {
 	if path == "" do return nil
-	fullPath, _ := filepath.join({projectDir, path}, context.temp_allocator)
+	fullPath := JoinPath(projectDir, path)
 	return rm->loadTexture(fullPath)
 }

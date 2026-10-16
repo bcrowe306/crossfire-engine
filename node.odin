@@ -3,7 +3,6 @@ package engine
 import "core:log"
 import "core:mem"
 import sdl "vendor:sdl3"
-import vmem "core:mem/virtual"
 
 /*
 How a node's world transform applies when it draws.
@@ -77,7 +76,7 @@ Node :: struct {
 	onEnter: EventSubject,
 	onExit: EventSubject,
 	// Holds this node and everything allocated with Node_GetAllocator
-	arena: vmem.Arena,
+	arena: MemoryArena,
 }
 
 /*
@@ -115,7 +114,7 @@ Example:
 	e.EventSubject_Init(&enemy.onHit, allocator)
 */
 Node_GetAllocator :: proc(node: ^Node) -> mem.Allocator {
-	return vmem.arena_allocator(&node.arena)
+	return MemoryArena_Allocator(&node.arena)
 }
 
 /*
@@ -136,16 +135,16 @@ Node_Destroy :: proc(node: ^Node) {
 	// The arena lives inside its own memory, so destroy a copy: freeing the blocks would
 	// otherwise also free the Arena struct while arena_destroy is still using it
 	arena := node.arena
-	vmem.arena_destroy(&arena)
+	MemoryArena_Destroy(&arena)
 }
 
 // Allocates a node of type T inside a new arena that the node owns
 @(private)
 allocateNode :: proc($T: typeid) -> ^T {
 	// T embeds Node as its first field, so the arena is at the same offset in T as in Node
-	object, err := vmem.arena_growing_bootstrap_new_by_offset(T, offset_of(Node, arena), NODE_ARENA_BLOCK_SIZE)
-	if err != nil {
-		log.panicf("Failed to allocate node %v: %v", typeid_of(T), err)
+	object, ok := MemoryArena_BootstrapNew(T, offset_of(Node, arena), NODE_ARENA_BLOCK_SIZE)
+	if !ok {
+		log.panicf("Failed to allocate node %v", typeid_of(T))
 	}
 	return object
 }

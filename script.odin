@@ -142,7 +142,7 @@ Inputs:
 */
 Script_Register :: proc "contextless" ($T: typeid, hooks: ScriptHooks(T), loc := #caller_location) {
 	// @(init) procedures run before main and must be contextless, so this sets up its own context
-	context = runtime.default_context()
+	context = Platform_DefaultContext()
 	info := new(ScriptInfo)
 	name := fmt.aprintf("%v", typeid_of(T))
 	// "scripts.Player" -> "Player"

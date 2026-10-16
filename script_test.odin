@@ -1,3 +1,4 @@
+#+build !js
 package engine
 
 import "core:encoding/json"
@@ -184,13 +185,14 @@ player_command_line :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 	testing.expect_value(t, options.projectDir, "MyGame")
 	testing.expect_value(t, options.scene, "")
+	testing.expect(t, options.folderGiven)
 	options, ok = Player_ParseArgs({"player", "MyGame", "--scene", "Level2"})
 	testing.expect(t, ok)
 	testing.expect_value(t, options.scene, "Level2")
 	options, ok = Player_ParseArgs({"player", "--describe-scripts"})
 	testing.expect(t, ok && options.describe)
 	options, ok = Player_ParseArgs({"player"})
-	testing.expect(t, ok && options.projectDir == ".")
+	testing.expect(t, ok && options.projectDir == "." && !options.folderGiven)
 	_, ok = Player_ParseArgs({"player", "MyGame", "--scene"})
 	testing.expect(t, !ok)
 	_, ok = Player_ParseArgs({"player", "A", "B"})

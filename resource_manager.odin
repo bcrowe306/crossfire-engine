@@ -4,7 +4,6 @@ import "core:log"
 import "core:fmt"
 import "core:strings"
 import sdl "vendor:sdl3"
-import img "vendor:sdl3/image"
 import mix "vendor:sdl3/mixer"
 import ttf "vendor:sdl3/ttf"
 
@@ -66,7 +65,7 @@ ResourceManager_loadTexture :: proc(rm: ^ResourceManager, filePath: string) -> ^
 		return tex
 	}
 
-	tex := img.LoadTexture(rm.renderer, fmt.ctprint(filePath))
+	tex := Platform_LoadTexture(rm.renderer, filePath)
 	if tex == nil {
 		log.errorf("Error loading texture: %s, %s", filePath, sdl.GetError())
 		return nil
@@ -83,7 +82,7 @@ ResourceManager_loadAudio :: proc(rm: ^ResourceManager, filePath: string, predec
 		return audio
 	}
 
-	audio := mix.LoadAudio(rm.mixer, fmt.ctprint(filePath), predecode)
+	audio := Platform_LoadAudio(rm.mixer, filePath, predecode)
 	if audio == nil {
 		log.errorf("Error loading audio: %s, %s", filePath, sdl.GetError())
 		return nil
@@ -128,7 +127,7 @@ ResourceManager_unloadTexture :: proc(rm: ^ResourceManager, filePath: string) {
 ResourceManager_unloadAudio :: proc(rm: ^ResourceManager, filePath: string) {
 	if filePath not_in rm.audio do return
 	key, audio := delete_key(&rm.audio, filePath)
-	mix.DestroyAudio(audio)
+	Platform_DestroyAudio(audio)
 	delete(key)
 }
 
@@ -154,7 +153,7 @@ ResourceManager_destroy :: proc(rm: ^ResourceManager) {
 	delete(rm.textures)
 
 	for key, audio in rm.audio {
-		mix.DestroyAudio(audio)
+		Platform_DestroyAudio(audio)
 		delete(key)
 	}
 	delete(rm.audio)

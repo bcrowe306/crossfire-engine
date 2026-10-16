@@ -6,7 +6,6 @@ import "core:strings"
 import "core:crypto"
 import "core:mem"
 import sdl "vendor:sdl3"
-import vmem "core:mem/virtual"
 
 
 Scene :: struct {
@@ -15,7 +14,7 @@ Scene :: struct {
 	nodes: [dynamic]^Node,
 	addQueue: [dynamic]^Node,
 	removeQueue: [dynamic]EntityId,
-	arena: vmem.Arena,
+	arena: MemoryArena,
 	// Optional camera, nil by default. When set, every layer not in `screenLayers` is drawn
 	// through it, and its pans and bounds are applied after each update. Create with `Scene_CreateCamera`
 	camera: ^Camera2D,
@@ -33,9 +32,8 @@ Scene :: struct {
 
 Scene_Init :: proc(scene: ^Scene) {
 	log.debug("Initializing Scene")
-	err := vmem.arena_init_growing(&scene.arena)
-	if err != nil {
-		log.panic("Failed to initialize arena: ", err)
+	if !MemoryArena_InitGrowing(&scene.arena) {
+		log.panic("Failed to initialize the scene's arena")
 	}
 	scene.addNode = Scene_AddNode
 	scene.removeNode = Scene_RemoveNode
@@ -59,7 +57,7 @@ Returns:
 - The scene arena allocator
 */
 Scene_GetAllocator :: proc(scene: ^Scene) -> mem.Allocator {
-	return vmem.arena_allocator(&scene.arena)
+	return MemoryArena_Allocator(&scene.arena)
 }
 
 Scene_Destroy :: proc(scene: ^Scene) {
@@ -70,7 +68,7 @@ Scene_Destroy :: proc(scene: ^Scene) {
 	delete(scene.removeQueue)
 	delete(scene.nodes)
 	// Destroy, not free_all: free_all keeps the first block, which leaked once the scene was freed
-	vmem.arena_destroy(&scene.arena)
+	MemoryArena_Destroy(&scene.arena)
 }
 
 /*

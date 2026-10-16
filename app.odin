@@ -30,25 +30,20 @@ Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2
 		return false
 	}
 
-	app.renderer = sdl.CreateRenderer(app.window, "opengl")
+	// The browser has WebGL only: let SDL pick there
+	app.renderer = sdl.CreateRenderer(app.window, PLATFORM_WEB ? nil : "opengl")
 	if app.renderer == nil {
 		log.error("Error creating renderer:", sdl.GetError())
 		return false
 	}
 
-	sdl.SetRenderVSync(app.renderer, 1)
+	// In the browser, vsync means "frames on requestAnimationFrame", which SDL can only set once
+	// Emscripten's main loop exists (before that, Present blocks): see Player_StartWeb
+	if !PLATFORM_WEB do sdl.SetRenderVSync(app.renderer, 1)
 
-	mixerInitOk := mix.Init()
-	if !mixerInitOk {
-		log.error("Error initializing SDL_mixer: ", sdl.GetError())
-		return false
-	}
-
-	app.mixer = mix.CreateMixerDevice(sdl.AUDIO_DEVICE_DEFAULT_PLAYBACK, nil)
-	if app.mixer == nil {
-		log.error("Error creating mixer device: ", sdl.GetError())
-		return false
-	}
+	mixer, audioOk := Platform_AudioInit()
+	if !audioOk do return false
+	app.mixer = mixer
 
 	if !ttf.Init() {
 		log.error("Error initializing SDL_ttf: ", sdl.GetError())
@@ -60,18 +55,34 @@ Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2
 }
 
 
+/*
+Runs the game until it quits: `Application_Frame` in a loop. The browser can't block like this;
+there, the page calls `Application_Frame` once per animation frame (see `Player_StartWeb`).
+*/
 Application_Run :: proc(app: ^Application, game: ^Game = nil) {
 	if game != nil {
 		App_SetGame(app, game)
 	}
+	for app.running do Application_Frame(app)
+}
 
-	lastTime := sdl.GetPerformanceCounter()
+// Frame timing and the event buffer, kept between frames
+@(private="file")
+frameState: struct {
+	lastTime: u64,
+	events: [MAX_EVENTS]sdl.Event,
+}
+
+/*
+Runs one frame: switches to a queued game, polls events, updates, draws and presents, and frees
+the frame's temporary memory. Sets `app.running` to false when the game quits.
+*/
+Application_Frame :: proc(app: ^Application) {
 	freq := sdl.GetPerformanceFrequency()
-
-	events := [MAX_EVENTS]sdl.Event{}
+	if frameState.lastTime == 0 do frameState.lastTime = sdl.GetPerformanceCounter()
+	events := &frameState.events
 	eventCount := 0
-
-	for app.running {
+	{
 
 		if app.queuedGame != nil {
 			log.info("Switching to new game")
@@ -90,8 +101,8 @@ Application_Run :: proc(app: ^Application, game: ^Game = nil) {
 
 		// Poll for events and build events buffer
 		now := sdl.GetPerformanceCounter()
-		deltaTime :=  (f64(now) - f64(lastTime) ) / f64(freq)
-		lastTime = now
+		deltaTime :=  (f64(now) - f64(frameState.lastTime) ) / f64(freq)
+		frameState.lastTime = now
 
 		for sdl.PollEvent(&events[eventCount]) {
 			// Map mouse/touch/pen positions from window space into the game's resolution
@@ -143,10 +154,7 @@ Application_Cleanup :: proc(app: ^Application) {
 	if app.game != nil {
 		Game_Destroy(app.game)
 	}
-	if app.mixer != nil {
-		mix.DestroyMixer(app.mixer)
-	}
-	mix.Quit()
+	Platform_AudioQuit(app.mixer)
 	ttf.Quit()
 	if app.renderer != nil {
 		sdl.DestroyRenderer(app.renderer)
