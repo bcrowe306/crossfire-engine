@@ -145,6 +145,8 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
   its move's contact planes (`moverContacts`).
 - Events are sent after each step, outside Box2D. Shape and body ids in end events can be stale:
   check `Shape_IsValid`.
+- `scene.physicsPaused` stops stepping (bodies stay queryable); the editor preview sets it.
+  CollisionShape has a `getBounds` (its extent), so editors can pick and outline it.
 - The web build links `box2d/lib/box2d_web.o`: one relocatable object, because Odin keeps plain C
   symbol names on wasm only for `.o` foreign imports (an `.a` gets `lib/x.a..b2Foo` names).
 

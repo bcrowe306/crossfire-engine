@@ -2,6 +2,7 @@ package engine
 
 import "core:math"
 import b2 "box2d"
+import sdl "vendor:sdl3"
 
 /*
 Physics nodes. A body node (StaticBody, DynamicBody, CharacterMover, Area) gets its shape from
@@ -280,6 +281,7 @@ CreateCollisionShape :: proc(scene: ^Scene, kind: CollisionShapeKind) -> ^Collis
 	shape.height = 64
 	shape.points = make([dynamic][2]f32, Node_GetAllocator(shape))
 	shape.destroy = collisionShapeDestroyed
+	shape.getBounds = collisionShapeBounds
 	// Its body (once it has one) includes it from the next step
 	shape.onEnter->subscribe(proc(_: ^EventSubject, source: rawptr, _: EventData, _: rawptr) {
 		if body := CollisionShape_GetBody(cast(^CollisionShape)source); body != nil do body.shapesDirty = true
@@ -416,6 +418,30 @@ physicsBodyDestroyed :: proc(node: ^Node) {
 	if b2.Body_IsValid(body.bodyId) do b2.DestroyBody(body.bodyId)
 	body.bodyId = {}
 	if world := node.scene.physics; world != nil do removeFromSlice(&world.bodies, body)
+}
+
+// The shape's extent in its own space: editors pick and outline shapes by it (shapes draw nothing)
+@(private="file")
+collisionShapeBounds :: proc(node: ^Node) -> (sdl.FRect, bool) {
+	shape := cast(^CollisionShape)node
+	switch shape.shape {
+	case .Rectangle:
+		return {-shape.size.x * 0.5, -shape.size.y * 0.5, shape.size.x, shape.size.y}, true
+	case .Circle:
+		return {-shape.radius, -shape.radius, shape.radius * 2, shape.radius * 2}, true
+	case .Capsule:
+		half := max(shape.height * 0.5, shape.radius)
+		return {-shape.radius, -half, shape.radius * 2, half * 2}, true
+	case .Polygon, .Segment:
+		if len(shape.points) == 0 do return {}, false
+		lo, hi := shape.points[0], shape.points[0]
+		for p in shape.points[1:] {
+			lo = {min(lo.x, p.x), min(lo.y, p.y)}
+			hi = {max(hi.x, p.x), max(hi.y, p.y)}
+		}
+		return {lo.x, lo.y, hi.x - lo.x, hi.y - lo.y}, true
+	}
+	return {}, false
 }
 
 @(private="file")

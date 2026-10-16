@@ -22,6 +22,9 @@ Scene :: struct {
 	screenLayers: bit_set[RenderLayer],
 	// The physics world (physics.odin), nil until the scene's first physics node is created
 	physics: ^PhysicsWorld,
+	// Don't step the physics (bodies still exist and can be queried). Editors set it: their
+	// previews update scenes for animations, and bodies mustn't fall there
+	physicsPaused: bool,
 	addNode: proc(scene: ^Scene, node: ^Node),
 	removeNode: proc(scene: ^Scene, nodeId: EntityId),
 	getNode: proc(scene: ^Scene, nodeId: EntityId) -> ^Node,

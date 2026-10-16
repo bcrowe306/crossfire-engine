@@ -305,6 +305,23 @@ physics_shapes_and_removal :: proc(t: ^testing.T) {
 	run(scene, 0.1)
 	testing.expect_value(t, len(b2.Body_GetShapes(body.bodyId, shapes[:])), 3)
 
+	// Bounds for editors: the rectangle the shape covers, in its own space
+	bounds, hasBounds := Node_GetLocalBounds(poly)
+	testing.expect(t, hasBounds && bounds == sdl.FRect{-10, -10, 20, 20})
+
+	// Paused physics doesn't step (editors), but bodies exist
+	falling := CreateDynamicBody(scene)
+	box(scene, falling, {10, 10})
+	Physics_SetGravity(scene, {0, 980})
+	scene.physicsPaused = true
+	run(scene, 0.5)
+	testing.expect(t, falling.position.y == 0 && b2.Body_IsValid(falling.bodyId))
+	scene.physicsPaused = false
+	run(scene, 0.5)
+	testing.expect(t, falling.position.y > 50)
+	scene->removeNode(falling.id)
+	run(scene, 0.05)
+
 	// Removing a body removes it from the world; its shapes' nodes go with it
 	world := scene.physics
 	testing.expect_value(t, len(world.bodies), 1)

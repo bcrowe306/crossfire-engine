@@ -116,7 +116,7 @@ Inputs:
 */
 Physics_Update :: proc(scene: ^Scene, deltaTime: f64) {
 	world := scene.physics
-	if world == nil do return
+	if world == nil || scene.physicsPaused do return
 	world.accumulator = min(world.accumulator + deltaTime, PHYSICS_TIMESTEP * PHYSICS_MAX_STEPS)
 	for world.accumulator >= PHYSICS_TIMESTEP {
 		world.accumulator -= PHYSICS_TIMESTEP
