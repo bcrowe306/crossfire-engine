@@ -177,3 +177,22 @@ scene_format_v3_scripts :: proc(t: ^testing.T) {
 	_, newer := ParseScene(`<scene formatVersion="4" name="S"/>`)
 	testing.expect_value(t, newer, ProjectError.Unsupported_Version)
 }
+
+@(test)
+player_command_line :: proc(t: ^testing.T) {
+	options, ok := Player_ParseArgs({"player", "MyGame"})
+	testing.expect(t, ok)
+	testing.expect_value(t, options.projectDir, "MyGame")
+	testing.expect_value(t, options.scene, "")
+	options, ok = Player_ParseArgs({"player", "MyGame", "--scene", "Level2"})
+	testing.expect(t, ok)
+	testing.expect_value(t, options.scene, "Level2")
+	options, ok = Player_ParseArgs({"player", "--describe-scripts"})
+	testing.expect(t, ok && options.describe)
+	options, ok = Player_ParseArgs({"player"})
+	testing.expect(t, ok && options.projectDir == ".")
+	_, ok = Player_ParseArgs({"player", "MyGame", "--scene"})
+	testing.expect(t, !ok)
+	_, ok = Player_ParseArgs({"player", "A", "B"})
+	testing.expect(t, !ok)
+}
