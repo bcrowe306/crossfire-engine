@@ -162,6 +162,9 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
 - **Joints** are created in `Physics_Sync` once both bodies exist, from their pose then; Box2D
   destroys a joint with either body. Units: degrees and px in, radians and meters to Box2D;
   torque / ppm², force / ppm.
+- Debug shapes: the project's `physicsDebug` is a development setting (the editor's exports write
+  it off); the player's `--physics-debug` forces it on, and `--dev` (the editor's Play, never
+  exports) sets `Game.devKeys`: F9 (`DEV_KEY_PHYSICS_DEBUG`) toggles the shapes while it runs.
 - `scene.physicsPaused` stops stepping (bodies stay queryable); the editor preview sets it.
   CollisionShape has a `getBounds` (its extent), so editors can pick and outline it.
 - The web build links `box2d/lib/box2d_web.o`: one relocatable object, because Odin keeps plain C

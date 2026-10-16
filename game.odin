@@ -19,6 +19,9 @@ ScaleMode :: enum {
 }
 
 
+// With `Game.devKeys`: shows and hides the physics shapes while the game runs
+DEV_KEY_PHYSICS_DEBUG :: sdl.Scancode.F9
+
 Game :: struct {
 	mixer: ^mix.Mixer,
 	window: ^sdl.Window,
@@ -26,6 +29,9 @@ Game :: struct {
 	shouldQuit: bool,
 	// Quit when Escape is pressed. Set to false in build if the game uses Escape itself
 	quitOnEscape: bool,
+	// Developer keys, for games run from the editor (the player's --dev; never in exports):
+	// F9 shows / hides the physics shapes (DEV_KEY_PHYSICS_DEBUG)
+	devKeys: bool,
 	initialized: bool,
 	backgroundColor: sdl.Color,
 	// Resolution the game is designed for. All drawing and event positions are in this
@@ -124,6 +130,11 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 
 		if event.type == .QUIT {
 			game.shouldQuit = true
+		}
+
+		if game.devKeys && event.type == .KEY_DOWN && !event.key.repeat && event.key.scancode == DEV_KEY_PHYSICS_DEBUG {
+			Physics_SetDebugDraw(game, !game.physics.debugDraw)
+			log.infof("Collision shapes %s (F9)", game.physics.debugDraw ? "shown" : "hidden")
 		}
 
 		if game.quitOnEscape && event.type == .KEY_DOWN && event.key.scancode == .ESCAPE {

@@ -11,7 +11,8 @@ The game player: runs a project saved by the editor.
 	                                          (its data/ folder), else the current folder
 	player <project folder>                   play it, from its start scene
 	player <project folder> --scene <name>    play it from another scene (the editor's Play Scene)
-	player ... --physics-debug                draw every physics shape (the editor's Show Collision Shapes)
+	player ... --physics-debug                draw every physics shape, whatever the project says
+	player ... --dev                          developer keys (the editor's Play): F9 shows / hides shapes
 	player --describe-scripts                 print the registered scripts as JSON, and exit
 
 `Player_Run` is the whole program. The engine's own `player/` package calls it with no game code;
@@ -38,7 +39,7 @@ Player_Run :: proc(args: []string) -> int {
 	context.logger = log.create_console_logger(.Info)
 	options, ok := Player_ParseArgs(args)
 	if !ok {
-		log.error("Usage: player <project folder> [--scene <name>] [--physics-debug] | player --describe-scripts")
+		log.error("Usage: player <project folder> [--scene <name>] [--physics-debug] [--dev] | player --describe-scripts")
 		return 1
 	}
 	if options.describe {
@@ -96,6 +97,7 @@ Player_Setup :: proc(options: PlayerOptions, app: ^Application) -> bool {
 	game.size = playerProject.size
 	game.scaleMode = playerProject.scaleMode
 	if options.physicsDebug do playerProject.physics.debugDraw = true
+	game.devKeys = options.dev
 	game.build = proc(game: ^Game) {
 		if !Game_LoadProject(game, &playerProject, projectDir) {
 			log.warn("Some scenes failed to load")
@@ -121,6 +123,8 @@ PlayerOptions :: struct {
 	describe: bool,
 	// Draw the physics shapes, whatever the project says
 	physicsDebug: bool,
+	// Developer keys (`Game.devKeys`); the editor's Play passes it, exports never run with it
+	dev: bool,
 	// A project folder was named on the command line (otherwise an exported game finds its own)
 	folderGiven: bool,
 }
@@ -160,6 +164,8 @@ Player_ParseArgs :: proc(args: []string) -> (PlayerOptions, bool) {
 			options.describe = true
 		case "--physics-debug":
 			options.physicsDebug = true
+		case "--dev":
+			options.dev = true
 		case "--scene":
 			if i + 1 >= len(args) do return options, false
 			options.scene = args[i + 1]

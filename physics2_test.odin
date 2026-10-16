@@ -5,6 +5,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:testing"
 import b2 "box2d"
+import sdl "vendor:sdl3"
 
 // Tests for smoothing, areas, per-body contacts and joints (physics_test.odin has the basics)
 
@@ -315,8 +316,23 @@ physics_joint_file :: proc(t: ^testing.T) {
 	// Limited to 45° either way
 	testing.expectf(t, abs(Joint_GetAngle(hinge)) <= 46, "angle %v", Joint_GetAngle(hinge))
 
-	options, ok := Player_ParseArgs({"player", "game", "--physics-debug"})
-	testing.expect(t, ok && options.physicsDebug)
+	options, ok := Player_ParseArgs({"player", "game", "--physics-debug", "--dev"})
+	testing.expect(t, ok && options.physicsDebug && options.dev)
+
+	// Developer keys: F9 toggles the shapes, only with devKeys
+	g: Game
+	g.physics = DEFAULT_PHYSICS
+	g.scenes = make(map[string]^Scene)
+	defer delete(g.scenes)
+	g.update = Game_Update
+	press := sdl.Event{key = {type = .KEY_DOWN, scancode = .F9}}
+	Game_Update(&g, {press}, 0)
+	testing.expect(t, !g.physics.debugDraw)
+	g.devKeys = true
+	Game_Update(&g, {press}, 0)
+	testing.expect(t, g.physics.debugDraw)
+	Game_Update(&g, {press}, 0)
+	testing.expect(t, !g.physics.debugDraw)
 	project, _ := ParseProject(`<project formatVersion="4" name="P" physicsSmoothing="false"/>`)
 	defer ProjectData_Destroy(&project)
 	testing.expect(t, !project.physics.smoothing)
