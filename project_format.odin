@@ -89,6 +89,32 @@ SceneNodeKind :: enum {
 }
 
 /*
+What a node kind is, for tools that let users pick one (the editor's Add Node dialog).
+*/
+SceneNodeKindInfo :: struct {
+	// One line describing what the node does
+	description: string,
+}
+
+/*
+Every node kind a scene file can contain, with its description. Tools list node kinds from this
+table, so a kind added to `SceneNodeKind` must be described here (the compiler enforces it).
+
+Example:
+	for kind in e.SceneNodeKind {
+		fmt.printfln("%v: %s", kind, e.SCENE_NODE_KINDS[kind].description)
+	}
+*/
+SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
+	.Node2D         = {"Groups nodes; moving, rotating or scaling it moves its children"},
+	.Sprite         = {"Draws an image"},
+	.AnimatedSprite = {"Plays a sprite sheet animation"},
+	.Camera         = {"Chooses the part of the scene the game shows; can follow a parent node"},
+	.Label          = {"Draws a line of text"},
+	.Menu           = {"A list of buttons that switch scenes or quit the game"},
+}
+
+/*
 A button in a Menu node. `action` is `scene:<SceneName>` to switch scene, or `quit`.
 */
 MenuItemData :: struct {
