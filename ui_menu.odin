@@ -50,9 +50,9 @@ MenuItem :: struct {
 }
 
 Menu :: struct {
+	// The node's position is the top-center of the first row; the rest stack below it.
+	// Menus are .Position_Only nodes: they follow their position but don't rotate or scale
 	using node: Node,
-	// Top-center of the first row; the rest stack below it
-	pos: [2]f32,
 	style: MenuStyle,
 	items: [MAX_MENU_ITEMS]MenuItem,
 	itemCount: int,
@@ -69,7 +69,9 @@ CreateMenu :: proc(scene: ^Scene, pos: [2]f32, style := DEFAULT_MENU_STYLE) -> ^
 	menu := CreateNode(scene, Menu)
 	menu.update = Menu_update
 	menu.draw = Menu_draw
-	menu.pos = pos
+	menu.getBounds = Menu_getBounds
+	menu.position = pos
+	menu.transformMode = .Position_Only
 	menu.style = style
 	menu.focused = -1
 	menu.dragging = -1
@@ -164,12 +166,13 @@ menuItemStyle :: proc(menu: ^Menu, item: ^MenuItem) -> ^MenuStyle {
 @(private)
 menuItemRect :: proc(menu: ^Menu, index: int) -> sdl.FRect {
 	// Rows use the menu's spacing so per-item style overrides can't break the column
-	y := menu.pos.y
+	// Relative to the menu's origin
+	y: f32 = 0
 	for i in 0..<index {
 		y += menuItemStyle(menu, &menu.items[i]).itemSize.y + menu.style.spacing
 	}
 	size := menuItemStyle(menu, &menu.items[index]).itemSize
-	return {menu.pos.x - size.x * 0.5, y, size.x, size.y}
+	return {-size.x * 0.5, y, size.x, size.y}
 }
 
 // Area on the right side of a row used by sliders and select boxes
@@ -197,7 +200,8 @@ menuPopupOptionRect :: proc(menu: ^Menu, index: int, option: int) -> sdl.FRect {
 	ctrl := menuControlRect(menu, index)
 	count := f32(len(menu.items[index].options))
 	y := ctrl.y + ctrl.h
-	if game := menu.scene.game; game != nil && y + ctrl.h * count > game.size.y {
+	screenY := Node_GetScreenPosition(menu).y
+	if game := menu.scene.game; game != nil && screenY + y + ctrl.h * count > game.size.y {
 		y = ctrl.y - ctrl.h * count
 	}
 	return {ctrl.x, y + f32(option) * ctrl.h, ctrl.w, ctrl.h}
@@ -216,4 +220,13 @@ snapSliderValue :: proc(item: ^MenuItem, value: f32) -> f32 {
 		v = clamp(v, item.minValue, item.maxValue)
 	}
 	return v
+}
+
+// The rows' combined rectangle, relative to the menu's origin
+Menu_getBounds :: proc(node: ^Node) -> (sdl.FRect, bool) {
+	menu := cast(^Menu)node
+	if menu.itemCount == 0 do return {}, false
+	first := menuItemRect(menu, 0)
+	last := menuItemRect(menu, menu.itemCount - 1)
+	return {min(first.x, last.x), first.y, max(first.w, last.w), last.y + last.h - first.y}, true
 }

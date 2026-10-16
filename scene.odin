@@ -130,22 +130,13 @@ Scene_GetNode :: proc(scene: ^Scene, nodeId: EntityId) -> ^Node {
 
 Scene_ProcessQueues :: proc(scene: ^Scene) {
 	for nodeId in scene.removeQueue {
-		for node, i in scene.nodes {
-			if node.id == nodeId {
-				log.debug("Removing Node with ID: ", nodeId)
-				node.onExit->notify(node, nil)
-				unordered_remove(&scene.nodes, i)
-				// Frees the node and everything in its arena, including its event listeners
-				Node_Destroy(node)
-				break
-			}
-		}
+		node := findQueuedOrLive(scene, nodeId)
+		if node != nil do removeSubtree(scene, node)
 	}
-
 	clear(&scene.removeQueue)
 
-
 	for &node in scene.addQueue {
+		node.inScene = true
 		node.onEnter->notify(node, nil)
 		append(&scene.nodes, node)
 	}
@@ -154,7 +145,6 @@ Scene_ProcessQueues :: proc(scene: ^Scene) {
 
 Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 	Scene_ProcessQueues(scene)
-
 
 	for node in scene.nodes {
 		if node.update != nil {
@@ -169,15 +159,124 @@ Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 	}
 }
 
+/*
+Draws the scene: layer by layer, and within a layer in tree order (a parent before its children,
+siblings in the order they were added). Each node draws in its local space; the scene sets the
+draw transform to the camera view combined with the node's world transform (only the position,
+for `.Position_Only` nodes), and the draw tint to its inherited tint. Hidden nodes and their
+children are skipped.
+*/
 Scene_Draw :: proc(scene: ^Scene, renderer: ^sdl.Renderer) {
-	defer activeCamera = nil
+	view := scene.camera != nil ? Camera2D_ViewTransform(scene.camera) : TRANSFORM2D_IDENTITY
+	Scene_DrawWithView(scene, renderer, view)
+}
 
+/*
+Draws the scene through a given view transform (world to screen) instead of its camera. Editors
+use it to show a scene with their own pan and zoom.
+
+Inputs:
+- scene: The scene
+- renderer: The renderer to draw with
+- view: World-to-screen transform for world layers
+- screenLayersUseView: Also draw `scene.screenLayers` through `view` (an editor shows HUD nodes
+  where they sit relative to the game area); otherwise they're drawn untransformed
+- positionOnlyScale: Size multiplier for `.Position_Only` nodes (labels, menus). The game uses 1;
+  an editor passes its zoom so UI keeps its size relative to the game area
+*/
+Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D, screenLayersUseView := false, positionOnlyScale: f32 = 1) {
+	defer SetDrawState(TRANSFORM2D_IDENTITY)
+
+	items := drawOrder(scene)
 	for layer in RenderLayer {
-		activeCamera = layer in scene.screenLayers ? nil : scene.camera
-		for node in scene.nodes {
-			if node.draw != nil && node.layer == layer {
-				node.draw(node, renderer)
+		base := layer in scene.screenLayers && !screenLayersUseView ? TRANSFORM2D_IDENTITY : view
+		for item in items {
+			node := item.node
+			if node.draw == nil || node.layer != layer do continue
+			transform := Transform2D_Multiply(base, item.world)
+			if node.transformMode == .Position_Only {
+				transform = {x = {positionOnlyScale, 0}, y = {0, positionOnlyScale}, origin = transform.origin}
 			}
+			SetDrawState(transform, item.tint)
+			node.draw(node, renderer)
+		}
+	}
+}
+
+/*
+Whether a node and all of its ancestors are visible.
+*/
+Node_IsVisibleInTree :: proc(node: ^Node) -> bool {
+	for n := node; n != nil; n = n.parent {
+		if !n.visible do return false
+	}
+	return true
+}
+
+// A node to draw, with its world transform and inherited tint
+@(private="file")
+DrawItem :: struct {
+	node: ^Node,
+	world: Transform2D,
+	tint: sdl.Color,
+}
+
+// Visible nodes in tree order, with world transforms computed top-down (temp allocated)
+@(private="file")
+drawOrder :: proc(scene: ^Scene) -> []DrawItem {
+	items := make([dynamic]DrawItem, 0, len(scene.nodes), context.temp_allocator)
+	visit :: proc(items: ^[dynamic]DrawItem, node: ^Node, parentWorld: Transform2D, parentTint: sdl.Color) {
+		if !node.inScene || !node.visible do return
+		world := Transform2D_Multiply(parentWorld, Node_GetLocalTransform(node))
+		tint := multiplyColor(parentTint, node.tint)
+		append(items, DrawItem{node, world, tint})
+		for child in node.children do visit(items, child, world, tint)
+	}
+	for node in scene.nodes {
+		if node.parent == nil do visit(&items, node, TRANSFORM2D_IDENTITY, {255, 255, 255, 255})
+	}
+	return items[:]
+}
+
+@(private="file")
+findQueuedOrLive :: proc(scene: ^Scene, id: EntityId) -> ^Node {
+	for node in scene.nodes do if node.id == id do return node
+	for node in scene.addQueue do if node.id == id do return node
+	return nil
+}
+
+// Removes a node and its descendants from the scene and frees them
+@(private="file")
+removeSubtree :: proc(scene: ^Scene, root: ^Node) {
+	if root.parent != nil {
+		removeChild(root.parent, root)
+		root.parent = nil
+	}
+
+	subtree := make([dynamic]^Node, context.temp_allocator)
+	collect :: proc(list: ^[dynamic]^Node, node: ^Node) {
+		append(list, node)
+		for child in node.children do collect(list, child)
+	}
+	collect(&subtree, root)
+
+	for node in subtree {
+		log.debug("Removing Node with ID: ", node.id)
+		if node.inScene do node.onExit->notify(node, nil)
+		node.inScene = false
+		removeFromList(&scene.nodes, node)
+		removeFromList(&scene.addQueue, node)
+	}
+	// Children first: a parent's arena holds its children list
+	#reverse for node in subtree do Node_Destroy(node)
+}
+
+@(private="file")
+removeFromList :: proc(list: ^[dynamic]^Node, node: ^Node) {
+	for n, i in list {
+		if n == node {
+			ordered_remove(list, i)
+			return
 		}
 	}
 }

@@ -10,7 +10,7 @@ import ttf "vendor:sdl3/ttf"
 // font is a font file path, or DEFAULT_FONT for the embedded Open Sans.
 // Fonts are loaded through the resource manager on first use and cached per size.
 // pos is the top-left corner of the text.
-// Under a scene camera, text is positioned and scaled by it but not rotated.
+// While a scene draws a node, text is positioned and scaled by its transform but not rotated.
 
 DrawText :: proc(rm: ^ResourceManager, pos: sdl.FPoint, text: string, font: string, size: f32, color: sdl.Color) {
 	DrawTextWrapped(rm, pos, text, font, size, color, 0)
@@ -21,13 +21,14 @@ DrawTextWrapped :: proc(rm: ^ResourceManager, pos: sdl.FPoint, text: string, fon
 	if len(text) == 0 || rm.textEngine == nil do return
 
 	pos, size, wrapWidth := pos, size, wrapWidth
-	if activeCamera != nil {
-		// Text follows the camera's position and zoom, but stays upright: SDL_ttf can't rotate.
-		// Zoomed sizes are rounded to whole points so a changing zoom doesn't cache endless font sizes
+	// Text follows the draw transform's position and scale, but stays upright: SDL_ttf can't
+	// rotate. Scaled sizes are rounded to whole points so changing scales don't cache endless sizes
+	if drawTransform != TRANSFORM2D_IDENTITY {
 		pos = sdl.FPoint(toScreen(cast([2]f32)pos))
 		size = max(math.round(toScreenLength(size)), 1)
 		wrapWidth = toScreenLength(wrapWidth)
 	}
+	color := tinted(color)
 
 	ttfFont := rm->loadFont(font, size)
 	if ttfFont == nil do return

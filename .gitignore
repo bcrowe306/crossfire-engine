@@ -1,0 +1,7 @@
+# Build output
+/player/player
+/player_bin
+*.bin
+*.exe
+*.pdb
+*.odin-doc

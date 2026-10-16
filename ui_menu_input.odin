@@ -6,6 +6,9 @@ import sdl "vendor:sdl3"
 
 Menu_update :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 	menu := cast(^Menu)node
+	if !Node_IsVisibleInTree(menu) do return
+	// Item rects are relative to the menu's origin; mouse events are in screen coordinates
+	origin := Node_GetScreenPosition(menu)
 
 	// Handlers return true after a button press or onBack, which commonly switch scenes.
 	// Remaining events are then left alone so they don't act on a menu that is going away
@@ -15,10 +18,10 @@ Menu_update :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 			if handleKey(menu, event.key) do return
 
 		case .MOUSE_MOTION:
-			handleMouseMotion(menu, {event.motion.x, event.motion.y})
+			handleMouseMotion(menu, [2]f32{event.motion.x, event.motion.y} - origin)
 
 		case .MOUSE_BUTTON_DOWN:
-			if event.button.button == sdl.BUTTON_LEFT && handleMouseDown(menu, {event.button.x, event.button.y}) {
+			if event.button.button == sdl.BUTTON_LEFT && handleMouseDown(menu, [2]f32{event.button.x, event.button.y} - origin) {
 				return
 			}
 

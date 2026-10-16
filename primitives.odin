@@ -7,9 +7,10 @@ import sdl "vendor:sdl3"
 
 // SDL PRIMITIVE HELPERS
 //
-// Positions and sizes are in world coordinates. When a scene camera is active (see camera.odin)
-// they are transformed by it; otherwise world and screen coordinates are the same.
-// 1px lines (DrawLine, *Outline) stay 1px wide regardless of zoom.
+// Positions and sizes are in the drawing node's local coordinates. While a scene draws a node,
+// they are transformed by the node's world transform and the camera (see GetDrawTransform), and
+// colors are multiplied by the node's inherited tint. Outside of scene drawing nothing is
+// transformed. 1px lines (DrawLine, *Outline) stay 1px wide at any scale.
 
 // Upper bound on segments used to approximate curves (circles, ellipses, arcs)
 MAX_CURVE_SEGMENTS :: 128
@@ -18,21 +19,25 @@ ROUNDED_CORNER_SEGMENTS :: 8
 ROUNDED_RECT_POINT_COUNT :: 4 * (ROUNDED_CORNER_SEGMENTS + 1)
 
 DrawRectangle :: proc(renderer: ^ sdl.Renderer, rect: ^sdl.FRect, color: sdl.Color) {
-	if activeCamera == nil {
+	color := tinted(color)
+	if Transform2D_IsAxisAligned(drawTransform) {
+		screen := screenRect(rect)
 		sdl.SetRenderDrawColor(renderer, color[0], color[1], color[2], color[3])
-		sdl.RenderFillRect(renderer, rect)
+		sdl.RenderFillRect(renderer, &screen)
 		return
 	}
-	// A rotated camera can turn the rectangle into any quad
+	// Rotation can turn the rectangle into any quad
 	corners := rectCorners(rect)
 	toScreenPoints(corners[:])
 	fillScreenPolygon(renderer, corners[:], color)
 }
 
 DrawRectangleOutline :: proc(renderer: ^sdl.Renderer, rect: ^sdl.FRect, color: sdl.Color) {
-	if activeCamera == nil {
+	if Transform2D_IsAxisAligned(drawTransform) {
+		color := tinted(color)
+		screen := screenRect(rect)
 		sdl.SetRenderDrawColor(renderer, color[0], color[1], color[2], color[3])
-		sdl.RenderRect(renderer, rect)
+		sdl.RenderRect(renderer, &screen)
 		return
 	}
 	corners := rectCorners(rect)
@@ -41,13 +46,14 @@ DrawRectangleOutline :: proc(renderer: ^sdl.Renderer, rect: ^sdl.FRect, color: s
 }
 
 DrawPoint :: proc(renderer: ^sdl.Renderer, p: sdl.FPoint, color: sdl.Color) {
-	p := tp(p)
+	p, color := tp(p), tinted(color)
 	sdl.SetRenderDrawColor(renderer, color[0], color[1], color[2], color[3])
 	sdl.RenderPoint(renderer, p.x, p.y)
 }
 
 DrawLine :: proc(renderer: ^sdl.Renderer, a, b: sdl.FPoint, color: sdl.Color) {
 	a, b := tp(a), tp(b)
+	color := tinted(color)
 	sdl.SetRenderDrawColor(renderer, color[0], color[1], color[2], color[3])
 	sdl.RenderLine(renderer, a.x, a.y, b.x, b.y)
 }
@@ -119,13 +125,13 @@ DrawRoundedRectangleOutline :: proc(renderer: ^sdl.Renderer, rect: ^sdl.FRect, r
 /*
 Draws a texture (or part of one) into a rectangle, with optional rotation, tint and flip.
 
-Under a scene camera, `dest` is in world coordinates and the texture is moved, scaled and
-rotated with the camera. Prefer this over `sdl.RenderTexture`, which bypasses the camera.
+`dest` is in the drawing node's local coordinates; the node's world transform and the camera
+move, scale and rotate the texture. Prefer this over `sdl.RenderTexture`, which bypasses them.
 
 Inputs:
 - renderer: The renderer to draw with
 - texture: The texture to draw. Nothing is drawn if nil
-- dest: Where to draw, as a rectangle in world coordinates
+- dest: Where to draw, as a rectangle in local coordinates
 - rotation: Degrees, clockwise around the center of `dest`
 - src: Part of the texture to draw, in texture pixels (e.g. one sprite sheet frame). nil draws the whole texture
 - tint: Multiplies the texture's colors and alpha. White leaves it unchanged
@@ -150,9 +156,10 @@ DrawTexture :: proc(
 	if texture == nil do return
 
 	center := tp({dest.x + dest.w * 0.5, dest.y + dest.h * 0.5})
-	w, h := toScreenLength(dest.w), toScreenLength(dest.h)
-	angle := rotation
-	if activeCamera != nil do angle += activeCamera.rotation
+	scale := Transform2D_Scale(drawTransform)
+	w, h := dest.w * scale.x, dest.h * scale.y
+	angle := rotation + Transform2D_Rotation(drawTransform)
+	tint := tinted(tint)
 
 	dst := sdl.FRect{center.x - w * 0.5, center.y - h * 0.5, w, h}
 	srcRect, hasSrc := src.?
@@ -170,7 +177,7 @@ ColorToFColor :: proc(color: sdl.Color) -> sdl.FColor {
 	return {f32(color[0]) / 255, f32(color[1]) / 255, f32(color[2]) / 255, f32(color[3]) / 255}
 }
 
-// World point to screen point through the active camera
+// Local point to screen point through the draw transform
 @(private="file")
 tp :: proc(p: sdl.FPoint) -> sdl.FPoint {
 	return sdl.FPoint(toScreen(cast([2]f32)p))
@@ -178,14 +185,14 @@ tp :: proc(p: sdl.FPoint) -> sdl.FPoint {
 
 @(private="file")
 toScreenPoints :: proc(points: []sdl.FPoint) {
-	if activeCamera == nil do return
+	if drawTransform == TRANSFORM2D_IDENTITY do return
 	for &p in points do p = tp(p)
 }
 
 // Caller's points are left untouched; the copy lives until the end of the frame
 @(private="file")
 transformedCopy :: proc(points: []sdl.FPoint) -> []sdl.FPoint {
-	if activeCamera == nil do return points
+	if drawTransform == TRANSFORM2D_IDENTITY do return points
 	out := make([]sdl.FPoint, len(points), context.temp_allocator)
 	for p, i in points do out[i] = tp(p)
 	return out
@@ -218,7 +225,7 @@ ellipsePoints :: proc(center: sdl.FPoint, rx, ry: f32) -> []sdl.FPoint {
 fillScreenPolygon :: proc(renderer: ^sdl.Renderer, points: []sdl.FPoint, color: sdl.Color) {
 	if len(points) < 3 do return
 
-	fc := ColorToFColor(color)
+	fc := ColorToFColor(tinted(color))
 	vertices := make([]sdl.Vertex, len(points), context.temp_allocator)
 	indices := make([]c.int, (len(points) - 2) * 3, context.temp_allocator)
 
@@ -239,6 +246,7 @@ fillScreenPolygon :: proc(renderer: ^sdl.Renderer, points: []sdl.FPoint, color: 
 strokeScreenPolygon :: proc(renderer: ^sdl.Renderer, points: []sdl.FPoint, color: sdl.Color) {
 	if len(points) < 2 do return
 
+	color := tinted(color)
 	sdl.SetRenderDrawColor(renderer, color[0], color[1], color[2], color[3])
 	sdl.RenderLines(renderer, raw_data(points), c.int(len(points)))
 	first, last := points[0], points[len(points) - 1]
@@ -275,4 +283,12 @@ RoundedRectanglePoints :: proc(rect: ^sdl.FRect, radius: f32) -> (points: [ROUND
 		}
 	}
 	return
+}
+
+// A local rectangle on screen, for transforms without rotation (mirroring is normalized)
+@(private="file")
+screenRect :: proc(rect: ^sdl.FRect) -> sdl.FRect {
+	a := toScreen({rect.x, rect.y})
+	b := toScreen({rect.x + rect.w, rect.y + rect.h})
+	return {min(a.x, b.x), min(a.y, b.y), abs(b.x - a.x), abs(b.y - a.y)}
 }

@@ -1,6 +1,7 @@
 package engine
 
 import "core:fmt"
+import "core:strings"
 
 import sdl "vendor:sdl3"
 import log "core:log"
@@ -75,9 +76,10 @@ Game_Init :: proc(game: ^Game, window: ^sdl.Window, renderer: ^sdl.Renderer, mix
 }
 
 Game_Destroy :: proc(game: ^Game) {
-	for _, scene in game.scenes {
+	for name, scene in game.scenes {
 		Scene_Destroy(scene)
 		free(scene)
+		delete(name)
 	}
 	delete(game.scenes)
 	game.resourceManager->destroy()
@@ -91,7 +93,8 @@ Game_CreateScene :: proc(game: ^Game, name: string) -> ^Scene {
 	scene := new(Scene)
 	Scene_Init(scene)
 	scene.game = game
-	game.scenes[name] = scene
+	// The map keeps its own copy of the name, so callers can pass temporary strings
+	game.scenes[strings.clone(name)] = scene
 	return scene
 }
 
