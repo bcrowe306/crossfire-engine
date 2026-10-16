@@ -11,8 +11,9 @@ A project is a folder:
 project.xml:
 
 	<?xml version="1.0" encoding="UTF-8"?>
-	<project formatVersion="3" name="Asteroids" width="1280" height="720"
-	         scaleMode="Letterbox" background="#0f121e" startScene="MenuScene">
+	<project formatVersion="4" name="Asteroids" width="1280" height="720"
+	         scaleMode="Letterbox" background="#0f121e" startScene="MenuScene"
+	         pixelsPerMeter="100" gravityX="0" gravityY="980">
 		<scene name="MenuScene" path="scenes/MenuScene.scene.xml"/>
 		<asset path="assets/ship.png" kind="Image"/>
 	</project>
@@ -21,7 +22,7 @@ A scene file holds a tree of nodes. Nesting is the hierarchy, and a node's `x`, 
 and scale are relative to its parent:
 
 	<?xml version="1.0" encoding="UTF-8"?>
-	<scene formatVersion="3" name="PlayScene">
+	<scene formatVersion="4" name="PlayScene">
 		<node kind="Node2D" name="World" x="0" y="0">
 			<node kind="Camera" name="Camera" x="640" y="360" zoom="1"/>
 			<node kind="Sprite" name="Ship" x="640" y="430" texture="assets/ship.png">
@@ -40,7 +41,21 @@ and scale are relative to its parent:
 				<prop name="speed" value="250"/>
 			</script>
 		</node>
+		<node kind="StaticBody" name="Ground" x="640" y="700" collisionLayer="1">
+			<node kind="CollisionShape" shape="Rectangle" width="1280" height="40"/>
+		</node>
+		<node kind="DynamicBody" name="Crate" x="600" y="100" restitution="0.3">
+			<node kind="Sprite" texture="assets/crate.png"/>
+			<node kind="CollisionShape" shape="Rectangle" width="48" height="48"/>
+		</node>
+		<node kind="Area" name="Goal" x="1200" y="640" collisionMask="2">
+			<node kind="CollisionShape" shape="Polygon" points="-20,20 20,20 0,-20"/>
+		</node>
 	</scene>
+
+Physics (physics.odin, physics_nodes.odin): body nodes (StaticBody, DynamicBody, CharacterMover,
+Area) get their shape from the CollisionShape nodes under them. Collision layers are lists of
+layer numbers 1-64 (`collisionLayer="1 3"`), `all`, or empty for none.
 
 Attributes every node may have: `kind`, `name`, `x`, `y`, `rotation` (degrees), `scaleX`,
 `scaleY`, `layer` (0-7), `visible`. Kind-specific attributes are listed on `SceneNodeData`.
@@ -54,6 +69,9 @@ Current limits:
 - Only images are loaded; Audio and Font assets are listed but not used.
 
 Version history:
+- 4: physics: StaticBody, DynamicBody, CharacterMover, Area, CollisionShape and RayCast nodes, and
+  the project's `pixelsPerMeter`, `gravityX`, `gravityY` and `physicsDebug`. Version 3 files are
+  valid version 4 files.
 - 3: a node can have a script: a `<script name="...">` child element holding `<prop name="..."
   value="..."/>` values for its exported fields (script.odin). Version 2 files are valid version 3
   files without scripts.
@@ -76,7 +94,7 @@ import "core:strings"
 import sdl "vendor:sdl3"
 
 // Version written by the editor. This loader also reads older versions
-PROJECT_FORMAT_VERSION :: 3
+PROJECT_FORMAT_VERSION :: 4
 
 /*
 Node kinds a scene file can contain.
@@ -94,6 +112,14 @@ SceneNodeKind :: enum {
 	Label,
 	// Vertical button menu whose buttons switch scenes or quit
 	Menu,
+	// Physics bodies (physics_nodes.odin); their CollisionShape children give them a shape
+	StaticBody,
+	DynamicBody,
+	CharacterMover,
+	Area,
+	CollisionShape,
+	// Casts a ray every physics step and reports the first hit
+	RayCast,
 }
 
 /*
@@ -120,6 +146,12 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.Camera         = {"Chooses the part of the scene the game shows; can follow a parent node"},
 	.Label          = {"Draws a line of text"},
 	.Menu           = {"A list of buttons that switch scenes or quit the game"},
+	.StaticBody     = {"A physics body that doesn't move by itself: walls, floors, platforms"},
+	.DynamicBody    = {"A physics body moved by gravity, collisions and forces"},
+	.CharacterMover = {"A body moved by code that slides along walls and floors: players, enemies"},
+	.Area           = {"A region that reports bodies entering and leaving it: pickups, triggers"},
+	.CollisionShape = {"The shape of the physics body above it: rectangle, circle, capsule, polygon, segment"},
+	.RayCast        = {"A ray that reports the first physics body in its way: line of sight, ground checks"},
 }
 
 /*
@@ -168,6 +200,34 @@ SceneNodeData :: struct {
 	// Any kind: the script attached to the node ("" for none), and its exported field values
 	script: string,
 	props: [dynamic]ScriptPropData,
+
+	// StaticBody, DynamicBody, CharacterMover, Area: the layers it's on and collides with
+	// (`collisionLayer="1 3"`, `collisionMask="all"`), and its surface
+	collisionLayer: u64,
+	collisionMask: u64,
+	friction: f32,
+	restitution: f32,
+	density: f32,
+	// DynamicBody
+	gravityScale: f32,
+	linearDamping: f32,
+	angularDamping: f32,
+	fixedRotation: bool,
+	bullet: bool,
+	// CharacterMover: the steepest floor, degrees
+	floorMaxAngle: f32,
+	// CollisionShape: `shape`; Rectangle `width` and `height`; Circle `radius`; Capsule `radius`
+	// and `height` (overall); Polygon and Segment `points="x,y x,y ..."`; `disabled`
+	shape: CollisionShapeKind,
+	shapeSize: [2]f32,
+	radius: f32,
+	points: [dynamic][2]f32,
+	disabled: bool,
+	// RayCast: `targetX`, `targetY` (relative to the node), `enabled`, `excludeParent`
+	// (collisionMask is the layers it hits)
+	target: [2]f32,
+	enabled: bool,
+	excludeParent: bool,
 }
 
 // A script field's value in a scene file: `<prop name="speed" value="250"/>`
@@ -189,6 +249,17 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	rows = 1,
 	fps = 8,
 	loop = true,
+	collisionLayer = 1,
+	collisionMask = PHYSICS_ALL_LAYERS,
+	friction = 0.6,
+	density = 1,
+	gravityScale = 1,
+	floorMaxAngle = 45,
+	shapeSize = {32, 32},
+	radius = 16,
+	target = {0, 50},
+	enabled = true,
+	excludeParent = true,
 }
 
 SceneData :: struct {
@@ -216,6 +287,8 @@ ProjectData :: struct {
 	startScene: string,
 	scenes: [dynamic]SceneRef,
 	assets: [dynamic]AssetRef,
+	// pixelsPerMeter, gravityX / gravityY (px/s²), physicsDebug
+	physics: PhysicsSettings,
 }
 
 ProjectError :: enum {
@@ -257,6 +330,11 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		startScene = cloneAttr(doc, 0, "startScene", ""),
 		scenes = make([dynamic]SceneRef),
 		assets = make([dynamic]AssetRef),
+		physics = {
+			pixelsPerMeter = max(attrF32(doc, 0, "pixelsPerMeter", DEFAULT_PHYSICS.pixelsPerMeter), 1),
+			gravity = {attrF32(doc, 0, "gravityX", DEFAULT_PHYSICS.gravity.x), attrF32(doc, 0, "gravityY", DEFAULT_PHYSICS.gravity.y)},
+			debugDraw = attrBool(doc, 0, "physicsDebug", false),
+		},
 	}
 	for child in childElements(doc, 0) {
 		switch doc.elements[child].ident {
@@ -327,6 +405,7 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.script)
 		for prop in node.props { delete(prop.name); delete(prop.value) }
 		delete(node.props)
+		delete(node.points)
 	}
 	delete(scene.nodes)
 	delete(scene.name)
@@ -366,7 +445,85 @@ ParseColor :: proc(text: string) -> (sdl.Color, bool) {
 }
 
 
+/*
+Formats collision layers the way the format stores them: `all`, the layer numbers ("1 3"), or ""
+for none.
+*/
+FormatPhysicsLayers :: proc(layers: u64, allocator := context.allocator) -> string {
+	if layers == PHYSICS_ALL_LAYERS do return strings.clone("all", allocator)
+	b := strings.builder_make(allocator)
+	for bit in 0 ..< 64 {
+		if layers & (1 << u64(bit)) == 0 do continue
+		if strings.builder_len(b) > 0 do strings.write_byte(&b, ' ')
+		strings.write_int(&b, bit + 1)
+	}
+	return strings.to_string(b)
+}
+
+/*
+Parses collision layers: `all`, or layer numbers 1-64 separated by spaces or commas ("" = none).
+
+Returns:
+- The layer bits, and false if a number isn't a layer
+*/
+ParsePhysicsLayers :: proc(text: string) -> (u64, bool) {
+	text := strings.trim_space(text)
+	if text == "all" do return PHYSICS_ALL_LAYERS, true
+	bits: u64
+	ok := true
+	for part in strings.split_multi(text, {" ", ","}, context.temp_allocator) {
+		if part == "" do continue
+		n, valid := strconv.parse_int(part)
+		if !valid || n < 1 || n > 64 {
+			ok = false
+			continue
+		}
+		bits |= 1 << u64(n - 1)
+	}
+	return bits, ok
+}
+
+// Formats points the way the format stores them: "x,y x,y"
+FormatPoints :: proc(points: [][2]f32, allocator := context.allocator) -> string {
+	b := strings.builder_make(allocator)
+	for p, i in points {
+		if i > 0 do strings.write_byte(&b, ' ')
+		fmt.sbprintf(&b, "%v,%v", p.x, p.y)
+	}
+	return strings.to_string(b)
+}
+
+/*
+Parses points: "x,y x,y ...".
+
+Returns:
+- The points (temp allocated), and false if one couldn't be read (it's skipped)
+*/
+ParsePoints :: proc(text: string) -> ([][2]f32, bool) {
+	points := make([dynamic][2]f32, context.temp_allocator)
+	ok := true
+	for part in strings.fields(text, context.temp_allocator) {
+		xs, _, ys := strings.partition(part, ",")
+		x, okX := strconv.parse_f32(xs)
+		y, okY := strconv.parse_f32(ys)
+		if !okX || !okY {
+			ok = false
+			continue
+		}
+		append(&points, [2]f32{x, y})
+	}
+	return points[:], ok
+}
+
 // INTERNAL
+
+@(private="file")
+attrLayers :: proc(doc: ^xml.Document, element: xml.Element_ID, key: string, default: u64) -> u64 {
+	value, found := xml.find_attribute_val_by_key(doc, element, key)
+	if !found do return default
+	layers, _ := ParsePhysicsLayers(value)
+	return layers
+}
 
 @(private="file")
 parseXML :: proc(text: string) -> (^xml.Document, ProjectError) {
@@ -410,6 +567,29 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.playMode = attrEnum(doc, element, "playMode", AnimationPlayMode.Forward)
 	node.items = make([dynamic]MenuItemData)
 	node.props = make([dynamic]ScriptPropData)
+	node.collisionLayer = attrLayers(doc, element, "collisionLayer", DEFAULT_SCENE_NODE.collisionLayer)
+	node.collisionMask = attrLayers(doc, element, "collisionMask", DEFAULT_SCENE_NODE.collisionMask)
+	node.friction = attrF32(doc, element, "friction", DEFAULT_SCENE_NODE.friction)
+	node.restitution = attrF32(doc, element, "restitution", DEFAULT_SCENE_NODE.restitution)
+	node.density = attrF32(doc, element, "density", DEFAULT_SCENE_NODE.density)
+	node.gravityScale = attrF32(doc, element, "gravityScale", DEFAULT_SCENE_NODE.gravityScale)
+	node.linearDamping = attrF32(doc, element, "linearDamping", 0)
+	node.angularDamping = attrF32(doc, element, "angularDamping", 0)
+	node.fixedRotation = attrBool(doc, element, "fixedRotation", false)
+	node.bullet = attrBool(doc, element, "bullet", false)
+	node.floorMaxAngle = attrF32(doc, element, "floorMaxAngle", DEFAULT_SCENE_NODE.floorMaxAngle)
+	node.shape = attrEnum(doc, element, "shape", CollisionShapeKind.Rectangle)
+	node.shapeSize = {attrF32(doc, element, "width", DEFAULT_SCENE_NODE.shapeSize.x), attrF32(doc, element, "height", DEFAULT_SCENE_NODE.shapeSize.y)}
+	node.radius = attrF32(doc, element, "radius", DEFAULT_SCENE_NODE.radius)
+	node.points = make([dynamic][2]f32)
+	if value, found := xml.find_attribute_val_by_key(doc, element, "points"); found {
+		points, _ := ParsePoints(value)
+		append(&node.points, ..points)
+	}
+	node.disabled = attrBool(doc, element, "disabled", false)
+	node.target = {attrF32(doc, element, "targetX", DEFAULT_SCENE_NODE.target.x), attrF32(doc, element, "targetY", DEFAULT_SCENE_NODE.target.y)}
+	node.enabled = attrBool(doc, element, "enabled", true)
+	node.excludeParent = attrBool(doc, element, "excludeParent", true)
 
 	index := len(scene.nodes)
 	append(&scene.nodes, node)

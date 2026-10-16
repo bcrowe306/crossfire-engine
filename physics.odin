@@ -1,0 +1,678 @@
+package engine
+
+import "core:log"
+import "core:math"
+import "core:math/linalg"
+import b2 "box2d"
+import sdl "vendor:sdl3"
+
+/*
+The physics world: Box2D 3.1 (the box2d/ package), one world per scene, created when the scene's
+first physics node is. Physics nodes are in physics_nodes.odin.
+
+Every scene update (`Scene_Update`) runs `Physics_Update`:
+1. Bodies whose nodes entered the scene get their Box2D bodies and shapes; bodies whose shapes
+   changed get them rebuilt.
+2. The world steps at a fixed PHYSICS_TIMESTEP (as many steps as the frame's time covers, at most
+   PHYSICS_MAX_STEPS). Before each step, nodes the game moved move their bodies; after it,
+   dynamic bodies move their nodes, collision events are sent and RayCasts update.
+Then the nodes and scripts update, so they see this frame's physics.
+
+Units: Box2D works in meters; the engine API in pixels. `PhysicsSettings.pixelsPerMeter` (100 by
+default) converts, so a 50 px crate is half a meter, which Box2D handles best (0.1 to 10 m).
+Gravity is in px/s² (980 = Earth's, at 100 px per meter). Rotation maps directly: Box2D angles
+in the engine's y-down space turn clockwise, like `Node.rotation` (converted to radians).
+*/
+
+// How the physics behaves; a project's comes from project.xml (`ProjectData.physics`)
+PhysicsSettings :: struct {
+	// Pixels per meter of the simulation. 0 means the defaults (DEFAULT_PHYSICS)
+	pixelsPerMeter: f32,
+	// px/s²; y points down
+	gravity: [2]f32,
+	// Draw every body's shapes over the scene (`Physics_DrawDebug`)
+	debugDraw: bool,
+}
+
+DEFAULT_PHYSICS :: PhysicsSettings{pixelsPerMeter = 100, gravity = {0, 980}}
+
+// Seconds per physics step (60 per second)
+PHYSICS_TIMESTEP :: 1.0 / 60.0
+// Box2D substeps per step: more is stiffer stacking at more cost
+PHYSICS_SUBSTEPS :: 4
+// Steps a frame may run to catch up, so a slow frame doesn't make the next one slower
+PHYSICS_MAX_STEPS :: 5
+// How close (pixels) a CharacterMover must be to something to count as touching it
+MOVER_SKIN :: 1.0
+
+// A scene's physics world (internal state; use the procedures)
+PhysicsWorld :: struct {
+	id: b2.WorldId,
+	settings: PhysicsSettings,
+	// Time not yet simulated
+	accumulator: f64,
+	bodies: [dynamic]^PhysicsBody,
+	rayCasts: [dynamic]^RayCast,
+}
+
+/*
+The scene's physics world, created with the game's settings (`Game.physics`) the first time it's
+needed.
+*/
+Scene_GetPhysics :: proc(scene: ^Scene) -> ^PhysicsWorld {
+	if scene.physics != nil do return scene.physics
+	world := new(PhysicsWorld)
+	world.settings = DEFAULT_PHYSICS
+	if scene.game != nil && scene.game.physics.pixelsPerMeter > 0 do world.settings = scene.game.physics
+	world.bodies = make([dynamic]^PhysicsBody)
+	world.rayCasts = make([dynamic]^RayCast)
+	def := b2.DefaultWorldDef()
+	def.gravity = world.settings.gravity / world.settings.pixelsPerMeter
+	world.id = b2.CreateWorld(def)
+	scene.physics = world
+	return world
+}
+
+// Changes the scene's gravity, px/s²
+Physics_SetGravity :: proc(scene: ^Scene, gravity: [2]f32) {
+	world := Scene_GetPhysics(scene)
+	world.settings.gravity = gravity
+	b2.World_SetGravity(world.id, gravity / world.settings.pixelsPerMeter)
+}
+
+// Frees the scene's world (Scene_Destroy, after its nodes)
+Physics_Destroy :: proc(scene: ^Scene) {
+	world := scene.physics
+	if world == nil do return
+	if b2.World_IsValid(world.id) do b2.DestroyWorld(world.id)
+	delete(world.bodies)
+	delete(world.rayCasts)
+	free(world)
+	scene.physics = nil
+}
+
+/*
+Creates the Box2D bodies of nodes that entered the scene, and rebuilds shapes that changed.
+`Scene_Update` calls it (before scripts' `ready`, so they can use their bodies).
+*/
+Physics_Sync :: proc(scene: ^Scene) {
+	world := scene.physics
+	if world == nil do return
+	for body in world.bodies {
+		if !body.inScene do continue
+		if !b2.Body_IsValid(body.bodyId) {
+			createBody(world, body)
+		} else if body.shapesDirty {
+			buildShapes(world, body)
+		}
+	}
+}
+
+/*
+Steps the scene's physics for a frame (see the top of this file). `Scene_Update` calls it.
+
+Inputs:
+- deltaTime: Seconds since the last frame
+*/
+Physics_Update :: proc(scene: ^Scene, deltaTime: f64) {
+	world := scene.physics
+	if world == nil do return
+	world.accumulator = min(world.accumulator + deltaTime, PHYSICS_TIMESTEP * PHYSICS_MAX_STEPS)
+	for world.accumulator >= PHYSICS_TIMESTEP {
+		world.accumulator -= PHYSICS_TIMESTEP
+		Physics_Sync(scene)
+		pushNodePoses(world)
+		b2.World_Step(world.id, PHYSICS_TIMESTEP, PHYSICS_SUBSTEPS)
+		pullBodyPoses(world)
+		sendEvents(world)
+		updateRayCasts(world)
+	}
+}
+
+// What a ray (or `Physics_RayCast`) hit
+RayHit :: struct {
+	hit: bool,
+	// World pixels
+	point: [2]f32,
+	normal: [2]f32,
+	body: ^PhysicsBody,
+	shape: ^CollisionShape,
+	// How far along the ray, 0-1
+	fraction: f32,
+}
+
+/*
+Casts a ray through the scene's physics world and returns the first body it hits.
+
+Inputs:
+- from, to: World pixels
+- mask: Layers to hit
+- exclude: A body to ignore (the caster's own)
+*/
+Physics_RayCast :: proc(scene: ^Scene, from, to: [2]f32, mask: u64 = PHYSICS_ALL_LAYERS, exclude: ^PhysicsBody = nil) -> RayHit {
+	world := Scene_GetPhysics(scene)
+	ppm := world.settings.pixelsPerMeter
+	Context :: struct {
+		exclude: ^PhysicsBody,
+		hit: RayHit,
+	}
+	ctx := Context{exclude = exclude}
+	callback :: proc "c" (shapeId: b2.ShapeId, point, normal: b2.Vec2, fraction: f32, userData: rawptr) -> f32 {
+		ctx := cast(^Context)userData
+		body := cast(^PhysicsBody)b2.Body_GetUserData(b2.Shape_GetBody(shapeId))
+		// -1: ignore this shape and go on; the fraction: only nearer hits from now on
+		if body == nil || body == ctx.exclude || b2.Shape_IsSensor(shapeId) do return -1
+		ctx.hit = {hit = true, point = point, normal = normal, body = body,
+			shape = cast(^CollisionShape)b2.Shape_GetUserData(shapeId), fraction = fraction}
+		return fraction
+	}
+	filter := b2.QueryFilter{categoryBits = PHYSICS_ALL_LAYERS, maskBits = mask}
+	_ = b2.World_CastRay(world.id, from / ppm, (to - from) / ppm, filter, callback, &ctx)
+	ctx.hit.point *= ppm
+	return ctx.hit
+}
+
+/*
+Moves a CharacterMover by its `velocity` for `deltaTime` seconds, sliding along what it hits, and
+updates `onFloor` / `onWall` / `onCeiling` and `floorNormal`. The part of the velocity that ran
+into something is removed (it stops falling when it lands). Call it from the mover's update or
+script every frame.
+
+Uses Box2D's mover functions: collide the capsule with the world to get contact planes, solve
+the planes for the move, sweep the capsule along the result (up to 5 times), then clip the
+velocity against the planes.
+
+Inputs:
+- mover: The mover; its body must exist (it's in the scene)
+- deltaTime: Seconds to move for
+*/
+CharacterMover_Move :: proc(mover: ^CharacterMover, deltaTime: f64) {
+	world := mover.scene.physics
+	if world == nil || !b2.Body_IsValid(mover.bodyId) do return
+	ppm := world.settings.pixelsPerMeter
+	capsule, ok := moverCapsule(mover)
+	if !ok do return
+
+	Planes :: struct {
+		self: ^PhysicsBody,
+		planes: [16]b2.CollisionPlane,
+		bodies: [16]^PhysicsBody,
+		count: int,
+	}
+	collect :: proc "c" (shapeId: b2.ShapeId, result: ^b2.PlaneResult, userData: rawptr) -> bool {
+		p := cast(^Planes)userData
+		body := cast(^PhysicsBody)b2.Body_GetUserData(b2.Shape_GetBody(shapeId))
+		if body == p.self || body == nil || !result.hit || b2.Shape_IsSensor(shapeId) do return true
+		if p.count < len(p.planes) {
+			p.planes[p.count] = {plane = result.plane, pushLimit = max(f32), push = 0, clipVelocity = true}
+			p.bodies[p.count] = body
+			p.count += 1
+		}
+		return true
+	}
+
+	xf := Node_GetWorldTransform(mover)
+	position := xf.origin / ppm
+	rotation := b2.MakeRot(math.to_radians(Transform2D_Rotation(xf)))
+	target := position + mover.velocity * f32(deltaTime) / ppm
+	filter := b2.QueryFilter{categoryBits = mover.collisionLayer, maskBits = mover.collisionMask}
+	planes := Planes{self = mover}
+	tolerance: f32 = 0.01 / ppm * 100 // a hundredth of a meter at the default scale
+	for _ in 0 ..< 5 {
+		planes.count = 0
+		world_capsule := b2.Capsule{
+			center1 = position + b2.RotateVector(rotation, capsule.center1),
+			center2 = position + b2.RotateVector(rotation, capsule.center2),
+			radius = capsule.radius,
+		}
+		b2.World_CollideMover(world.id, world_capsule, filter, collect, &planes)
+		result := b2.SolvePlanes(target - position, planes.planes[:planes.count])
+		fraction := b2.World_CastMover(world.id, world_capsule, result.translation, filter)
+		delta := fraction * result.translation
+		position += delta
+		if linalg.length2(delta) < tolerance * tolerance do break
+	}
+
+	// The sweep stops just short of what it hits, and planes only count when the capsule
+	// touches: what the mover rests against comes from a capsule MOVER_SKIN pixels larger
+	all := Planes{self = mover}
+	contact := b2.Capsule{
+		center1 = position + b2.RotateVector(rotation, capsule.center1),
+		center2 = position + b2.RotateVector(rotation, capsule.center2),
+		radius = capsule.radius + MOVER_SKIN / ppm,
+	}
+	b2.World_CollideMover(world.id, contact, filter, collect, &all)
+	// Remove the part of the velocity going into each surface (b2ClipVector only clips planes
+	// SolvePlanes pushed against, and these come from the probe)
+	for plane in all.planes[:all.count] {
+		if into := linalg.dot(mover.velocity, plane.plane.normal); into < 0 do mover.velocity -= into * plane.plane.normal
+	}
+
+	// Floor, walls and ceiling from the contact normals (they point from the surface to the mover)
+	floorLimit := math.cos(math.to_radians(mover.floorMaxAngle))
+	mover.onFloor, mover.onWall, mover.onCeiling = false, false, false
+	mover.floorNormal = {}
+	for plane in all.planes[:all.count] {
+		normal := plane.plane.normal
+		switch {
+		case -normal.y >= floorLimit:
+			mover.onFloor = true
+			mover.floorNormal = normal
+		case normal.y >= floorLimit:
+			mover.onCeiling = true
+		case:
+			mover.onWall = true
+		}
+	}
+
+	Node_SetWorldPosition(mover, position * ppm)
+	moverContacts(mover, all.bodies[:all.count])
+}
+
+/*
+Draws the outlines of every shape in the scene's physics world, through `view` (world to screen).
+`Scene_DrawWithView` calls it when `settings.debugDraw` is on.
+*/
+Physics_DrawDebug :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D) {
+	world := scene.physics
+	if world == nil do return
+	SetDrawState(view)
+	defer SetDrawState(TRANSFORM2D_IDENTITY)
+	ppm := world.settings.pixelsPerMeter
+	for body in world.bodies {
+		if !b2.Body_IsValid(body.bodyId) do continue
+		color := debugColor(body)
+		xf := b2.Body_GetTransform(body.bodyId)
+		shapes: [32]b2.ShapeId
+		for shapeId in b2.Body_GetShapes(body.bodyId, shapes[:]) {
+			drawShapeOutline(renderer, shapeId, xf, ppm, color)
+		}
+	}
+	for ray in world.rayCasts {
+		if !ray.inScene || !ray.enabled do continue
+		xf := Node_GetWorldTransform(ray)
+		from := xf.origin
+		to := ray.colliding ? ray.point : Transform2D_Apply(xf, ray.target)
+		DrawLine(renderer, {from.x, from.y}, {to.x, to.y}, ray.colliding ? {255, 90, 90, 255} : {255, 220, 80, 255})
+	}
+}
+
+// INTERNAL
+
+@(private)
+pixelsPerMeter :: proc(scene: ^Scene) -> f32 {
+	if scene.physics != nil do return scene.physics.settings.pixelsPerMeter
+	return DEFAULT_PHYSICS.pixelsPerMeter
+}
+
+@(private="file")
+createBody :: proc(world: ^PhysicsWorld, body: ^PhysicsBody) {
+	ppm := world.settings.pixelsPerMeter
+	xf := Node_GetWorldTransform(body)
+	rotation := Transform2D_Rotation(xf)
+	def := b2.DefaultBodyDef()
+	def.position = xf.origin / ppm
+	def.rotation = b2.MakeRot(math.to_radians(rotation))
+	def.userData = body
+	switch body.kind {
+	case .Static:
+		def.type = .staticBody
+	case .Dynamic:
+		d := cast(^DynamicBody)body
+		def.type = .dynamicBody
+		def.gravityScale = d.gravityScale
+		def.linearDamping = d.linearDamping
+		def.angularDamping = d.angularDamping
+		def.fixedRotation = d.fixedRotation
+		def.isBullet = d.bullet
+		def.linearVelocity = d.initialVelocity / ppm
+	case .Character, .Area:
+		// Moved by code: kinematic, so it pushes dynamic bodies and isn't pushed back
+		def.type = .kinematicBody
+	}
+	body.bodyId = b2.CreateBody(world.id, def)
+	body.syncedPosition, body.syncedRotation = xf.origin, rotation
+	buildShapes(world, body)
+}
+
+// (Re)creates a body's Box2D shapes from the CollisionShape nodes it owns
+@(private="file")
+buildShapes :: proc(world: ^PhysicsWorld, body: ^PhysicsBody) {
+	body.shapesDirty = false
+	existing: [32]b2.ShapeId
+	for shapeId in b2.Body_GetShapes(body.bodyId, existing[:]) do b2.DestroyShape(shapeId, false)
+
+	ppm := world.settings.pixelsPerMeter
+	bodyWorld := Node_GetWorldTransform(body)
+	// The Box2D body has the node's position and rotation; its scale goes into the shapes
+	frame := Transform2D_Inverse(Transform2D_Make(bodyWorld.origin, Transform2D_Rotation(bodyWorld), {1, 1}))
+
+	def := b2.DefaultShapeDef()
+	def.material.friction = body.friction
+	def.material.restitution = body.restitution
+	def.density = body.density
+	def.filter = {categoryBits = body.collisionLayer, maskBits = body.collisionMask}
+	def.isSensor = body.kind == .Area
+	def.enableSensorEvents = true
+	def.enableContactEvents = body.kind != .Area
+	def.updateBodyMass = false
+
+	visit :: proc(node: ^Node, body: ^PhysicsBody, frame: Transform2D, ppm: f32, def: ^b2.ShapeDef) {
+		for child in node.children {
+			// A body under this one owns the shapes under it
+			if Node_IsPhysicsBody(child) do continue
+			if Node_Is(child, CollisionShape) {
+				shape := cast(^CollisionShape)child
+				if !shape.disabled {
+					local := Transform2D_Multiply(frame, Node_GetWorldTransform(shape))
+					createShape(body, shape, local, ppm, def)
+				}
+			}
+			visit(child, body, frame, ppm, def)
+		}
+	}
+	visit(body, body, frame, ppm, &def)
+	b2.Body_ApplyMassFromShapes(body.bodyId)
+}
+
+// One CollisionShape as a Box2D shape. `local` maps the shape node's space to the body's (pixels)
+@(private="file")
+createShape :: proc(body: ^PhysicsBody, shape: ^CollisionShape, local: Transform2D, ppm: f32, def: ^b2.ShapeDef) {
+	def.userData = shape
+	point :: proc(local: Transform2D, p: [2]f32, ppm: f32) -> b2.Vec2 { return Transform2D_Apply(local, p) / ppm }
+	scale := Transform2D_UniformScale(local)
+	shape.shapeId = {}
+	switch shape.shape {
+	case .Rectangle:
+		half := shape.size * 0.5
+		corners := [4]b2.Vec2{
+			point(local, {-half.x, -half.y}, ppm), point(local, {half.x, -half.y}, ppm),
+			point(local, {half.x, half.y}, ppm), point(local, {-half.x, half.y}, ppm),
+		}
+		shape.shapeId = polygonShape(body, def, corners[:], shape)
+	case .Circle:
+		circle := b2.Circle{center = point(local, {0, 0}, ppm), radius = shape.radius * scale / ppm}
+		shape.shapeId = b2.CreateCircleShape(body.bodyId, def^, &circle)
+	case .Capsule:
+		radius := shape.radius
+		half := max(shape.height * 0.5 - radius, 0)
+		if half <= 0 {
+			circle := b2.Circle{center = point(local, {0, 0}, ppm), radius = radius * scale / ppm}
+			shape.shapeId = b2.CreateCircleShape(body.bodyId, def^, &circle)
+		} else {
+			capsule := b2.Capsule{center1 = point(local, {0, -half}, ppm), center2 = point(local, {0, half}, ppm), radius = radius * scale / ppm}
+			shape.shapeId = b2.CreateCapsuleShape(body.bodyId, def^, &capsule)
+		}
+	case .Polygon:
+		if len(shape.points) < 3 {
+			log.warnf("%s: a Polygon shape needs at least 3 points", shape.name)
+			return
+		}
+		points := make([]b2.Vec2, min(len(shape.points), COLLISION_POLYGON_MAX_POINTS), context.temp_allocator)
+		for &p, i in points do p = point(local, shape.points[i], ppm)
+		shape.shapeId = polygonShape(body, def, points, shape)
+	case .Segment:
+		if len(shape.points) < 2 {
+			log.warnf("%s: a Segment shape needs 2 points", shape.name)
+			return
+		}
+		segment := b2.Segment{point1 = point(local, shape.points[0], ppm), point2 = point(local, shape.points[1], ppm)}
+		shape.shapeId = b2.CreateSegmentShape(body.bodyId, def^, &segment)
+	}
+}
+
+@(private="file")
+polygonShape :: proc(body: ^PhysicsBody, def: ^b2.ShapeDef, points: []b2.Vec2, shape: ^CollisionShape) -> b2.ShapeId {
+	hull := b2.ComputeHull(points)
+	if hull.count == 0 {
+		log.warnf("%s: the shape's points don't make a polygon (too small, or all in a line)", shape.name)
+		return {}
+	}
+	polygon := b2.MakePolygon(hull, 0)
+	return b2.CreatePolygonShape(body.bodyId, def^, &polygon)
+}
+
+// Before a step: bodies whose nodes the game moved follow them
+@(private="file")
+pushNodePoses :: proc(world: ^PhysicsWorld) {
+	ppm := world.settings.pixelsPerMeter
+	for body in world.bodies {
+		if !body.inScene || !b2.Body_IsValid(body.bodyId) do continue
+		xf := Node_GetWorldTransform(body)
+		position, rotation := xf.origin, Transform2D_Rotation(xf)
+		moved := linalg.length2(position - body.syncedPosition) > 1e-6 || abs(angleDifference(rotation, body.syncedRotation)) > 1e-4
+		switch body.kind {
+		case .Static, .Dynamic:
+			// Teleports: the node was set in code. What rests on it wakes up (or it would hang in the air)
+			if moved {
+				b2.Body_SetTransform(body.bodyId, position / ppm, b2.MakeRot(math.to_radians(rotation)))
+				contacts: [64]b2.ContactData
+				for contact in b2.Body_GetContactData(body.bodyId, contacts[:]) {
+					for shapeId in ([2]b2.ShapeId{contact.shapeIdA, contact.shapeIdB}) {
+						if b2.Shape_IsValid(shapeId) do b2.Body_SetAwake(b2.Shape_GetBody(shapeId), true)
+					}
+				}
+			}
+		case .Character, .Area:
+			// Back at the last pose, with the velocity that reaches the node's pose in one step:
+			// what touches it sees it move (a mover pushes crates) instead of appearing elsewhere
+			b2.Body_SetTransform(body.bodyId, body.syncedPosition / ppm, b2.MakeRot(math.to_radians(body.syncedRotation)))
+			b2.Body_SetLinearVelocity(body.bodyId, (position - body.syncedPosition) / ppm / PHYSICS_TIMESTEP)
+			b2.Body_SetAngularVelocity(body.bodyId, math.to_radians(angleDifference(rotation, body.syncedRotation)) / PHYSICS_TIMESTEP)
+		}
+		body.syncedPosition, body.syncedRotation = position, rotation
+	}
+}
+
+// After a step: dynamic bodies' nodes follow them; kinematic bodies stop
+@(private="file")
+pullBodyPoses :: proc(world: ^PhysicsWorld) {
+	ppm := world.settings.pixelsPerMeter
+	for body in world.bodies {
+		if !body.inScene || !b2.Body_IsValid(body.bodyId) do continue
+		switch body.kind {
+		case .Dynamic:
+			position := b2.Body_GetPosition(body.bodyId) * ppm
+			rotation := math.to_degrees(b2.Rot_GetAngle(b2.Body_GetRotation(body.bodyId)))
+			setWorldPose(body, position, rotation)
+			// What the node now says, so the next step doesn't take it for a move by the game
+			xf := Node_GetWorldTransform(body)
+			body.syncedPosition, body.syncedRotation = xf.origin, Transform2D_Rotation(xf)
+		case .Character, .Area:
+			b2.Body_SetLinearVelocity(body.bodyId, {})
+			b2.Body_SetAngularVelocity(body.bodyId, 0)
+		case .Static:
+		}
+	}
+}
+
+// Puts a node at a world position and rotation, whatever its parents are
+@(private="file")
+setWorldPose :: proc(node: ^Node, position: [2]f32, rotation: f32) {
+	Node_SetWorldPosition(node, position)
+	parentRotation: f32 = node.parent != nil ? Transform2D_Rotation(Node_GetWorldTransform(node.parent)) : 0
+	node.rotation = rotation - parentRotation
+}
+
+// a - b in degrees, in -180..180
+@(private="file")
+angleDifference :: proc(a, b: f32) -> f32 {
+	d := math.mod(a - b, 360)
+	if d > 180 do d -= 360
+	if d < -180 do d += 360
+	return d
+}
+
+// Box2D's contact and sensor events as node events
+@(private="file")
+sendEvents :: proc(world: ^PhysicsWorld) {
+	ppm := world.settings.pixelsPerMeter
+	contacts := b2.World_GetContactEvents(world.id)
+	for event in contacts.beginEvents[:contacts.beginCount] {
+		if !b2.Shape_IsValid(event.shapeIdA) || !b2.Shape_IsValid(event.shapeIdB) do continue
+		a, b := bodyOfShape(event.shapeIdA), bodyOfShape(event.shapeIdB)
+		shapeA := cast(^CollisionShape)b2.Shape_GetUserData(event.shapeIdA)
+		shapeB := cast(^CollisionShape)b2.Shape_GetUserData(event.shapeIdB)
+		point: [2]f32
+		if event.manifold.pointCount > 0 do point = event.manifold.points[0].point * ppm
+		normal := event.manifold.normal
+		notifyCollision(a, b, shapeA, shapeB, point, normal, true)
+		notifyCollision(b, a, shapeB, shapeA, point, -normal, true)
+	}
+	for event in contacts.endEvents[:contacts.endCount] {
+		// Ends caused by a destroyed body or shape have nothing left to report to
+		if !b2.Shape_IsValid(event.shapeIdA) || !b2.Shape_IsValid(event.shapeIdB) do continue
+		a, b := bodyOfShape(event.shapeIdA), bodyOfShape(event.shapeIdB)
+		shapeA := cast(^CollisionShape)b2.Shape_GetUserData(event.shapeIdA)
+		shapeB := cast(^CollisionShape)b2.Shape_GetUserData(event.shapeIdB)
+		notifyCollision(a, b, shapeA, shapeB, {}, {}, false)
+		notifyCollision(b, a, shapeB, shapeA, {}, {}, false)
+	}
+	sensors := b2.World_GetSensorEvents(world.id)
+	for event in sensors.beginEvents[:sensors.beginCount] {
+		if !b2.Shape_IsValid(event.sensorShapeId) || !b2.Shape_IsValid(event.visitorShapeId) do continue
+		notifyCollision(bodyOfShape(event.sensorShapeId), bodyOfShape(event.visitorShapeId),
+			cast(^CollisionShape)b2.Shape_GetUserData(event.sensorShapeId),
+			cast(^CollisionShape)b2.Shape_GetUserData(event.visitorShapeId), {}, {}, true)
+	}
+	for event in sensors.endEvents[:sensors.endCount] {
+		if !b2.Shape_IsValid(event.sensorShapeId) || !b2.Shape_IsValid(event.visitorShapeId) do continue
+		notifyCollision(bodyOfShape(event.sensorShapeId), bodyOfShape(event.visitorShapeId),
+			cast(^CollisionShape)b2.Shape_GetUserData(event.sensorShapeId),
+			cast(^CollisionShape)b2.Shape_GetUserData(event.visitorShapeId), {}, {}, false)
+	}
+}
+
+// Sends one side of a collision: the body's event, then its script's hook
+@(private="file")
+notifyCollision :: proc(body, other: ^PhysicsBody, shape, otherShape: ^CollisionShape, point, normal: [2]f32, enter: bool) {
+	if body == nil || other == nil || !body.inScene do return
+	collision := Collision{body = body, other = other, shape = shape, otherShape = otherShape, point = point, normal = normal}
+	subject := enter ? &body.onCollisionEnter : &body.onCollisionExit
+	subject->notify(body, EventData(rawptr(&collision)))
+	if info := body.script.info; info != nil {
+		hook := enter ? info.collisionEnter : info.collisionExit
+		if hook != nil do hook(body.script.data, &collision)
+	}
+}
+
+// A mover's contacts come from its moves (Box2D makes no contacts between kinematic and static
+// bodies): bodies it started or stopped touching get events, on both sides
+@(private="file")
+moverContacts :: proc(mover: ^CharacterMover, touched: []^PhysicsBody) {
+	now := make([dynamic]^PhysicsBody, context.temp_allocator)
+	for body in touched {
+		known := false
+		for b in now do if b == body do known = true
+		if !known do append(&now, body)
+	}
+	for body in now {
+		was := false
+		for b in mover.touching do if b == body do was = true
+		if !was {
+			notifyCollision(mover, body, nil, nil, {}, {}, true)
+			notifyCollision(body, mover, nil, nil, {}, {}, true)
+		}
+	}
+	for body in mover.touching {
+		still := false
+		for b in now do if b == body do still = true
+		if !still && Node_IsPhysicsBody(body) {
+			notifyCollision(mover, body, nil, nil, {}, {}, false)
+			notifyCollision(body, mover, nil, nil, {}, {}, false)
+		}
+	}
+	clear(&mover.touching)
+	append(&mover.touching, ..now[:])
+}
+
+// The mover's capsule in body space (meters), from its first Capsule or Circle shape
+@(private="file")
+moverCapsule :: proc(mover: ^CharacterMover) -> (b2.Capsule, bool) {
+	shapes: [32]b2.ShapeId
+	for shapeId in b2.Body_GetShapes(mover.bodyId, shapes[:]) {
+		#partial switch b2.Shape_GetType(shapeId) {
+		case .capsuleShape:
+			return b2.Shape_GetCapsule(shapeId), true
+		case .circleShape:
+			circle := b2.Shape_GetCircle(shapeId)
+			return {center1 = circle.center, center2 = circle.center, radius = circle.radius}, true
+		}
+	}
+	@(static) warned: bool
+	if !warned {
+		log.warnf("%s: a CharacterMover needs a Capsule or Circle CollisionShape", mover.name)
+		warned = true
+	}
+	return {}, false
+}
+
+@(private="file")
+updateRayCasts :: proc(world: ^PhysicsWorld) {
+	for ray in world.rayCasts {
+		if !ray.inScene || !ray.enabled do continue
+		RayCast_ForceUpdate(ray)
+	}
+}
+
+/*
+Casts a RayCast now (they cast after every physics step by themselves), updating its results.
+*/
+RayCast_ForceUpdate :: proc(ray: ^RayCast) {
+	xf := Node_GetWorldTransform(ray)
+	exclude: ^PhysicsBody
+	if ray.excludeParent {
+		for n := ray.parent; n != nil; n = n.parent do if Node_IsPhysicsBody(n) {
+			exclude = cast(^PhysicsBody)n
+			break
+		}
+	}
+	hit := Physics_RayCast(ray.scene, xf.origin, Transform2D_Apply(xf, ray.target), ray.collisionMask, exclude)
+	ray.colliding, ray.point, ray.normal, ray.collider, ray.colliderShape = hit.hit, hit.point, hit.normal, hit.body, hit.shape
+}
+
+@(private="file")
+debugColor :: proc(body: ^PhysicsBody) -> sdl.Color {
+	switch body.kind {
+	case .Static:    return {120, 200, 120, 255}
+	case .Dynamic:   return b2.Body_IsAwake(body.bodyId) ? {110, 170, 255, 255} : {90, 110, 150, 255}
+	case .Character: return {255, 170, 70, 255}
+	case .Area:      return {200, 120, 255, 255}
+	}
+	return {255, 255, 255, 255}
+}
+
+@(private="file")
+drawShapeOutline :: proc(renderer: ^sdl.Renderer, shapeId: b2.ShapeId, xf: b2.Transform, ppm: f32, color: sdl.Color) {
+	toPixels :: proc(xf: b2.Transform, p: b2.Vec2, ppm: f32) -> sdl.FPoint {
+		w := b2.TransformPoint(xf, p) * ppm
+		return {w.x, w.y}
+	}
+	#partial switch b2.Shape_GetType(shapeId) {
+	case .polygonShape:
+		polygon := b2.Shape_GetPolygon(shapeId)
+		points := make([]sdl.FPoint, polygon.count, context.temp_allocator)
+		for &p, i in points do p = toPixels(xf, polygon.vertices[i], ppm)
+		DrawPolygonOutline(renderer, points, color)
+	case .circleShape:
+		circle := b2.Shape_GetCircle(shapeId)
+		center := toPixels(xf, circle.center, ppm)
+		DrawCircleOutline(renderer, center, circle.radius * ppm, color)
+		// A spoke, so rotation shows
+		edge := toPixels(xf, circle.center + {circle.radius, 0}, ppm)
+		DrawLine(renderer, center, edge, color)
+	case .capsuleShape:
+		capsule := b2.Shape_GetCapsule(shapeId)
+		a, b := toPixels(xf, capsule.center1, ppm), toPixels(xf, capsule.center2, ppm)
+		radius := capsule.radius * ppm
+		DrawCircleOutline(renderer, a, radius, color)
+		DrawCircleOutline(renderer, b, radius, color)
+		side := linalg.normalize0([2]f32{b.x - a.x, b.y - a.y})
+		offset := [2]f32{-side.y, side.x} * radius
+		DrawLine(renderer, {a.x + offset.x, a.y + offset.y}, {b.x + offset.x, b.y + offset.y}, color)
+		DrawLine(renderer, {a.x - offset.x, a.y - offset.y}, {b.x - offset.x, b.y - offset.y}, color)
+	case .segmentShape:
+		segment := b2.Shape_GetSegment(shapeId)
+		DrawLine(renderer, toPixels(xf, segment.point1, ppm), toPixels(xf, segment.point2, ppm), color)
+	}
+}

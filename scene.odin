@@ -20,6 +20,8 @@ Scene :: struct {
 	camera: ^Camera2D,
 	// Layers drawn in screen space, ignoring `camera`. Put HUDs and menus on these layers
 	screenLayers: bit_set[RenderLayer],
+	// The physics world (physics.odin), nil until the scene's first physics node is created
+	physics: ^PhysicsWorld,
 	addNode: proc(scene: ^Scene, node: ^Node),
 	removeNode: proc(scene: ^Scene, nodeId: EntityId),
 	getNode: proc(scene: ^Scene, nodeId: EntityId) -> ^Node,
@@ -64,6 +66,8 @@ Scene_Destroy :: proc(scene: ^Scene) {
 	// Nodes live in their own arenas, so each one is freed individually
 	for node in scene.nodes do Node_Destroy(node)
 	for node in scene.addQueue do Node_Destroy(node)
+	// After the nodes: destroying a body node destroys its Box2D body
+	Physics_Destroy(scene)
 	delete(scene.addQueue)
 	delete(scene.removeQueue)
 	delete(scene.nodes)
@@ -97,6 +101,7 @@ CreateNode :: proc(scene: ^Scene, $T: typeid, addToScene: bool = true) -> ^T {
 	node := cast(^Node)newObject
 	context.random_generator = crypto.random_generator()
 	node.id = uuid.generate_v4()
+	node.type = T
 	node.scene = scene
 	Node_Init(node, Node_GetAllocator(node))
 	if addToScene {
@@ -144,8 +149,12 @@ Scene_ProcessQueues :: proc(scene: ^Scene) {
 
 Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 	Scene_ProcessQueues(scene)
+	// New physics nodes get their bodies, so scripts can use them in `ready`
+	Physics_Sync(scene)
 	// Scripts get `ready` once, before their first update, when every node is in the scene
 	Scene_ReadyScripts(scene)
+	// Physics steps before nodes update: they see this frame's positions and collisions
+	Physics_Update(scene, deltaTime)
 
 	for node in scene.nodes {
 		if node.update != nil {
@@ -208,6 +217,7 @@ Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transfo
 			if scriptDraw != nil do scriptDraw(node.script.data, renderer)
 		}
 	}
+	if scene.physics != nil && scene.physics.settings.debugDraw do Physics_DrawDebug(scene, renderer, view)
 }
 
 /*

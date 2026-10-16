@@ -40,6 +40,9 @@ Game :: struct {
 	nextScenePtr: ^Scene,
 	currentScene: ^Scene,
 	name: string,
+	// How its scenes' physics behave (physics.odin); zero means DEFAULT_PHYSICS. Set before
+	// scenes create physics nodes
+	physics: PhysicsSettings,
 	// The folder asset paths are relative to (owned; set by Game_LoadProject, "" for the working directory)
 	projectDir: string,
 	update: proc(game: ^Game, events: []sdl.Event, deltaTime: f64),

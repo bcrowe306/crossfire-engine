@@ -11,6 +11,7 @@ import e "odin_sdl_engine"   // or "../odin_sdl_engine" from a sibling package
 ## Commands
 
 ```bash
+tools/build_box2d.sh [<emsdk>]              # once: build Box2D into box2d/lib/ (with an emsdk: the web library too)
 odin check . -no-entry-point -vet-unused    # type-check the library (it has no main)
 odin test . -vet-unused                     # unit tests (format parser, transforms, scripts)
 odin check player -vet-unused               # type-check the player program
@@ -20,7 +21,9 @@ odin build player -out:player_bin           # build the player: player_bin <proj
 
 To run something, build a game that uses it. In the workspace root, `odin run .` runs asteroids.
 
-Runtime libraries: `libSDL3`, `libSDL3_image`, `libSDL3_ttf`, `libSDL3_mixer`. The default font is
+Runtime libraries: `libSDL3`, `libSDL3_image`, `libSDL3_ttf`, `libSDL3_mixer`. Box2D is linked
+statically from `box2d/lib/` (built from the `third_party/box2d` submodule, v3.1.1, by
+`tools/build_box2d.sh`; nothing to install). Without it, compiling stops with a message saying so. The default font is
 compiled in with `#load` (`Open_Sans/static/OpenSans-Regular.ttf`).
 
 ## Architecture
@@ -55,6 +58,11 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `player_web.odin` | The browser player: `odin_web_main` (called by `web/main.c`), `Web_Context` (Emscripten's malloc, a per-frame temp arena, console logger), `Player_StartWeb` (Emscripten's main loop drives `Application_Frame`) |
 | `web/` | Files the web export links: `main.c` (C `main`), `odin_env.js` and `odin_env_pre.js` (what Odin's js runtime imports from "odin_env") |
 | `paths.odin` | `JoinPath` ("/"-separated, works everywhere) |
+| `physics.odin` | **Physics world** (Box2D, one per scene): settings and units, `Physics_Sync` / `Physics_Update` (fixed steps, pose sync, events, ray casts), `Physics_RayCast`, `CharacterMover_Move`, `Physics_DrawDebug` |
+| `physics_nodes.odin` | Physics nodes: `PhysicsBody` (layers, surface, `onCollisionEnter/Exit`), `StaticBody`, `DynamicBody` (+ velocity, impulse, force), `CharacterMover`, `Area` (+ `Area_GetOverlaps`), `CollisionShape`, `RayCast`, `Collision` |
+| `box2d/` | Box2D 3.1.1 bindings: a copy of Odin's `vendor:box2d` linking our own `box2d/lib/` (why: its doc comment). `lib/` is built, not committed |
+| `third_party/box2d`, `tools/build_box2d.sh` | Box2D's sources (submodule) and the script that compiles them (no CMake) |
+| `physics_test.odin` | Tests: falling and landing, events, layers, Areas, ray casts, the mover (landing, walls, pushing), shapes with baked transforms, removal, scene files, debug drawing |
 | `audio.odin` | SDL3_mixer setup (`Audio_Init`: no device means silence, not an error), loading, and `Game_PlaySound(game, path)` (paths relative to `game.projectDir`, cached). The same on desktop and web |
 | `player/main.odin` | The **player** for projects without scripts: calls `Player_Main` (`Player_Run` with the command line; nothing in the browser). A project with scripts gets its own generated main that also imports its `scripts` package. Used by the editor's Play and, later, exports |
 | `script_test.odin` | Tests: script registration, fields and tags, lifecycle on a node, bad values, `Scene_FindNode` paths, format v3 scripts |
@@ -115,7 +123,30 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
   and bounds move the camera node (`Camera2D_SetTarget`).
 
 **Node types** embed `using node: e.Node` as their **first** field. Casting and node allocation both
-depend on it.
+depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
+
+**Physics** (physics.odin, physics_nodes.odin; their doc comments have the details):
+- The engine API is in pixels, degrees and px/s; Box2D in meters (`pixelsPerMeter`, 100). Box2D's
+  angle in the y-down world is the engine's clockwise rotation, in radians.
+- A body's Box2D body is created by `Physics_Sync` (in `Scene_Update`, before scripts' `ready`)
+  once its node is in the scene; its shapes come from the CollisionShape nodes under it (nearest
+  body ancestor), with their transforms relative to the body **baked in**. Changing a shape in
+  code needs `PhysicsBody_RebuildShapes`.
+- Who moves what: dynamic bodies move their nodes (after each step); a node of a static or
+  dynamic body moved in code teleports its body (waking what rests on it); Areas and
+  CharacterMovers are kinematic: before each step they're put back at their last pose with the
+  velocity that reaches the node's pose, so they push what's in the way.
+- `CharacterMover_Move` uses Box2D's mover API. Two Box2D facts it depends on: `World_CastMover`
+  ignores shapes it starts inside (so the mover's own body doesn't block it), and planes count as
+  hits only when touching, while the sweep stops just short. So the contacts (floor flags,
+  velocity clipping, events) come from one more `CollideMover` with the capsule `MOVER_SKIN` px
+  bigger, and the velocity is clipped by hand: `b2ClipVector` skips planes with `push == 0`.
+- Box2D makes no contacts between kinematic and static bodies: mover collision events come from
+  its move's contact planes (`moverContacts`).
+- Events are sent after each step, outside Box2D. Shape and body ids in end events can be stale:
+  check `Shape_IsValid`.
+- The web build links `box2d/lib/box2d_web.o`: one relocatable object, because Odin keeps plain C
+  symbol names on wasm only for `.o` foreign imports (an `.a` gets `lib/x.a..b2Foo` names).
 
 **Scripts** (`script.odin`, doc comment at the top has the full example):
 - A script struct's first field is `using script: e.Script` (checked at registration). It's
@@ -241,6 +272,7 @@ comment. What was needed, and why:
   - Menus and labels in a scene with a camera are drawn through it, because scene files can't set
     `screenLayers` yet.
   - Audio assets aren't loaded with the scene (play them from scripts: `Game_PlaySound`, loaded on first use).
+- **Format version 4** adds the physics node kinds and the project's physics settings.
 - **Format version 3** adds `<script>` elements; version 2 stores local positions, and version 1
   files are migrated when parsed (`migrateSceneFromV1`). Bump `PROJECT_FORMAT_VERSION` and add a migration for any incompatible
   format change.

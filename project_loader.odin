@@ -57,7 +57,8 @@ LoadSceneFile :: proc(path: string, allocator := context.allocator) -> (SceneDat
 }
 
 /*
-Creates every scene of a project in a game and switches to its start scene. Call from the
+Creates every scene of a project in a game and switches to its start scene. Also sets the game's
+physics settings from the project. Call from the
 game's `build` procedure, after `game.size` and `game.scaleMode` were set from the project
 (the scenes' cameras and menus are positioned for that size).
 
@@ -79,6 +80,7 @@ Example:
 */
 Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string) -> bool {
 	game.backgroundColor = project.background
+	game.physics = project.physics
 	delete(game.projectDir)
 	game.projectDir = strings.clone(projectDir)
 	ok := true
@@ -174,6 +176,45 @@ Scene_Build :: proc(scene: ^Scene, data: ^SceneData, projectDir: string, allocat
 				button.userData = action
 			}
 			n = menu
+
+		case .StaticBody:
+			n = CreateStaticBody(scene)
+		case .DynamicBody:
+			body := CreateDynamicBody(scene)
+			body.gravityScale = node.gravityScale
+			body.linearDamping = node.linearDamping
+			body.angularDamping = node.angularDamping
+			body.fixedRotation = node.fixedRotation
+			body.bullet = node.bullet
+			n = body
+		case .CharacterMover:
+			mover := CreateCharacterMover(scene)
+			mover.floorMaxAngle = node.floorMaxAngle
+			n = mover
+		case .Area:
+			n = CreateArea(scene)
+		case .CollisionShape:
+			shape := CreateCollisionShape(scene, node.shape)
+			shape.size = node.shapeSize
+			shape.radius = node.radius
+			shape.height = node.shapeSize.y
+			shape.disabled = node.disabled
+			append(&shape.points, ..node.points[:])
+			n = shape
+		case .RayCast:
+			ray := CreateRayCast(scene, node.target)
+			ray.collisionMask = node.collisionMask
+			ray.enabled = node.enabled
+			ray.excludeParent = node.excludeParent
+			n = ray
+		}
+		if Node_IsPhysicsBody(n) {
+			body := cast(^PhysicsBody)n
+			body.collisionLayer = node.collisionLayer
+			body.collisionMask = node.collisionMask
+			body.friction = node.friction
+			body.restitution = node.restitution
+			body.density = node.density
 		}
 
 		n.name = strings.clone(node.name, Node_GetAllocator(n))

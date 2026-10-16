@@ -40,6 +40,8 @@ children too.
 */
 Node :: struct {
 	id: EntityId,
+	// The type `CreateNode` made it as (`Sprite`, `DynamicBody`, ...); see `Node_Is`
+	type: typeid,
 	// The name from the scene file ("" for nodes made in code unless set). Used by
 	// `Scene_FindNode` and `Node_FindChild`; owned by the node's arena when set by `Scene_Build`
 	name: string,
@@ -147,6 +149,16 @@ allocateNode :: proc($T: typeid) -> ^T {
 		log.panicf("Failed to allocate node %v", typeid_of(T))
 	}
 	return object
+}
+
+/*
+Whether a node was created as type T (`CreateNode(scene, T)`).
+
+Example:
+	if e.Node_Is(node, e.DynamicBody) do e.DynamicBody_ApplyImpulse(cast(^e.DynamicBody)node, {0, -300})
+*/
+Node_Is :: proc(node: ^Node, $T: typeid) -> bool {
+	return node != nil && node.type == T
 }
 
 /*

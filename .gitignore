@@ -5,3 +5,6 @@
 *.exe
 *.pdb
 *.odin-doc
+
+# Box2D, built by tools/build_box2d.sh
+box2d/lib/

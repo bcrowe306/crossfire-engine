@@ -175,7 +175,7 @@ scene_format_v3_scripts :: proc(t: ^testing.T) {
 	testing.expect_value(t, scene.nodes[0].props[1].value, "Hi & bye")
 	testing.expect_value(t, scene.nodes[1].script, "")
 	// Version 4 isn't read
-	_, newer := ParseScene(`<scene formatVersion="4" name="S"/>`)
+	_, newer := ParseScene(`<scene formatVersion="99" name="S"/>`)
 	testing.expect_value(t, newer, ProjectError.Unsupported_Version)
 }
 

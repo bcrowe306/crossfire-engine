@@ -74,6 +74,10 @@ ScriptHooks :: struct($T: typeid) {
 	update: proc(self: ^T, events: []sdl.Event, deltaTime: f64),
 	draw: proc(self: ^T, renderer: ^sdl.Renderer),
 	destroy: proc(self: ^T),
+	// Physics body nodes only: another body started / stopped touching this one (or entered /
+	// left it, for an Area). `collision` is valid during the call
+	collisionEnter: proc(self: ^T, collision: ^Collision),
+	collisionExit: proc(self: ^T, collision: ^Collision),
 }
 
 // A registered script
@@ -90,6 +94,8 @@ ScriptInfo :: struct {
 	update: proc(self: rawptr, events: []sdl.Event, deltaTime: f64),
 	draw: proc(self: rawptr, renderer: ^sdl.Renderer),
 	destroy: proc(self: rawptr),
+	collisionEnter: proc(self: rawptr, collision: ^Collision),
+	collisionExit: proc(self: rawptr, collision: ^Collision),
 }
 
 // What an exported field holds, as the scene file and the editor see it
@@ -159,6 +165,8 @@ Script_Register :: proc "contextless" ($T: typeid, hooks: ScriptHooks(T), loc :=
 		update = transmute(proc(self: rawptr, events: []sdl.Event, deltaTime: f64))hooks.update,
 		draw = transmute(proc(self: rawptr, renderer: ^sdl.Renderer))hooks.draw,
 		destroy = transmute(proc(self: rawptr))hooks.destroy,
+		collisionEnter = transmute(proc(self: rawptr, collision: ^Collision))hooks.collisionEnter,
+		collisionExit = transmute(proc(self: rawptr, collision: ^Collision))hooks.collisionExit,
 	}
 
 	first := reflect.struct_field_at(T, 0)
