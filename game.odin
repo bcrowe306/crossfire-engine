@@ -1,5 +1,6 @@
 package engine
 
+import "base:runtime"
 import "core:fmt"
 import "core:strings"
 
@@ -46,6 +47,13 @@ Game :: struct {
 	nextScenePtr: ^Scene,
 	currentScene: ^Scene,
 	name: string,
+	// Global scripts, in their start order (globals.odin)
+	globals: [dynamic]GlobalInstance,
+	// Data resources loaded so far, by path (data.odin)
+	data: map[string]DataInstance,
+	// Memory that lives as long as the game: globals, data resources (Game_GetAllocator)
+	arena: MemoryArena,
+	arenaReady: bool,
 	// How its scenes' physics behave (physics.odin); zero means DEFAULT_PHYSICS. Set before
 	// scenes create physics nodes
 	physics: PhysicsSettings,
@@ -86,7 +94,18 @@ Game_Init :: proc(game: ^Game, window: ^sdl.Window, renderer: ^sdl.Renderer, mix
 	game.initialized = true
 }
 
+/*
+Memory that lives as long as the game (globals and data resources use it). Freed by Game_Destroy.
+*/
+Game_GetAllocator :: proc(game: ^Game) -> runtime.Allocator {
+	if !game.arenaReady {
+		game.arenaReady = MemoryArena_InitGrowing(&game.arena)
+	}
+	return MemoryArena_Allocator(&game.arena)
+}
+
 Game_Destroy :: proc(game: ^Game) {
+	Globals_Destroy(game)
 	for name, scene in game.scenes {
 		Scene_Destroy(scene)
 		free(scene)
@@ -95,6 +114,11 @@ Game_Destroy :: proc(game: ^Game) {
 	delete(game.scenes)
 	delete(game.projectDir)
 	game.resourceManager->destroy()
+	delete(game.globals)
+	delete(game.data)
+	if game.arenaReady do MemoryArena_Destroy(&game.arena)
+	game.arenaReady = false
+	if currentGame == game do currentGame = nil
 }
 
 Game_CreateScene :: proc(game: ^Game, name: string) -> ^Scene {
@@ -149,8 +173,12 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 		game.nextScenePtr.onEnter->notify(game.nextScenePtr, nil)
 		game.currentScene = game.nextScenePtr
 		game.nextScenePtr = nil
+		Globals_SceneChanged(game, game.currentScene)
 	}
 
+
+	// Globals first: the scene's nodes see what they changed this frame
+	Globals_Update(game, events, deltaTime)
 
 	if game.currentScene != nil {
 		if game.currentScene.update != nil {
@@ -178,6 +206,8 @@ Game_Draw :: proc(game: ^Game) {
 	else {
 		log.warn("No current scene to draw")
 	}
+	// Globals that draw (a HUD) go over the scene, in screen space
+	Globals_Draw(game)
 }
 
 

@@ -5,6 +5,7 @@ import "base:runtime"
 import "core:fmt"
 import vmem "core:mem/virtual"
 import "core:os"
+import "core:strings"
 import sdl "vendor:sdl3"
 import img "vendor:sdl3/image"
 
@@ -74,4 +75,51 @@ does nothing: the page starts the game through `odin_web_main`).
 */
 Player_Main :: proc() {
 	os.exit(Player_Run(os.args))
+}
+
+// Where saves go (tests set it to a scratch folder); "" = SDL's per-user folder for the game
+@(private)
+saveRootOverride: string
+
+// Saves: <SDL's per-user folder for the game>/saves/<slot>.json. `name` is "<game>/<slot>"
+@(private="file")
+savePath :: proc(name: string) -> (string, bool) {
+	app, _, slot := strings.partition(name, "/")
+	root := saveRootOverride
+	if root == "" {
+		pref := sdl.GetPrefPath("", strings.clone_to_cstring(app, context.temp_allocator))
+		if pref == nil do return "", false
+		root = strings.clone(string(cstring(pref)), context.temp_allocator)
+		sdl.free(rawptr(pref))
+	} else {
+		root = JoinPath(root, app)
+	}
+	dir := JoinPath(root, "saves")
+	_ = os.make_directory_all(dir)
+	return JoinPath(dir, fmt.tprintf("%s.json", slot)), true
+}
+
+Platform_SaveWrite :: proc(name: string, data: []byte) -> bool {
+	path, ok := savePath(name)
+	if !ok do return false
+	// Written next to it first, then moved over it: a crash mid-write can't leave half a save
+	temp := fmt.tprintf("%s.tmp", path)
+	if os.write_entire_file(temp, data) != nil do return false
+	return os.rename(temp, path) == nil
+}
+
+Platform_SaveRead :: proc(name: string) -> ([]byte, bool) {
+	path, ok := savePath(name)
+	if !ok do return nil, false
+	data, err := os.read_entire_file(path, context.temp_allocator)
+	return data, err == nil
+}
+
+Platform_SaveExists :: proc(name: string) -> bool {
+	path, ok := savePath(name)
+	return ok && os.exists(path)
+}
+
+Platform_SaveDelete :: proc(name: string) {
+	if path, ok := savePath(name); ok do _ = os.remove(path)
 }

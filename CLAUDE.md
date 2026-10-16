@@ -58,6 +58,11 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `player_web.odin` | The browser player: `odin_web_main` (called by `web/main.c`), `Web_Context` (Emscripten's malloc, a per-frame temp arena, console logger), `Player_StartWeb` (Emscripten's main loop drives `Application_Frame`) |
 | `web/` | Files the web export links: `main.c` (C `main`), `odin_env.js` and `odin_env_pre.js` (what Odin's js runtime imports from "odin_env") |
 | `paths.odin` | `JoinPath` ("/"-separated, works everywhere) |
+| `globals.odin` | **Global scripts**: scripts listed in project.xml (`<global>`), one instance per run, before the scenes; `Global(T)`; ready / update / draw (screen space, `hidden`) / sceneChanged / destroy |
+| `data.odin` | **Data resources**: `Data_Register(T)`, `.data.json` files (`ParseDataResource` / `FormatDataResource`), `Data(T, asset)` (loaded once, shared) |
+| `save.odin` | **Saves**: `Save_Game` / `Load_Game` / `Save_Exists` / `Save_Delete`: every global's fields as JSON (`save:"-"` skips one); desktop files in SDL's pref path, web localStorage; `--dev` runs save apart |
+| `assets.odin` | **Typed asset handles**: `TextureAsset`, `SoundAsset`, `FontAsset`, `DataAsset`; `Asset_Texture` / `Asset_Sound` / `Asset_Font`, `Game_PlaySound` (handle or path) |
+| `globals_test.odin` | Tests: globals' lifecycle and reset per run, data resources, saves (nested structs, arrays, maps, enums, `save:"-"`, older saves) |
 | `physics.odin` | **Physics world** (Box2D, one per scene): settings and units, `Physics_Sync` / `Physics_Update` (fixed steps, pose sync, ray casts), `Physics_RayCast`, `CharacterMover_Move` |
 | `physics_events.odin` | Contact and Area events per body pair (counted over shape pairs), `PhysicsBody_GetAreas` / `IsInArea` / `GetContacts` / `IsTouching`, exits when a body is removed, the world's shape table |
 | `physics_joints.odin` | `Joint` nodes: Revolute, Distance, Prismatic, Weld, Wheel (anchor = the node; body A = its body or the world; body B by name), limits, motors, springs |
@@ -127,6 +132,17 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 
 **Node types** embed `using node: e.Node` as their **first** field. Casting and node allocation both
 depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
+
+**Globals, data, saves** (globals.odin, data.odin, save.odin):
+- `currentGame` (set by `Game_LoadProject`) is the game `Global`, `Data` and `Save_Game` use by
+  default: there's one game per process. Globals and data live in the game's arena
+  (`Game_GetAllocator`), freed by `Game_Destroy`.
+- Order: `Globals_Start` (fields from project.xml) → scenes built → `Globals_Ready`; every frame
+  `Globals_Update` before the scene, `Globals_Draw` after it (screen space).
+- Saves marshal each saved field with `core:encoding/json`, and load by unmarshalling a global's
+  object into the whole struct (`ScriptInfo.pointerType`: `unmarshal_any` needs a pointer type,
+  which can't be made at run time), so fields the save lacks keep their values.
+- Asset handles are a struct with one string: `Script_SetField` writes them as strings.
 
 **Physics** (physics.odin, physics_nodes.odin; their doc comments have the details):
 - The engine API is in pixels, degrees and px/s; Box2D in meters (`pixelsPerMeter`, 100). Box2D's
@@ -294,6 +310,7 @@ comment. What was needed, and why:
   - Menus and labels in a scene with a camera are drawn through it, because scene files can't set
     `screenLayers` yet.
   - Audio assets aren't loaded with the scene (play them from scripts: `Game_PlaySound`, loaded on first use).
+- **Format version 5** adds `<global>` elements to project.xml and assets of kind "Data".
 - **Format version 4** adds the physics node kinds and the project's physics settings.
 - **Format version 3** adds `<script>` elements; version 2 stores local positions, and version 1
   files are migrated when parsed (`migrateSceneFromV1`). Bump `PROJECT_FORMAT_VERSION` and add a migration for any incompatible

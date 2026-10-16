@@ -11,11 +11,15 @@ A project is a folder:
 project.xml:
 
 	<?xml version="1.0" encoding="UTF-8"?>
-	<project formatVersion="4" name="Asteroids" width="1280" height="720"
+	<project formatVersion="5" name="Asteroids" width="1280" height="720"
 	         scaleMode="Letterbox" background="#0f121e" startScene="MenuScene"
 	         pixelsPerMeter="100" gravityX="0" gravityY="980">
 		<scene name="MenuScene" path="scenes/MenuScene.scene.xml"/>
 		<asset path="assets/ship.png" kind="Image"/>
+		<asset path="data/fast_ship.data.json" kind="Data"/>
+		<global script="GameState">
+			<prop name="lives" value="3"/>
+		</global>
 	</project>
 
 A scene file holds a tree of nodes. Nesting is the hierarchy, and a node's `x`, `y`, `rotation`
@@ -69,6 +73,9 @@ Current limits:
 - Only images are loaded; Audio and Font assets are listed but not used.
 
 Version history:
+- 5: global scripts (`<global script="..."><prop name value/></global>` in project.xml) and
+  assets of kind "Data" (data resources, `data/<name>.data.json`: data.odin). Version 4 files are
+  valid version 5 files.
 - 4: physics: StaticBody, DynamicBody, CharacterMover, Area, CollisionShape, RayCast and Joint
   nodes, and the project's `pixelsPerMeter`, `gravityX`, `gravityY`, `physicsDebug` and
   `physicsSmoothing`. Version 3 files are
@@ -95,7 +102,7 @@ import "core:strings"
 import sdl "vendor:sdl3"
 
 // Version written by the editor. This loader also reads older versions
-PROJECT_FORMAT_VERSION :: 4
+PROJECT_FORMAT_VERSION :: 5
 
 /*
 Node kinds a scene file can contain.
@@ -299,7 +306,7 @@ SceneRef :: struct {
 
 AssetRef :: struct {
 	path: string,
-	// "Image", "Audio" or "Font"
+	// "Image", "Audio", "Font" or "Data"
 	kind: string,
 }
 
@@ -313,6 +320,8 @@ ProjectData :: struct {
 	assets: [dynamic]AssetRef,
 	// pixelsPerMeter, gravityX / gravityY (px/s²), physicsDebug
 	physics: PhysicsSettings,
+	// Global scripts, in start order: `<global script="GameState"><prop .../></global>` (globals.odin)
+	globals: [dynamic]GlobalData,
 }
 
 ProjectError :: enum {
@@ -354,6 +363,7 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		startScene = cloneAttr(doc, 0, "startScene", ""),
 		scenes = make([dynamic]SceneRef),
 		assets = make([dynamic]AssetRef),
+		globals = make([dynamic]GlobalData),
 		physics = {
 			pixelsPerMeter = max(attrF32(doc, 0, "pixelsPerMeter", DEFAULT_PHYSICS.pixelsPerMeter), 1),
 			gravity = {attrF32(doc, 0, "gravityX", DEFAULT_PHYSICS.gravity.x), attrF32(doc, 0, "gravityY", DEFAULT_PHYSICS.gravity.y)},
@@ -367,6 +377,13 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 			append(&project.scenes, SceneRef{cloneAttr(doc, child, "name", ""), cloneAttr(doc, child, "path", "")})
 		case "asset":
 			append(&project.assets, AssetRef{cloneAttr(doc, child, "path", ""), cloneAttr(doc, child, "kind", "")})
+		case "global":
+			global := GlobalData{script = cloneAttr(doc, child, "script", ""), props = make([dynamic]ScriptPropData)}
+			for prop in childElements(doc, child) {
+				if doc.elements[prop].ident != "prop" do continue
+				append(&global.props, ScriptPropData{cloneAttr(doc, prop, "name", ""), cloneAttr(doc, prop, "value", "")})
+			}
+			append(&project.globals, global)
 		}
 	}
 	if project.startScene == "" && len(project.scenes) > 0 {
@@ -411,6 +428,12 @@ ProjectData_Destroy :: proc(project: ^ProjectData, allocator := context.allocato
 	delete(project.scenes)
 	for a in project.assets { delete(a.path); delete(a.kind) }
 	delete(project.assets)
+	for &g in project.globals {
+		delete(g.script)
+		for p in g.props { delete(p.name); delete(p.value) }
+		delete(g.props)
+	}
+	delete(project.globals)
 	delete(project.name)
 	delete(project.startScene)
 	project^ = {}

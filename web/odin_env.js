@@ -11,6 +11,45 @@ addToLibrary({
 		odinPending = lines.pop();
 		for (const line of lines) (fd === 2 ? console.error : console.log)(line);
 	},
+	// Saves (the engine's save.odin): localStorage, text in UTF-8. A blocked or full storage
+	// reports failure instead of throwing
+	odin_storage_set__deps: ["$UTF8ToString"],
+	odin_storage_set: function (key, keyLength, value, valueLength) {
+		try {
+			localStorage.setItem(UTF8ToString(key, keyLength), UTF8ToString(value, valueLength));
+			return 1;
+		} catch (e) {
+			console.error("Couldn't save: " + e);
+			return 0;
+		}
+	},
+	odin_storage_size__deps: ["$UTF8ToString", "$lengthBytesUTF8"],
+	odin_storage_size: function (key, keyLength) {
+		try {
+			const value = localStorage.getItem(UTF8ToString(key, keyLength));
+			return value === null ? -1 : lengthBytesUTF8(value);
+		} catch (e) {
+			return -1;
+		}
+	},
+	odin_storage_get__deps: ["$UTF8ToString", "$stringToUTF8Array"],
+	odin_storage_get: function (key, keyLength, buffer, capacity) {
+		try {
+			const value = localStorage.getItem(UTF8ToString(key, keyLength));
+			if (value === null) return -1;
+			const bytes = [];
+			stringToUTF8Array(value, bytes, 0, 0x7fffffff);
+			const n = Math.min(capacity, bytes.length);
+			for (let i = 0; i < n; i++) HEAPU8[buffer + i] = bytes[i];
+			return n;
+		} catch (e) {
+			return -1;
+		}
+	},
+	odin_storage_remove__deps: ["$UTF8ToString"],
+	odin_storage_remove: function (key, keyLength) {
+		try { localStorage.removeItem(UTF8ToString(key, keyLength)); } catch (e) {}
+	},
 	rand_bytes: function (ptr, len) {
 		crypto.getRandomValues(HEAPU8.subarray(ptr, ptr + len));
 	},

@@ -62,10 +62,12 @@ One script per node. The registry is global (scripts register before `main`).
 
 // The first field of every script struct: what the script is attached to
 Script :: struct {
-	// The node it's attached to
+	// The node it's attached to (nil for globals: globals.odin)
 	node: ^Node,
 	scene: ^Scene,
 	game: ^Game,
+	// Globals: skip `draw` while set
+	hidden: bool,
 }
 
 // The procedures a script can have; all optional
@@ -81,12 +83,17 @@ ScriptHooks :: struct($T: typeid) {
 	// Physics body nodes only: this body entered / left an Area (`collision.other`)
 	areaEnter: proc(self: ^T, collision: ^Collision),
 	areaExit: proc(self: ^T, collision: ^Collision),
+	// Globals only (globals.odin): the game switched to `scene`; Load_Game restored the fields
+	sceneChanged: proc(self: ^T, scene: ^Scene),
+	loaded: proc(self: ^T),
 }
 
 // A registered script
 ScriptInfo :: struct {
 	name: string,
 	type: typeid,
+	// typeid_of(^T): what JSON loading needs (save.odin)
+	pointerType: typeid,
 	size: int,
 	align: int,
 	// Where Script_Register was called, so the editor can open the file
@@ -101,6 +108,8 @@ ScriptInfo :: struct {
 	collisionExit: proc(self: rawptr, collision: ^Collision),
 	areaEnter: proc(self: rawptr, collision: ^Collision),
 	areaExit: proc(self: rawptr, collision: ^Collision),
+	sceneChanged: proc(self: rawptr, scene: ^Scene),
+	loaded: proc(self: rawptr),
 }
 
 // What an exported field holds, as the scene file and the editor see it
@@ -112,6 +121,11 @@ ScriptFieldType :: enum {
 	Vector2,
 	Color,
 	Enum,
+	// Asset handles (assets.odin): the value is the asset's path
+	Texture,
+	Sound,
+	Font,
+	Data,
 }
 
 // An exported field of a script
@@ -125,7 +139,7 @@ ScriptField :: struct {
 	defaultValue: string,
 	min: Maybe(f64),
 	max: Maybe(f64),
-	// "scene" for a string naming a scene
+	// "scene" for a string naming a scene; for a Data field, the data type it holds (`kind=EnemyStats`)
 	hint: string,
 	// Enum fields: the names, in order
 	enumNames: []string,
@@ -161,6 +175,7 @@ Script_Register :: proc "contextless" ($T: typeid, hooks: ScriptHooks(T), loc :=
 	info^ = {
 		name = name,
 		type = T,
+		pointerType = typeid_of(^T),
 		size = size_of(T),
 		align = align_of(T),
 		file = loc.file_path,
@@ -174,6 +189,8 @@ Script_Register :: proc "contextless" ($T: typeid, hooks: ScriptHooks(T), loc :=
 		collisionExit = transmute(proc(self: rawptr, collision: ^Collision))hooks.collisionExit,
 		areaEnter = transmute(proc(self: rawptr, collision: ^Collision))hooks.areaEnter,
 		areaExit = transmute(proc(self: rawptr, collision: ^Collision))hooks.areaExit,
+		sceneChanged = transmute(proc(self: rawptr, scene: ^Scene))hooks.sceneChanged,
+		loaded = transmute(proc(self: rawptr))hooks.loaded,
 	}
 
 	first := reflect.struct_field_at(T, 0)
@@ -182,7 +199,7 @@ Script_Register :: proc "contextless" ($T: typeid, hooks: ScriptHooks(T), loc :=
 		fmt.eprintfln("Script %s: its first field must be `using script: e.Script`; not registered", name)
 		return
 	}
-	info.fields = scriptFields(T)
+	info.fields = exportedFields(T)
 	registry[name] = info
 }
 
@@ -275,7 +292,8 @@ Script_SetField :: proc(self: rawptr, field: ScriptField, text: string, allocato
 		case "false", "0", "": (cast(^bool)at)^ = false
 		case: return false
 		}
-	case .String:
+	case .String, .Texture, .Sound, .Font, .Data:
+		// The handles are a struct holding a path: laid out like a string
 		(cast(^string)at)^ = strings.clone(text, allocator)
 	case .Vector2:
 		v, ok := parseVector2(text)
@@ -309,35 +327,51 @@ Script_SetField :: proc(self: rawptr, field: ScriptField, text: string, allocato
 }
 
 /*
-A description of every registered script, as JSON: what `player --describe-scripts` prints so the
-editor can show exported fields in its inspector. Fields: name, file, line, and for each field
-name, type, default, min/max (when set), hint, and enum names.
+A description of every registered script and data type, as JSON: what `player --describe-scripts`
+prints so the editor can show exported fields in its inspector. `{"scripts": [...], "data": [...]}`,
+each with name, file, line, and for each field name, type, default, min/max (when set), hint, and
+enum names.
 */
 Script_DescribeJSON :: proc(allocator := context.allocator) -> string {
 	b := strings.builder_make(allocator)
 	strings.write_string(&b, "{\"scripts\": [")
 	for info, i in Script_All() {
 		if i > 0 do strings.write_string(&b, ", ")
-		fmt.sbprintf(&b, "{{\"name\": %q, \"file\": %q, \"line\": %d, \"fields\": [", info.name, info.file, info.line)
-		for field, j in info.fields {
-			if j > 0 do strings.write_string(&b, ", ")
-			fmt.sbprintf(&b, "{{\"name\": %q, \"type\": %q, \"default\": %q, \"hint\": %q", field.name, fmt.tprint(field.type), field.defaultValue, field.hint)
-			if v, ok := field.min.?; ok do fmt.sbprintf(&b, ", \"min\": %v", v)
-			if v, ok := field.max.?; ok do fmt.sbprintf(&b, ", \"max\": %v", v)
-			if len(field.enumNames) > 0 {
-				strings.write_string(&b, ", \"enum\": [")
-				for name, k in field.enumNames {
-					if k > 0 do strings.write_string(&b, ", ")
-					fmt.sbprintf(&b, "%q", name)
-				}
-				strings.write_string(&b, "]")
-			}
-			strings.write_string(&b, "}")
-		}
-		strings.write_string(&b, "]}")
+		fmt.sbprintf(&b, "{{\"name\": %q, \"file\": %q, \"line\": %d, \"fields\": ", info.name, info.file, info.line)
+		describeFields(&b, info.fields)
+		strings.write_string(&b, "}")
+	}
+	// Data types (data.odin): the same, without hooks
+	strings.write_string(&b, "], \"data\": [")
+	for info, i in Data_All() {
+		if i > 0 do strings.write_string(&b, ", ")
+		fmt.sbprintf(&b, "{{\"name\": %q, \"file\": %q, \"line\": %d, \"fields\": ", info.name, info.file, info.line)
+		describeFields(&b, info.fields)
+		strings.write_string(&b, "}")
 	}
 	strings.write_string(&b, "]}")
 	return strings.to_string(b)
+}
+
+@(private="file")
+describeFields :: proc(b: ^strings.Builder, fields: []ScriptField) {
+	strings.write_string(b, "[")
+	for field, j in fields {
+		if j > 0 do strings.write_string(b, ", ")
+		fmt.sbprintf(b, "{{\"name\": %q, \"type\": %q, \"default\": %q, \"hint\": %q", field.name, fmt.tprint(field.type), field.defaultValue, field.hint)
+		if v, ok := field.min.?; ok do fmt.sbprintf(b, ", \"min\": %v", v)
+		if v, ok := field.max.?; ok do fmt.sbprintf(b, ", \"max\": %v", v)
+		if len(field.enumNames) > 0 {
+			strings.write_string(b, ", \"enum\": [")
+			for name, k in field.enumNames {
+				if k > 0 do strings.write_string(b, ", ")
+				fmt.sbprintf(b, "%q", name)
+			}
+			strings.write_string(b, "]")
+		}
+		strings.write_string(b, "}")
+	}
+	strings.write_string(b, "]")
 }
 
 // Runs scripts' `ready` for nodes that haven't had it yet. Called by Scene_Update before updates
@@ -351,9 +385,9 @@ Scene_ReadyScripts :: proc(scene: ^Scene) {
 	}
 }
 
-// The exported fields of a script type
-@(private="file")
-scriptFields :: proc(T: typeid) -> []ScriptField {
+// The exported fields of a script or data type
+@(private)
+exportedFields :: proc(T: typeid) -> []ScriptField {
 	fields := make([dynamic]ScriptField)
 	for f in reflect.struct_fields_zipped(T) {
 		options, exported := reflect.struct_tag_lookup(f.tag, "export")
@@ -367,11 +401,15 @@ scriptFields :: proc(T: typeid) -> []ScriptField {
 		case f.type.id == string: field.type = .String
 		case f.type.id == [2]f32: field.type = .Vector2
 		case f.type.id == sdl.Color: field.type = .Color
+		case f.type.id == TextureAsset: field.type = .Texture
+		case f.type.id == SoundAsset: field.type = .Sound
+		case f.type.id == FontAsset: field.type = .Font
+		case f.type.id == DataAsset: field.type = .Data
 		case reflect.is_enum(base):
 			field.type = .Enum
 			field.enumNames = reflect.enum_field_names(f.type.id)
 		case:
-			log.warnf("%v.%s: %v can't be exported (use f32, f64, int, i32, bool, string, [2]f32, an enum or sdl.Color)", T, f.name, f.type.id)
+			log.warnf("%v.%s: %v can't be exported (use f32, f64, int, i32, bool, string, [2]f32, an enum, sdl.Color or an asset handle)", T, f.name, f.type.id)
 			continue
 		}
 		for option in tagOptions(options) {

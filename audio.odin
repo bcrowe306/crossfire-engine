@@ -60,9 +60,9 @@ Returns:
 - false (logged) if it couldn't be loaded or played
 
 Example:
-	e.Game_PlaySound(self.node.scene.game, "assets/laser.wav")
+	e.Game_PlaySound(self.game, "assets/laser.wav")  // or a SoundAsset (assets.odin)
 */
-Game_PlaySound :: proc(game: ^Game, path: string) -> bool {
+Game_PlaySoundFile :: proc(game: ^Game, path: string) -> bool {
 	if game.mixer == nil do return false
 	audio := game.resourceManager->loadAudio(game.projectDir == "" ? path : JoinPath(game.projectDir, path))
 	if audio == nil do return false

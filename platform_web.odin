@@ -79,3 +79,34 @@ Platform_LoadTexture :: proc(renderer: ^sdl.Renderer, path: string) -> ^sdl.Text
 	defer sdl.DestroySurface(surface)
 	return sdl.CreateTextureFromSurface(renderer, surface)
 }
+
+// Saves in the browser: localStorage (web/odin_env.js), keyed "<game>/<slot>"
+foreign import storage "env.o"
+
+@(default_calling_convention = "c")
+foreign storage {
+	odin_storage_set :: proc(key: [^]u8, keyLength: i32, value: [^]u8, valueLength: i32) -> i32 ---
+	odin_storage_size :: proc(key: [^]u8, keyLength: i32) -> i32 ---
+	odin_storage_get :: proc(key: [^]u8, keyLength: i32, buffer: [^]u8, capacity: i32) -> i32 ---
+	odin_storage_remove :: proc(key: [^]u8, keyLength: i32) ---
+}
+
+Platform_SaveWrite :: proc(name: string, data: []byte) -> bool {
+	return odin_storage_set(raw_data(name), i32(len(name)), raw_data(data), i32(len(data))) != 0
+}
+
+Platform_SaveRead :: proc(name: string) -> ([]byte, bool) {
+	size := odin_storage_size(raw_data(name), i32(len(name)))
+	if size < 0 do return nil, false
+	buffer := make([]byte, size, context.temp_allocator)
+	got := odin_storage_get(raw_data(name), i32(len(name)), raw_data(buffer), size)
+	return buffer[:max(got, 0)], got >= 0
+}
+
+Platform_SaveExists :: proc(name: string) -> bool {
+	return odin_storage_size(raw_data(name), i32(len(name))) >= 0
+}
+
+Platform_SaveDelete :: proc(name: string) {
+	odin_storage_remove(raw_data(name), i32(len(name)))
+}

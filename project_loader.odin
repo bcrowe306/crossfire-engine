@@ -81,6 +81,11 @@ Example:
 Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string) -> bool {
 	game.backgroundColor = project.background
 	game.physics = project.physics
+	if game.name == "" do game.name = strings.clone(project.name)
+	// Data, Global and Save_Game use the game that's playing
+	currentGame = game
+	// Globals exist before the scenes (their nodes' scripts may look them up in `ready`)
+	Globals_Start(game, project.globals[:])
 	delete(game.projectDir)
 	game.projectDir = strings.clone(projectDir)
 	ok := true
@@ -101,6 +106,7 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 	if project.startScene != "" {
 		game->switchScene(project.startScene)
 	}
+	Globals_Ready(game)
 	return ok
 }
 
