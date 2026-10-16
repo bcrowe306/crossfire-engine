@@ -207,6 +207,17 @@ Scene_Build :: proc(scene: ^Scene, data: ^SceneData, projectDir: string, allocat
 			ray.enabled = node.enabled
 			ray.excludeParent = node.excludeParent
 			n = ray
+		case .Joint:
+			joint := CreateJoint(scene, node.jointKind)
+			allocator := Node_GetAllocator(joint)
+			joint.bodyA = strings.clone(node.bodyA, allocator)
+			joint.bodyB = strings.clone(node.bodyB, allocator)
+			joint.offset = node.jointOffset
+			joint.enableLimit, joint.lower, joint.upper = node.enableLimit, node.lower, node.upper
+			joint.enableMotor, joint.motorSpeed, joint.maxMotor = node.enableMotor, node.motorSpeed, node.maxMotor
+			joint.enableSpring, joint.hertz, joint.dampingRatio = node.enableSpring, node.hertz, node.dampingRatio
+			joint.collideConnected = node.collideConnected
+			n = joint
 		}
 		if Node_IsPhysicsBody(n) {
 			body := cast(^PhysicsBody)n

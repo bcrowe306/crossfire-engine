@@ -69,8 +69,9 @@ Current limits:
 - Only images are loaded; Audio and Font assets are listed but not used.
 
 Version history:
-- 4: physics: StaticBody, DynamicBody, CharacterMover, Area, CollisionShape and RayCast nodes, and
-  the project's `pixelsPerMeter`, `gravityX`, `gravityY` and `physicsDebug`. Version 3 files are
+- 4: physics: StaticBody, DynamicBody, CharacterMover, Area, CollisionShape, RayCast and Joint
+  nodes, and the project's `pixelsPerMeter`, `gravityX`, `gravityY`, `physicsDebug` and
+  `physicsSmoothing`. Version 3 files are
   valid version 4 files.
 - 3: a node can have a script: a `<script name="...">` child element holding `<prop name="..."
   value="..."/>` values for its exported fields (script.odin). Version 2 files are valid version 3
@@ -120,6 +121,8 @@ SceneNodeKind :: enum {
 	CollisionShape,
 	// Casts a ray every physics step and reports the first hit
 	RayCast,
+	// Connects two physics bodies: a hinge, rope, spring, slider, weld or wheel
+	Joint,
 }
 
 /*
@@ -152,6 +155,7 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.Area           = {"A region that reports bodies entering and leaving it: pickups, triggers"},
 	.CollisionShape = {"The shape of the physics body above it: rectangle, circle, capsule, polygon, segment"},
 	.RayCast        = {"A ray that reports the first physics body in its way: line of sight, ground checks"},
+	.Joint          = {"Connects two physics bodies: a hinge, rope, spring, slider, weld or wheel"},
 }
 
 /*
@@ -228,6 +232,24 @@ SceneNodeData :: struct {
 	target: [2]f32,
 	enabled: bool,
 	excludeParent: bool,
+	// Joint (physics_joints.odin): `joint` (the kind), `bodyA` / `bodyB` (names or paths; bodyA
+	// "" = the body it's under, or the world), `offsetX`/`offsetY` (Distance: body B's anchor),
+	// `limit`, `lower`, `upper`, `motor`, `motorSpeed`, `maxMotor`, `spring`, `hertz`, `damping`,
+	// `collideConnected`
+	jointKind: JointKind,
+	bodyA: string,
+	bodyB: string,
+	jointOffset: [2]f32,
+	enableLimit: bool,
+	lower: f32,
+	upper: f32,
+	enableMotor: bool,
+	motorSpeed: f32,
+	maxMotor: f32,
+	enableSpring: bool,
+	hertz: f32,
+	dampingRatio: f32,
+	collideConnected: bool,
 }
 
 // A script field's value in a scene file: `<prop name="speed" value="250"/>`
@@ -260,6 +282,8 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	target = {0, 50},
 	enabled = true,
 	excludeParent = true,
+	jointOffset = {0, 100},
+	dampingRatio = 0.5,
 }
 
 SceneData :: struct {
@@ -334,6 +358,7 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 			pixelsPerMeter = max(attrF32(doc, 0, "pixelsPerMeter", DEFAULT_PHYSICS.pixelsPerMeter), 1),
 			gravity = {attrF32(doc, 0, "gravityX", DEFAULT_PHYSICS.gravity.x), attrF32(doc, 0, "gravityY", DEFAULT_PHYSICS.gravity.y)},
 			debugDraw = attrBool(doc, 0, "physicsDebug", false),
+			smoothing = attrBool(doc, 0, "physicsSmoothing", true),
 		},
 	}
 	for child in childElements(doc, 0) {
@@ -406,6 +431,8 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		for prop in node.props { delete(prop.name); delete(prop.value) }
 		delete(node.props)
 		delete(node.points)
+		delete(node.bodyA)
+		delete(node.bodyB)
 	}
 	delete(scene.nodes)
 	delete(scene.name)
@@ -590,6 +617,20 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.target = {attrF32(doc, element, "targetX", DEFAULT_SCENE_NODE.target.x), attrF32(doc, element, "targetY", DEFAULT_SCENE_NODE.target.y)}
 	node.enabled = attrBool(doc, element, "enabled", true)
 	node.excludeParent = attrBool(doc, element, "excludeParent", true)
+	node.jointKind = attrEnum(doc, element, "joint", JointKind.Revolute)
+	node.bodyA = cloneAttr(doc, element, "bodyA", "")
+	node.bodyB = cloneAttr(doc, element, "bodyB", "")
+	node.jointOffset = {attrF32(doc, element, "offsetX", DEFAULT_SCENE_NODE.jointOffset.x), attrF32(doc, element, "offsetY", DEFAULT_SCENE_NODE.jointOffset.y)}
+	node.enableLimit = attrBool(doc, element, "limit", false)
+	node.lower = attrF32(doc, element, "lower", 0)
+	node.upper = attrF32(doc, element, "upper", 0)
+	node.enableMotor = attrBool(doc, element, "motor", false)
+	node.motorSpeed = attrF32(doc, element, "motorSpeed", 0)
+	node.maxMotor = attrF32(doc, element, "maxMotor", 0)
+	node.enableSpring = attrBool(doc, element, "spring", false)
+	node.hertz = attrF32(doc, element, "hertz", 0)
+	node.dampingRatio = attrF32(doc, element, "damping", DEFAULT_SCENE_NODE.dampingRatio)
+	node.collideConnected = attrBool(doc, element, "collideConnected", false)
 
 	index := len(scene.nodes)
 	append(&scene.nodes, node)

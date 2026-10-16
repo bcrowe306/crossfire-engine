@@ -415,6 +415,15 @@ physics_debug_draw :: proc(t: ^testing.T) {
 	box(scene, ground, {60, 20})
 	ray := CreateRayCast(scene, {0, 30})
 	ray.position = {10, 0}
+	// A joint pinning a small body to the world at (80, 80): its anchor ring is drawn
+	pinned := CreateDynamicBody(scene)
+	pinned.name = "Pinned"
+	pinned.position = {80, 80}
+	box(scene, pinned, {4, 4})
+	pin := CreateJoint(scene, .Revolute)
+	pin.position = {80, 80}
+	pin.bodyB = "Pinned"
+	Physics_SetGravity(scene, {0, 0})
 	scene.physics.settings.debugDraw = true
 	run(scene, 0.1)
 
@@ -430,6 +439,10 @@ physics_debug_draw :: proc(t: ^testing.T) {
 	}
 	// The ground's outline (static: green) on its top edge, nothing inside it; the ray (yellow)
 	testing.expectf(t, pixel(surface, 50, 40).g == 200, "outline %v", pixel(surface, 50, 40))
-	testing.expect_value(t, pixel(surface, 50, 50).a, 0)
+	// Filled, translucent (blended, not opaque)
+	inside := pixel(surface, 50, 50)
+	testing.expectf(t, inside.a > 0 && inside.a < 255 && inside.g > inside.r, "fill %v", inside)
 	testing.expectf(t, pixel(surface, 10, 15).r == 255, "ray %v", pixel(surface, 10, 15))
+	ring := pixel(surface, 84, 80)
+	testing.expectf(t, ring.r == 255 && ring.g == 220, "joint anchor %v", ring)
 }

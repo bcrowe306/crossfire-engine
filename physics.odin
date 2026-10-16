@@ -4,7 +4,6 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import b2 "box2d"
-import sdl "vendor:sdl3"
 
 /*
 The physics world: Box2D 3.1 (the box2d/ package), one world per scene, created when the scene's
@@ -32,9 +31,11 @@ PhysicsSettings :: struct {
 	gravity: [2]f32,
 	// Draw every body's shapes over the scene (`Physics_DrawDebug`)
 	debugDraw: bool,
+	// Draw dynamic bodies between their last two physics steps (physics_debug.odin)
+	smoothing: bool,
 }
 
-DEFAULT_PHYSICS :: PhysicsSettings{pixelsPerMeter = 100, gravity = {0, 980}}
+DEFAULT_PHYSICS :: PhysicsSettings{pixelsPerMeter = 100, gravity = {0, 980}, smoothing = true}
 
 // Seconds per physics step (60 per second)
 PHYSICS_TIMESTEP :: 1.0 / 60.0
@@ -51,8 +52,15 @@ PhysicsWorld :: struct {
 	settings: PhysicsSettings,
 	// Time not yet simulated
 	accumulator: f64,
+	// How far between the last two steps this frame is drawn (0-1), for smoothing
+	alpha: f32,
 	bodies: [dynamic]^PhysicsBody,
 	rayCasts: [dynamic]^RayCast,
+	joints: [dynamic]^Joint,
+	// Every Box2D shape's body and node (physics_events.odin)
+	shapes: map[b2.ShapeId]ShapeOwner,
+	// The body joints attach to when they have no body A: the world itself (static, at the origin)
+	ground: b2.BodyId,
 }
 
 /*
@@ -66,6 +74,8 @@ Scene_GetPhysics :: proc(scene: ^Scene) -> ^PhysicsWorld {
 	if scene.game != nil && scene.game.physics.pixelsPerMeter > 0 do world.settings = scene.game.physics
 	world.bodies = make([dynamic]^PhysicsBody)
 	world.rayCasts = make([dynamic]^RayCast)
+	world.joints = make([dynamic]^Joint)
+	world.shapes = make(map[b2.ShapeId]ShapeOwner)
 	def := b2.DefaultWorldDef()
 	def.gravity = world.settings.gravity / world.settings.pixelsPerMeter
 	world.id = b2.CreateWorld(def)
@@ -87,6 +97,8 @@ Physics_Destroy :: proc(scene: ^Scene) {
 	if b2.World_IsValid(world.id) do b2.DestroyWorld(world.id)
 	delete(world.bodies)
 	delete(world.rayCasts)
+	delete(world.joints)
+	delete(world.shapes)
 	free(world)
 	scene.physics = nil
 }
@@ -106,6 +118,10 @@ Physics_Sync :: proc(scene: ^Scene) {
 			buildShapes(world, body)
 		}
 	}
+	// Joints once both their bodies exist (physics_joints.odin)
+	for joint in world.joints {
+		if joint.inScene && !b2.Joint_IsValid(joint.jointId) && !joint.failed do createJoint(world, joint)
+	}
 }
 
 /*
@@ -122,11 +138,14 @@ Physics_Update :: proc(scene: ^Scene, deltaTime: f64) {
 		world.accumulator -= PHYSICS_TIMESTEP
 		Physics_Sync(scene)
 		pushNodePoses(world)
+		rememberPoses(world)
 		b2.World_Step(world.id, PHYSICS_TIMESTEP, PHYSICS_SUBSTEPS)
 		pullBodyPoses(world)
 		sendEvents(world)
 		updateRayCasts(world)
 	}
+	// What's left of the frame's time: how far toward the next step drawing is (smoothing)
+	world.alpha = f32(world.accumulator / PHYSICS_TIMESTEP)
 }
 
 // What a ray (or `Physics_RayCast`) hit
@@ -267,34 +286,8 @@ CharacterMover_Move :: proc(mover: ^CharacterMover, deltaTime: f64) {
 
 	Node_SetWorldPosition(mover, position * ppm)
 	moverContacts(mover, all.bodies[:all.count])
-}
-
-/*
-Draws the outlines of every shape in the scene's physics world, through `view` (world to screen).
-`Scene_DrawWithView` calls it when `settings.debugDraw` is on.
-*/
-Physics_DrawDebug :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D) {
-	world := scene.physics
-	if world == nil do return
-	SetDrawState(view)
-	defer SetDrawState(TRANSFORM2D_IDENTITY)
-	ppm := world.settings.pixelsPerMeter
-	for body in world.bodies {
-		if !b2.Body_IsValid(body.bodyId) do continue
-		color := debugColor(body)
-		xf := b2.Body_GetTransform(body.bodyId)
-		shapes: [32]b2.ShapeId
-		for shapeId in b2.Body_GetShapes(body.bodyId, shapes[:]) {
-			drawShapeOutline(renderer, shapeId, xf, ppm, color)
-		}
-	}
-	for ray in world.rayCasts {
-		if !ray.inScene || !ray.enabled do continue
-		xf := Node_GetWorldTransform(ray)
-		from := xf.origin
-		to := ray.colliding ? ray.point : Transform2D_Apply(xf, ray.target)
-		DrawLine(renderer, {from.x, from.y}, {to.x, to.y}, ray.colliding ? {255, 90, 90, 255} : {255, 220, 80, 255})
-	}
+	// Moved by code: drawn where it is, not smoothed
+	mover.previousPosition, mover.previousRotation = mover.position, mover.rotation
 }
 
 // INTERNAL
@@ -340,7 +333,11 @@ createBody :: proc(world: ^PhysicsWorld, body: ^PhysicsBody) {
 buildShapes :: proc(world: ^PhysicsWorld, body: ^PhysicsBody) {
 	body.shapesDirty = false
 	existing: [32]b2.ShapeId
-	for shapeId in b2.Body_GetShapes(body.bodyId, existing[:]) do b2.DestroyShape(shapeId, false)
+	for shapeId in b2.Body_GetShapes(body.bodyId, existing[:]) {
+		// Its late end events still find the body (physics_events.odin)
+		if owner, ok := &world.shapes[shapeId]; ok do owner.expires = 2
+		b2.DestroyShape(shapeId, false)
+	}
 
 	ppm := world.settings.pixelsPerMeter
 	bodyWorld := Node_GetWorldTransform(body)
@@ -357,7 +354,7 @@ buildShapes :: proc(world: ^PhysicsWorld, body: ^PhysicsBody) {
 	def.enableContactEvents = body.kind != .Area
 	def.updateBodyMass = false
 
-	visit :: proc(node: ^Node, body: ^PhysicsBody, frame: Transform2D, ppm: f32, def: ^b2.ShapeDef) {
+	visit :: proc(world: ^PhysicsWorld, node: ^Node, body: ^PhysicsBody, frame: Transform2D, ppm: f32, def: ^b2.ShapeDef) {
 		for child in node.children {
 			// A body under this one owns the shapes under it
 			if Node_IsPhysicsBody(child) do continue
@@ -366,12 +363,13 @@ buildShapes :: proc(world: ^PhysicsWorld, body: ^PhysicsBody) {
 				if !shape.disabled {
 					local := Transform2D_Multiply(frame, Node_GetWorldTransform(shape))
 					createShape(body, shape, local, ppm, def)
+					if b2.Shape_IsValid(shape.shapeId) do world.shapes[shape.shapeId] = {body = body, shape = shape}
 				}
 			}
-			visit(child, body, frame, ppm, def)
+			visit(world, child, body, frame, ppm, def)
 		}
 	}
-	visit(body, body, frame, ppm, &def)
+	visit(world, body, body, frame, ppm, &def)
 	b2.Body_ApplyMassFromShapes(body.bodyId)
 }
 
@@ -495,95 +493,12 @@ setWorldPose :: proc(node: ^Node, position: [2]f32, rotation: f32) {
 }
 
 // a - b in degrees, in -180..180
-@(private="file")
+@(private)
 angleDifference :: proc(a, b: f32) -> f32 {
 	d := math.mod(a - b, 360)
 	if d > 180 do d -= 360
 	if d < -180 do d += 360
 	return d
-}
-
-// Box2D's contact and sensor events as node events
-@(private="file")
-sendEvents :: proc(world: ^PhysicsWorld) {
-	ppm := world.settings.pixelsPerMeter
-	contacts := b2.World_GetContactEvents(world.id)
-	for event in contacts.beginEvents[:contacts.beginCount] {
-		if !b2.Shape_IsValid(event.shapeIdA) || !b2.Shape_IsValid(event.shapeIdB) do continue
-		a, b := bodyOfShape(event.shapeIdA), bodyOfShape(event.shapeIdB)
-		shapeA := cast(^CollisionShape)b2.Shape_GetUserData(event.shapeIdA)
-		shapeB := cast(^CollisionShape)b2.Shape_GetUserData(event.shapeIdB)
-		point: [2]f32
-		if event.manifold.pointCount > 0 do point = event.manifold.points[0].point * ppm
-		normal := event.manifold.normal
-		notifyCollision(a, b, shapeA, shapeB, point, normal, true)
-		notifyCollision(b, a, shapeB, shapeA, point, -normal, true)
-	}
-	for event in contacts.endEvents[:contacts.endCount] {
-		// Ends caused by a destroyed body or shape have nothing left to report to
-		if !b2.Shape_IsValid(event.shapeIdA) || !b2.Shape_IsValid(event.shapeIdB) do continue
-		a, b := bodyOfShape(event.shapeIdA), bodyOfShape(event.shapeIdB)
-		shapeA := cast(^CollisionShape)b2.Shape_GetUserData(event.shapeIdA)
-		shapeB := cast(^CollisionShape)b2.Shape_GetUserData(event.shapeIdB)
-		notifyCollision(a, b, shapeA, shapeB, {}, {}, false)
-		notifyCollision(b, a, shapeB, shapeA, {}, {}, false)
-	}
-	sensors := b2.World_GetSensorEvents(world.id)
-	for event in sensors.beginEvents[:sensors.beginCount] {
-		if !b2.Shape_IsValid(event.sensorShapeId) || !b2.Shape_IsValid(event.visitorShapeId) do continue
-		notifyCollision(bodyOfShape(event.sensorShapeId), bodyOfShape(event.visitorShapeId),
-			cast(^CollisionShape)b2.Shape_GetUserData(event.sensorShapeId),
-			cast(^CollisionShape)b2.Shape_GetUserData(event.visitorShapeId), {}, {}, true)
-	}
-	for event in sensors.endEvents[:sensors.endCount] {
-		if !b2.Shape_IsValid(event.sensorShapeId) || !b2.Shape_IsValid(event.visitorShapeId) do continue
-		notifyCollision(bodyOfShape(event.sensorShapeId), bodyOfShape(event.visitorShapeId),
-			cast(^CollisionShape)b2.Shape_GetUserData(event.sensorShapeId),
-			cast(^CollisionShape)b2.Shape_GetUserData(event.visitorShapeId), {}, {}, false)
-	}
-}
-
-// Sends one side of a collision: the body's event, then its script's hook
-@(private="file")
-notifyCollision :: proc(body, other: ^PhysicsBody, shape, otherShape: ^CollisionShape, point, normal: [2]f32, enter: bool) {
-	if body == nil || other == nil || !body.inScene do return
-	collision := Collision{body = body, other = other, shape = shape, otherShape = otherShape, point = point, normal = normal}
-	subject := enter ? &body.onCollisionEnter : &body.onCollisionExit
-	subject->notify(body, EventData(rawptr(&collision)))
-	if info := body.script.info; info != nil {
-		hook := enter ? info.collisionEnter : info.collisionExit
-		if hook != nil do hook(body.script.data, &collision)
-	}
-}
-
-// A mover's contacts come from its moves (Box2D makes no contacts between kinematic and static
-// bodies): bodies it started or stopped touching get events, on both sides
-@(private="file")
-moverContacts :: proc(mover: ^CharacterMover, touched: []^PhysicsBody) {
-	now := make([dynamic]^PhysicsBody, context.temp_allocator)
-	for body in touched {
-		known := false
-		for b in now do if b == body do known = true
-		if !known do append(&now, body)
-	}
-	for body in now {
-		was := false
-		for b in mover.touching do if b == body do was = true
-		if !was {
-			notifyCollision(mover, body, nil, nil, {}, {}, true)
-			notifyCollision(body, mover, nil, nil, {}, {}, true)
-		}
-	}
-	for body in mover.touching {
-		still := false
-		for b in now do if b == body do still = true
-		if !still && Node_IsPhysicsBody(body) {
-			notifyCollision(mover, body, nil, nil, {}, {}, false)
-			notifyCollision(body, mover, nil, nil, {}, {}, false)
-		}
-	}
-	clear(&mover.touching)
-	append(&mover.touching, ..now[:])
 }
 
 // The mover's capsule in body space (meters), from its first Capsule or Circle shape
@@ -629,50 +544,4 @@ RayCast_ForceUpdate :: proc(ray: ^RayCast) {
 	}
 	hit := Physics_RayCast(ray.scene, xf.origin, Transform2D_Apply(xf, ray.target), ray.collisionMask, exclude)
 	ray.colliding, ray.point, ray.normal, ray.collider, ray.colliderShape = hit.hit, hit.point, hit.normal, hit.body, hit.shape
-}
-
-@(private="file")
-debugColor :: proc(body: ^PhysicsBody) -> sdl.Color {
-	switch body.kind {
-	case .Static:    return {120, 200, 120, 255}
-	case .Dynamic:   return b2.Body_IsAwake(body.bodyId) ? {110, 170, 255, 255} : {90, 110, 150, 255}
-	case .Character: return {255, 170, 70, 255}
-	case .Area:      return {200, 120, 255, 255}
-	}
-	return {255, 255, 255, 255}
-}
-
-@(private="file")
-drawShapeOutline :: proc(renderer: ^sdl.Renderer, shapeId: b2.ShapeId, xf: b2.Transform, ppm: f32, color: sdl.Color) {
-	toPixels :: proc(xf: b2.Transform, p: b2.Vec2, ppm: f32) -> sdl.FPoint {
-		w := b2.TransformPoint(xf, p) * ppm
-		return {w.x, w.y}
-	}
-	#partial switch b2.Shape_GetType(shapeId) {
-	case .polygonShape:
-		polygon := b2.Shape_GetPolygon(shapeId)
-		points := make([]sdl.FPoint, polygon.count, context.temp_allocator)
-		for &p, i in points do p = toPixels(xf, polygon.vertices[i], ppm)
-		DrawPolygonOutline(renderer, points, color)
-	case .circleShape:
-		circle := b2.Shape_GetCircle(shapeId)
-		center := toPixels(xf, circle.center, ppm)
-		DrawCircleOutline(renderer, center, circle.radius * ppm, color)
-		// A spoke, so rotation shows
-		edge := toPixels(xf, circle.center + {circle.radius, 0}, ppm)
-		DrawLine(renderer, center, edge, color)
-	case .capsuleShape:
-		capsule := b2.Shape_GetCapsule(shapeId)
-		a, b := toPixels(xf, capsule.center1, ppm), toPixels(xf, capsule.center2, ppm)
-		radius := capsule.radius * ppm
-		DrawCircleOutline(renderer, a, radius, color)
-		DrawCircleOutline(renderer, b, radius, color)
-		side := linalg.normalize0([2]f32{b.x - a.x, b.y - a.y})
-		offset := [2]f32{-side.y, side.x} * radius
-		DrawLine(renderer, {a.x + offset.x, a.y + offset.y}, {b.x + offset.x, b.y + offset.y}, color)
-		DrawLine(renderer, {a.x - offset.x, a.y - offset.y}, {b.x - offset.x, b.y - offset.y}, color)
-	case .segmentShape:
-		segment := b2.Shape_GetSegment(shapeId)
-		DrawLine(renderer, toPixels(xf, segment.point1, ppm), toPixels(xf, segment.point2, ppm), color)
-	}
 }

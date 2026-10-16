@@ -240,7 +240,8 @@ Returns:
 - offset × zoom × rotate(-world rotation) × translate(-world position)
 */
 Camera2D_ViewTransform :: proc(camera: ^Camera2D) -> Transform2D {
-	world := Node_GetWorldTransform(camera)
+	// As drawn: a camera under a smoothed body moves with what's drawn, not ahead of it
+	world := Node_GetRenderWorldTransform(camera)
 	zoom := cameraZoom(camera)
 	view := Transform2D_Make(camera.offset, 0, {zoom, zoom})
 	view = Transform2D_Multiply(view, Transform2D_Make({0, 0}, -Transform2D_Rotation(world), {1, 1}))

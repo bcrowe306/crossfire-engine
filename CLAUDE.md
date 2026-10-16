@@ -58,11 +58,14 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `player_web.odin` | The browser player: `odin_web_main` (called by `web/main.c`), `Web_Context` (Emscripten's malloc, a per-frame temp arena, console logger), `Player_StartWeb` (Emscripten's main loop drives `Application_Frame`) |
 | `web/` | Files the web export links: `main.c` (C `main`), `odin_env.js` and `odin_env_pre.js` (what Odin's js runtime imports from "odin_env") |
 | `paths.odin` | `JoinPath` ("/"-separated, works everywhere) |
-| `physics.odin` | **Physics world** (Box2D, one per scene): settings and units, `Physics_Sync` / `Physics_Update` (fixed steps, pose sync, events, ray casts), `Physics_RayCast`, `CharacterMover_Move`, `Physics_DrawDebug` |
+| `physics.odin` | **Physics world** (Box2D, one per scene): settings and units, `Physics_Sync` / `Physics_Update` (fixed steps, pose sync, ray casts), `Physics_RayCast`, `CharacterMover_Move` |
+| `physics_events.odin` | Contact and Area events per body pair (counted over shape pairs), `PhysicsBody_GetAreas` / `IsInArea` / `GetContacts` / `IsTouching`, exits when a body is removed, the world's shape table |
+| `physics_joints.odin` | `Joint` nodes: Revolute, Distance, Prismatic, Weld, Wheel (anchor = the node; body A = its body or the world; body B by name), limits, motors, springs |
+| `physics_debug.odin` | **Smoothing** (`Node_GetRenderLocalTransform` / `Node_GetRenderWorldTransform`) and debug drawing (`Physics_DrawDebug`, `Physics_SetDebugDraw`) |
 | `physics_nodes.odin` | Physics nodes: `PhysicsBody` (layers, surface, `onCollisionEnter/Exit`), `StaticBody`, `DynamicBody` (+ velocity, impulse, force), `CharacterMover`, `Area` (+ `Area_GetOverlaps`), `CollisionShape`, `RayCast`, `Collision` |
 | `box2d/` | Box2D 3.1.1 bindings: a copy of Odin's `vendor:box2d` linking our own `box2d/lib/` (why: its doc comment). `lib/` is built, not committed |
 | `third_party/box2d`, `tools/build_box2d.sh` | Box2D's sources (submodule) and the script that compiles them (no CMake) |
-| `physics_test.odin` | Tests: falling and landing, events, layers, Areas, ray casts, the mover (landing, walls, pushing), shapes with baked transforms, removal, scene files, debug drawing |
+| `physics_test.odin`, `physics2_test.odin` | Tests: falling and landing, events, layers, Areas, ray casts, the mover (landing, walls, pushing), shapes with baked transforms, removal, scene files, debug drawing; smoothing at 144 fps, areas seen from bodies, one event per body pair, exits on removal, every joint kind |
 | `audio.odin` | SDL3_mixer setup (`Audio_Init`: no device means silence, not an error), loading, and `Game_PlaySound(game, path)` (paths relative to `game.projectDir`, cached). The same on desktop and web |
 | `player/main.odin` | The **player** for projects without scripts: calls `Player_Main` (`Player_Run` with the command line; nothing in the browser). A project with scripts gets its own generated main that also imports its `scripts` package. Used by the editor's Play and, later, exports |
 | `script_test.odin` | Tests: script registration, fields and tags, lifecycle on a node, bad values, `Scene_FindNode` paths, format v3 scripts |
@@ -143,8 +146,22 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
   bigger, and the velocity is clipped by hand: `b2ClipVector` skips planes with `push == 0`.
 - Box2D makes no contacts between kinematic and static bodies: mover collision events come from
   its move's contact planes (`moverContacts`).
-- Events are sent after each step, outside Box2D. Shape and body ids in end events can be stale:
-  check `Shape_IsValid`.
+- **Events are per body pair**: each body counts its contacts per other body (`contacts`, and
+  `areas`); enter on the first shape pair, exit on the last. Box2D reports the ends of destroyed
+  shapes' contacts a step later with stale ids, so events are looked up in the world's `shapes`
+  table (body and node per shape id), never through the ids: rebuilt shapes stay mapped to their
+  living body for two steps; a removed body's shapes are dropped after `physicsForgetBody` sent
+  everyone their exits. Scene_ProcessQueues walks its remove queue by index: those exits may
+  queue more removals.
+- **Smoothing** (Box2D's advice: fixed step + "Fix Your Timestep!"): only drawing is interpolated.
+  `node.position` stays the simulated pose; `drawOrder`, `Camera2D_ViewTransform` and the debug
+  drawing use `Node_GetRenderWorldTransform`, which blends dynamic bodies between
+  `previousPosition` (set before each step, after code moved nodes, so teleports don't streak)
+  and the current pose by `world.alpha`. New code that draws a node at its position should use
+  the render transform too.
+- **Joints** are created in `Physics_Sync` once both bodies exist, from their pose then; Box2D
+  destroys a joint with either body. Units: degrees and px in, radians and meters to Box2D;
+  torque / ppm², force / ppm.
 - `scene.physicsPaused` stops stepping (bodies stay queryable); the editor preview sets it.
   CollisionShape has a `getBounds` (its extent), so editors can pick and outline it.
 - The web build links `box2d/lib/box2d_web.o`: one relocatable object, because Odin keeps plain C

@@ -136,7 +136,9 @@ Scene_GetNode :: proc(scene: ^Scene, nodeId: EntityId) -> ^Node {
 }
 
 Scene_ProcessQueues :: proc(scene: ^Scene) {
-	for nodeId in scene.removeQueue {
+	// By index: removing a node can queue more removals (a collision exit's handler)
+	for i := 0; i < len(scene.removeQueue); i += 1 {
+		nodeId := scene.removeQueue[i]
 		node := findQueuedOrLive(scene, nodeId)
 		if node != nil do removeSubtree(scene, node)
 	}
@@ -247,7 +249,8 @@ drawOrder :: proc(scene: ^Scene) -> []DrawItem {
 	items := make([dynamic]DrawItem, 0, len(scene.nodes), context.temp_allocator)
 	visit :: proc(items: ^[dynamic]DrawItem, node: ^Node, parentWorld: Transform2D, parentTint: sdl.Color) {
 		if !node.inScene || !node.visible do return
-		world := Transform2D_Multiply(parentWorld, Node_GetLocalTransform(node))
+		// Smoothed for dynamic bodies (physics_debug.odin)
+		world := Transform2D_Multiply(parentWorld, Node_GetRenderLocalTransform(node))
 		tint := multiplyColor(parentTint, node.tint)
 		append(items, DrawItem{node, world, tint})
 		for child in node.children do visit(items, child, world, tint)

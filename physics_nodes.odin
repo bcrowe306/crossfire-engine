@@ -81,6 +81,16 @@ PhysicsBody :: struct {
 	onCollisionEnter: EventSubject,
 	// They stopped touching
 	onCollisionExit: EventSubject,
+	// This body entered / left an Area (`Collision.other` is the Area)
+	onAreaEnter: EventSubject,
+	onAreaExit: EventSubject,
+	// Bodies touching it (for an Area: inside it) and the Areas it's in, counted per shape pair
+	// (internal: use PhysicsBody_GetContacts / PhysicsBody_GetAreas, physics_events.odin)
+	contacts: [dynamic]BodyContact,
+	areas: [dynamic]BodyContact,
+	// Its local pose before the last step, for smoothing (physics_debug.odin)
+	previousPosition: [2]f32,
+	previousRotation: f32,
 
 	// The Box2D body (internal; valid once the body is in the world)
 	bodyId: b2.BodyId,
@@ -175,7 +185,7 @@ CollisionShape :: struct {
 	height: f32,
 	// Polygon, Segment: points in the node's space
 	points: [dynamic][2]f32,
-	// A disabled shape is left out of its body
+	// Left out of its body
 	disabled: bool,
 	// The Box2D shape (internal)
 	shapeId: b2.ShapeId,
@@ -375,26 +385,10 @@ DynamicBody_GetMass :: proc(body: ^DynamicBody) -> f32 {
 
 /*
 Bodies inside an Area right now (temp allocated). Areas see bodies whose layers are in their mask.
+Kept up to date by every physics step (physics_events.odin).
 */
 Area_GetOverlaps :: proc(area: ^Area, allocator := context.temp_allocator) -> []^PhysicsBody {
-	result := make([dynamic]^PhysicsBody, allocator)
-	if !b2.Body_IsValid(area.bodyId) do return result[:]
-	shapes: [32]b2.ShapeId
-	for shapeId in b2.Body_GetShapes(area.bodyId, shapes[:]) {
-		capacity := b2.Shape_GetSensorCapacity(shapeId)
-		if capacity <= 0 do continue
-		overlaps := make([]b2.ShapeId, capacity, context.temp_allocator)
-		count := b2.Shape_GetSensorOverlaps(shapeId, raw_data(overlaps), capacity)
-		for visitor in overlaps[:count] {
-			if !b2.Shape_IsValid(visitor) do continue
-			other := bodyOfShape(visitor)
-			if other == nil do continue
-			known := false
-			for b in result do if b == other do known = true
-			if !known do append(&result, other)
-		}
-	}
-	return result[:]
+	return PhysicsBody_GetContacts(area, allocator)
 }
 
 @(private="file")
@@ -407,6 +401,10 @@ initBody :: proc(body: ^PhysicsBody, kind: PhysicsBodyKind) {
 	body.density = 1
 	EventSubject_Init(&body.onCollisionEnter, allocator)
 	EventSubject_Init(&body.onCollisionExit, allocator)
+	EventSubject_Init(&body.onAreaEnter, allocator)
+	EventSubject_Init(&body.onAreaExit, allocator)
+	body.contacts = make([dynamic]BodyContact, allocator)
+	body.areas = make([dynamic]BodyContact, allocator)
 	world := Scene_GetPhysics(body.scene)
 	append(&world.bodies, body)
 	body.destroy = physicsBodyDestroyed
@@ -415,6 +413,8 @@ initBody :: proc(body: ^PhysicsBody, kind: PhysicsBodyKind) {
 @(private="file")
 physicsBodyDestroyed :: proc(node: ^Node) {
 	body := cast(^PhysicsBody)node
+	// Exits for everything it touched, first: they still see it as it was
+	if world := node.scene.physics; world != nil do physicsForgetBody(world, body)
 	if b2.Body_IsValid(body.bodyId) do b2.DestroyBody(body.bodyId)
 	body.bodyId = {}
 	if world := node.scene.physics; world != nil do removeFromSlice(&world.bodies, body)
@@ -449,6 +449,10 @@ collisionShapeDestroyed :: proc(node: ^Node) {
 	shape := cast(^CollisionShape)node
 	// A body destroyed first took its Box2D shapes with it
 	if b2.Shape_IsValid(shape.shapeId) {
+		// Its late end events still find its body, not the freed node (physics_events.odin)
+		if world := node.scene.physics; world != nil {
+			if owner, ok := &world.shapes[shape.shapeId]; ok do owner.shape, owner.expires = nil, 2
+		}
 		bodyId := b2.Shape_GetBody(shape.shapeId)
 		b2.DestroyShape(shape.shapeId, true)
 		if body := cast(^PhysicsBody)b2.Body_GetUserData(bodyId); body != nil do body.shapesDirty = true
