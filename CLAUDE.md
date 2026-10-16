@@ -139,6 +139,9 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
   (`Game_GetAllocator`), freed by `Game_Destroy`.
 - Order: `Globals_Start` (fields from project.xml) → scenes built → `Globals_Ready`; every frame
   `Globals_Update` before the scene, `Globals_Draw` after it (screen space).
+- **What a save holds:** a global's state, not its settings. Fields that aren't exported are
+  saved (unless `save:"-"`); exported fields are editor settings and aren't (unless `save:""`),
+  so changing one in the editor reaches players who already have a save.
 - Saves marshal each saved field with `core:encoding/json`, and load by unmarshalling a global's
   object into the whole struct (`ScriptInfo.pointerType`: `unmarshal_any` needs a pointer type,
   which can't be made at run time), so fields the save lacks keep their values.

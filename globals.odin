@@ -30,8 +30,8 @@ Hooks (all optional; `self.node` and `self.scene` are nil for globals, `self.gam
   `self.hidden` to skip it for a while
 - `loaded(self)`: `Load_Game` just restored its fields (save.odin)
 
-Globals are also what `Save_Game` saves: every field but the `Script` header and fields tagged
-`save:"-"`.
+Globals are also what `Save_Game` saves: their state (fields that aren't exported, unless tagged
+`save:"-"`, and exported ones tagged `save:""`: save.odin).
 */
 
 // A global in project.xml: its script and field values

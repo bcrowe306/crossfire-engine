@@ -10,6 +10,8 @@ import sdl "vendor:sdl3"
 
 Scene :: struct {
 	id: EntityId,
+	// Its name in the game (`Game_CreateScene`); "" for scenes made another way
+	name: string,
 	game: ^Game,
 	nodes: [dynamic]^Node,
 	addQueue: [dynamic]^Node,

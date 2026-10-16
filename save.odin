@@ -14,9 +14,13 @@ Saving and loading game state as JSON: what's in the globals (globals.odin).
 	e.Load_Game()          // false if there's no save yet
 	e.Save_Game("slot2")
 
-A save holds every global's fields by name: every field except the `Script` header and those
-tagged `save:"-"` (caches, pointers to nodes; fields that can't be written as JSON are skipped
-with a warning). Numbers, bools, strings, enums (by name), arrays, slices, dynamic arrays, maps,
+A save holds every global's state by field name:
+- Fields that aren't exported are the game's state: saved, unless tagged `save:"-"` (caches,
+  pointers to nodes).
+- Exported fields (`export:""`) are settings from the editor: not saved, so changing them in the
+  editor reaches players who have a save. Tag one `save:""` when the player changes it too (a
+  chosen ship, a volume): then the save's value wins.
+Fields that can't be written as JSON are skipped with a warning. Numbers, bools, strings, enums (by name), arrays, slices, dynamic arrays, maps,
 nested structs and asset handles all work. Loading sets the fields a save has and leaves the
 others (fields added to a global since the save keep their values), then calls the globals'
 `loaded` hook.
@@ -151,14 +155,18 @@ Save_FromJSON :: proc(game: ^Game, text: string) -> bool {
 	return true
 }
 
-// A struct's fields that saves hold: all but the Script header and `save:"-"` ones (temp allocated)
+// A struct's fields that saves hold (temp allocated): not the Script header; not exported fields
+// unless tagged `save:""`; not `save:"-"` ones
 @(private="file")
 savedFields :: proc(T: typeid) -> []reflect.Struct_Field {
 	fields := make([dynamic]reflect.Struct_Field, context.temp_allocator)
 	for field, i in reflect.struct_fields_zipped(T) {
 		if i == 0 && field.type.id == Script do continue
-		if tag, has := reflect.struct_tag_lookup(field.tag, "save"); has && tag == "-" do continue
+		save, tagged := reflect.struct_tag_lookup(field.tag, "save")
+		if tagged && save == "-" do continue
 		if tag, has := reflect.struct_tag_lookup(field.tag, "json"); has && tag == "-" do continue
+		_, exported := reflect.struct_tag_lookup(field.tag, "export")
+		if exported && !tagged do continue
 		append(&fields, field)
 	}
 	return fields[:]

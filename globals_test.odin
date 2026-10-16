@@ -22,9 +22,11 @@ Upgrade :: struct {
 @(private="file")
 TestState :: struct {
 	using script: Script,
-	lives: int `export:"default=3 min=0"`,
+	// Exported and saved: the player changes them
+	lives: int `export:"default=3 min=0" save:""`,
+	difficulty: Difficulty `export:"" save:""`,
+	// Exported, a setting: not saved
 	playerName: string `export:"default=Ace"`,
-	difficulty: Difficulty `export:""`,
 	music: SoundAsset `export:""`,
 	// Saved but not exported: the game's own state
 	score: int,
@@ -207,6 +209,7 @@ save_and_load :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(text, `"score": 1200`))
 	testing.expect(t, strings.contains(text, `"difficulty": "Hard"`))
 	testing.expect(t, !strings.contains(text, "frames"))
+	testing.expect(t, !strings.contains(text, "playerName"))
 	testing.expect(t, !strings.contains(text, "\"script\""))
 
 	// A new run loads it back; the loaded hook runs

@@ -129,8 +129,11 @@ Game_CreateScene :: proc(game: ^Game, name: string) -> ^Scene {
 	scene := new(Scene)
 	Scene_Init(scene)
 	scene.game = game
-	// The map keeps its own copy of the name, so callers can pass temporary strings
-	game.scenes[strings.clone(name)] = scene
+	// The map keeps its own copy of the name, so callers can pass temporary strings; the scene
+	// shares it (freed with the map's keys)
+	key := strings.clone(name)
+	scene.name = key
+	game.scenes[key] = scene
 	return scene
 }
 
