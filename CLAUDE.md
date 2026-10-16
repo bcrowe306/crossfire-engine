@@ -51,10 +51,11 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `project_loader.odin` | Builds scenes from parsed data: `LoadProjectFile`, `Game_LoadProject`, `Scene_Build`; data-driven `Sprite` and `AnimatedSprite` nodes; menu actions `scene:<Name>` / `quit` |
 | `script.odin` | **Scripts**: Odin game code attached to nodes. `Script_Register`, the registry, exported fields (`export:""` tags) set from scene files by reflection, `Node_AttachScript`, `Script_DescribeJSON` |
 | `player.odin` | `Player_Run(args)`: the whole player program (`player <project folder>`, `player --scene <name>`, `player --describe-scripts`); `Player_Setup`, shared with the web; with no folder, an exported game finds its project next to itself (`data/project.xml`) |
-| `platform_native.odin`, `platform_web.odin` | **Platform layer** (`#+build !js` / `#+build js`): memory arenas, reading files, the executable's folder, loading textures, audio. Code outside these files must not import `core:os`, `core:mem/virtual`, `core:path/filepath`, SDL_image or SDL_mixer: none of them build for the browser |
+| `platform_native.odin`, `platform_web.odin` | **Platform layer** (`#+build !js` / `#+build js`): memory arenas, reading files, the executable's folder, loading textures. Code outside these files must not import `core:os`, `core:mem/virtual`, `core:path/filepath` or SDL_image: they don't build for the browser (SDL_mixer does: see "Web build") |
 | `player_web.odin` | The browser player: `odin_web_main` (called by `web/main.c`), `Web_Context` (Emscripten's malloc, a per-frame temp arena, console logger), `Player_StartWeb` (Emscripten's main loop drives `Application_Frame`) |
 | `web/` | Files the web export links: `main.c` (C `main`), `odin_env.js` and `odin_env_pre.js` (what Odin's js runtime imports from "odin_env") |
 | `paths.odin` | `JoinPath` ("/"-separated, works everywhere) |
+| `audio.odin` | SDL3_mixer setup (`Audio_Init`: no device means silence, not an error), loading, and `Game_PlaySound(game, path)` (paths relative to `game.projectDir`, cached). The same on desktop and web |
 | `player/main.odin` | The **player** for projects without scripts: calls `Player_Main` (`Player_Run` with the command line; nothing in the browser). A project with scripts gets its own generated main that also imports its `scripts` package. Used by the editor's Play and, later, exports |
 | `script_test.odin` | Tests: script registration, fields and tags, lifecycle on a node, bad values, `Scene_FindNode` paths, format v3 scripts |
 | `project_format_test.odin`, `transform_test.odin` | Tests: parser and v1 migration; transform math, hierarchy, subtree removal, draw order/transform/tint/visibility, camera node |
@@ -205,8 +206,17 @@ The editor's Web export builds the player for `js_wasm32` with `-build-mode:obj`
 Emscripten (the editor pins emsdk as a submodule). The link line is in `player_web.odin`'s doc
 comment. What was needed, and why:
 - Odin's `vendor:sdl3` and `vendor:sdl3/ttf` link Emscripten's SDL3 and SDL3_ttf ports on wasm
-  (`-sUSE_SDL=3 -sUSE_SDL_TTF=3`). **There are no SDL3_image or SDL3_mixer ports**, so the web
-  loads images with SDL's own `SDL_LoadPNG` / `SDL_LoadBMP` (PNG and BMP only) and has no audio.
+  (`-sUSE_SDL=3 -sUSE_SDL_TTF=3`). **There is no SDL3_image port**, so the web loads images with
+  SDL's own `SDL_LoadPNG` / `SDL_LoadBMP` (PNG and BMP only).
+- **Audio:** there's no SDL3_mixer port either, so the editor builds SDL3_mixer from source with
+  Emscripten (its `tools/build_web_mixer.sh`, the `third_party/SDL_mixer` submodule at the native
+  version, 3.2.4) with the decoders it carries (WAV, OGG via stb_vorbis, MP3 via dr_mp3, FLAC via
+  dr_flac, AIFF, AU, VOC), and links `libSDL3_mixer.a`. **Odin's `vendor:sdl3/mixer` has no wasm
+  branch:** it imports from the module "system:SDL3_mixer", so the object asks for symbols literally
+  named `system:SDL3_mixer..MIX_Init`. The build script compiles SDL_mixer.c with an alias under that
+  name for every public function, so the game links to the library directly and scripts can use
+  all of SDL3_mixer. SDL resumes the browser's AudioContext after the first click or key press
+  (autoplay rule); until then the game runs silently.
 - `js_wasm32` (not `freestanding`), because `core:log` and `core:fmt` need it. Its runtime imports
   `write`, `rand_bytes` and some math from a JS module "odin_env": `web/odin_env.js` defines them
   as an Emscripten library, and `web/odin_env_pre.js` passes Emscripten's imports under that name.
@@ -230,7 +240,7 @@ comment. What was needed, and why:
   writer must stay in sync with it.
   - Menus and labels in a scene with a camera are drawn through it, because scene files can't set
     `screenLayers` yet.
-  - Audio assets aren't loaded.
+  - Audio assets aren't loaded with the scene (play them from scripts: `Game_PlaySound`, loaded on first use).
 - **Format version 3** adds `<script>` elements; version 2 stores local positions, and version 1
   files are migrated when parsed (`migrateSceneFromV1`). Bump `PROJECT_FORMAT_VERSION` and add a migration for any incompatible
   format change.

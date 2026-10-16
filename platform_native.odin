@@ -3,12 +3,10 @@ package engine
 
 import "base:runtime"
 import "core:fmt"
-import "core:log"
 import vmem "core:mem/virtual"
 import "core:os"
 import sdl "vendor:sdl3"
 import img "vendor:sdl3/image"
-import mix "vendor:sdl3/mixer"
 
 /*
 Platform services, desktop version (Linux, macOS, Windows). platform_web.odin has the same
@@ -62,33 +60,6 @@ Platform_ExecutableDir :: proc() -> (string, bool) {
 // An image file as a texture: any format SDL3_image reads
 Platform_LoadTexture :: proc(renderer: ^sdl.Renderer, path: string) -> ^sdl.Texture {
 	return img.LoadTexture(renderer, fmt.ctprint(path))
-}
-
-// Audio: SDL3_mixer, playing on the default device
-Platform_AudioInit :: proc() -> (^mix.Mixer, bool) {
-	if !mix.Init() {
-		log.error("Error initializing SDL_mixer: ", sdl.GetError())
-		return nil, false
-	}
-	mixer := mix.CreateMixerDevice(sdl.AUDIO_DEVICE_DEFAULT_PLAYBACK, nil)
-	if mixer == nil {
-		log.error("Error creating mixer device: ", sdl.GetError())
-		return nil, false
-	}
-	return mixer, true
-}
-
-Platform_AudioQuit :: proc(mixer: ^mix.Mixer) {
-	if mixer != nil do mix.DestroyMixer(mixer)
-	mix.Quit()
-}
-
-Platform_LoadAudio :: proc(mixer: ^mix.Mixer, path: string, predecode: bool) -> ^mix.Audio {
-	return mix.LoadAudio(mixer, fmt.ctprint(path), predecode)
-}
-
-Platform_DestroyAudio :: proc(audio: ^mix.Audio) {
-	mix.DestroyAudio(audio)
 }
 
 // A context for contextless code (`@(init)` procedures): Odin's default

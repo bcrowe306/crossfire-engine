@@ -41,7 +41,7 @@ Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2
 	// Emscripten's main loop exists (before that, Present blocks): see Player_StartWeb
 	if !PLATFORM_WEB do sdl.SetRenderVSync(app.renderer, 1)
 
-	mixer, audioOk := Platform_AudioInit()
+	mixer, audioOk := Audio_Init()
 	if !audioOk do return false
 	app.mixer = mixer
 
@@ -154,7 +154,7 @@ Application_Cleanup :: proc(app: ^Application) {
 	if app.game != nil {
 		Game_Destroy(app.game)
 	}
-	Platform_AudioQuit(app.mixer)
+	Audio_Quit(app.mixer)
 	ttf.Quit()
 	if app.renderer != nil {
 		sdl.DestroyRenderer(app.renderer)

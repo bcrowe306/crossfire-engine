@@ -12,7 +12,7 @@ import sdl "vendor:sdl3"
 The player in a browser. The editor's Web export builds the game's player (the same `main`
 package as a desktop build) for `js_wasm32` with `-build-mode:obj`, and links it with Emscripten:
 
-	emcc <engine>/web/main.c game.wasm.o -o index.html -sUSE_SDL=3 -sUSE_SDL_TTF=3
+	emcc <engine>/web/main.c game.wasm.o libSDL3_mixer.a -o index.html -sUSE_SDL=3 -sUSE_SDL_TTF=3
 		-sALLOW_MEMORY_GROWTH --js-library <engine>/web/odin_env.js
 		--pre-js <engine>/web/odin_env_pre.js --preload-file <project>@/data
 
@@ -24,8 +24,9 @@ Emscripten calls `Application_Frame` once per animation frame.
 - Files: the project is packaged into Emscripten's virtual file system under /data.
 - web/odin_env.js and web/odin_env_pre.js supply what Odin's js runtime imports from the
   "odin_env" module (console output, random bytes, some math).
-- Limits: images load with SDL's built-in PNG and BMP loaders (no SDL_image port exists), and
-  there's no audio yet (no SDL_mixer port).
+- Audio: SDL3_mixer, built for the web by the editor (`tools/build_web_mixer.sh`: Emscripten has
+  no SDL3_mixer port). Browsers start sound only after the player clicks or presses a key.
+- Limits: images load with SDL's built-in PNG and BMP loaders (no SDL_image port exists).
 */
 
 // Where the Web export packages the project

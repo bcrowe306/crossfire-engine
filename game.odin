@@ -40,6 +40,8 @@ Game :: struct {
 	nextScenePtr: ^Scene,
 	currentScene: ^Scene,
 	name: string,
+	// The folder asset paths are relative to (owned; set by Game_LoadProject, "" for the working directory)
+	projectDir: string,
 	update: proc(game: ^Game, events: []sdl.Event, deltaTime: f64),
 	draw: proc(game: ^Game),
 	createScene: proc(game: ^Game, name: string) -> ^Scene,
@@ -82,6 +84,7 @@ Game_Destroy :: proc(game: ^Game) {
 		delete(name)
 	}
 	delete(game.scenes)
+	delete(game.projectDir)
 	game.resourceManager->destroy()
 }
 

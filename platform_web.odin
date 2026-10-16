@@ -6,7 +6,6 @@ import "core:c"
 import "core:fmt"
 import "core:log"
 import sdl "vendor:sdl3"
-import mix "vendor:sdl3/mixer"
 
 /*
 Platform services, browser version: a WebAssembly build linked by Emscripten (the editor's Web
@@ -80,16 +79,3 @@ Platform_LoadTexture :: proc(renderer: ^sdl.Renderer, path: string) -> ^sdl.Text
 	defer sdl.DestroySurface(surface)
 	return sdl.CreateTextureFromSurface(renderer, surface)
 }
-
-Platform_AudioInit :: proc() -> (^mix.Mixer, bool) {
-	log.info("Audio isn't supported in the web build yet")
-	return nil, true
-}
-
-Platform_AudioQuit :: proc(mixer: ^mix.Mixer) {}
-
-Platform_LoadAudio :: proc(mixer: ^mix.Mixer, path: string, predecode: bool) -> ^mix.Audio {
-	return nil
-}
-
-Platform_DestroyAudio :: proc(audio: ^mix.Audio) {}

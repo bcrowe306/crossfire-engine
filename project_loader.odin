@@ -79,6 +79,8 @@ Example:
 */
 Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string) -> bool {
 	game.backgroundColor = project.background
+	delete(game.projectDir)
+	game.projectDir = strings.clone(projectDir)
 	ok := true
 
 	for ref in project.scenes {
