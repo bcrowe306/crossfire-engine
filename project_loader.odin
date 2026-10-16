@@ -106,19 +106,22 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 Creates a scene's nodes from parsed scene data, with the same parent/child structure.
 
 A Camera node becomes a Camera2D node; the first one becomes the scene's camera. Hidden nodes
-are created hidden, so game code can show them later.
+are created hidden, so game code can show them later. Nodes keep their names (`Scene_FindNode`),
+and nodes with a script get it attached (it must be registered: see script.odin); its `ready`
+runs on the scene's next update.
 
 Inputs:
 - scene: The scene to fill
 - data: The parsed scene
 - projectDir: Folder that asset paths are relative to
 - allocator: Allocator for the returned list
+- attachScripts: Attach scripts. The editor's viewport passes false: scripts don't run there
 
 Returns:
 - The created nodes, one per entry in `data.nodes` (same order). Editors use it to keep the
   nodes in sync with their own data; the caller owns the slice
 */
-Scene_Build :: proc(scene: ^Scene, data: ^SceneData, projectDir: string, allocator := context.temp_allocator) -> []^Node {
+Scene_Build :: proc(scene: ^Scene, data: ^SceneData, projectDir: string, allocator := context.temp_allocator, attachScripts := true) -> []^Node {
 	rm := &scene.game.resourceManager
 	created := make([]^Node, len(data.nodes), allocator)
 
@@ -173,6 +176,7 @@ Scene_Build :: proc(scene: ^Scene, data: ^SceneData, projectDir: string, allocat
 			n = menu
 		}
 
+		n.name = strings.clone(node.name, Node_GetAllocator(n))
 		n.position = node.position
 		n.rotation = node.rotation
 		n.scale = node.scale
@@ -180,6 +184,13 @@ Scene_Build :: proc(scene: ^Scene, data: ^SceneData, projectDir: string, allocat
 		n.visible = node.visible
 		if node.parent >= 0 && created[node.parent] != nil {
 			Node_AddChild(created[node.parent], n)
+		}
+		if node.script != "" && attachScripts {
+			if info := Script_Find(node.script); info != nil {
+				Node_AttachScript(n, info, node.props[:])
+			} else {
+				log.warnf("%s: no script named '%s' (is the project's scripts package built into this player?)", node.name, node.script)
+			}
 		}
 		created[i] = n
 	}

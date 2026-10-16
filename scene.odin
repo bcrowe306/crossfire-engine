@@ -2,6 +2,7 @@ package engine
 
 import "core:encoding/uuid"
 import "core:log"
+import "core:strings"
 import "core:crypto"
 import "core:mem"
 import sdl "vendor:sdl3"
@@ -145,10 +146,15 @@ Scene_ProcessQueues :: proc(scene: ^Scene) {
 
 Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 	Scene_ProcessQueues(scene)
+	// Scripts get `ready` once, before their first update, when every node is in the scene
+	Scene_ReadyScripts(scene)
 
 	for node in scene.nodes {
 		if node.update != nil {
 			node.update(node, events, deltaTime)
+		}
+		if script := node.script; script.info != nil && script.info.update != nil {
+			script.info.update(script.data, events, deltaTime)
 		}
 	}
 
@@ -192,13 +198,16 @@ Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transfo
 		base := layer in scene.screenLayers && !screenLayersUseView ? TRANSFORM2D_IDENTITY : view
 		for item in items {
 			node := item.node
-			if node.draw == nil || node.layer != layer do continue
+			scriptDraw := node.script.info != nil ? node.script.info.draw : nil
+			if (node.draw == nil && scriptDraw == nil) || node.layer != layer do continue
 			transform := Transform2D_Multiply(base, item.world)
 			if node.transformMode == .Position_Only {
 				transform = {x = {positionOnlyScale, 0}, y = {0, positionOnlyScale}, origin = transform.origin}
 			}
 			SetDrawState(transform, item.tint)
-			node.draw(node, renderer)
+			if node.draw != nil do node.draw(node, renderer)
+			// A script draws after its node, in the same local space
+			if scriptDraw != nil do scriptDraw(node.script.data, renderer)
 		}
 	}
 }
@@ -279,4 +288,46 @@ removeFromList :: proc(list: ^[dynamic]^Node, node: ^Node) {
 			return
 		}
 	}
+}
+
+/*
+Finds a node by its name, or by a path of names from a top-level node: "World/Ship/Flame".
+
+Inputs:
+- scene: The scene
+- path: A name, or names separated by "/"
+
+Returns:
+- The first match in tree order (nodes waiting to be added included), or nil
+*/
+Scene_FindNode :: proc(scene: ^Scene, path: string) -> ^Node {
+	first, _, rest := strings.partition(path, "/")
+	search :: proc(nodes: []^Node, first, rest, path: string) -> ^Node {
+		for node in nodes {
+			if rest == "" && strings.index_byte(path, '/') < 0 {
+				// A bare name matches anywhere in the tree
+				if node.name == first do return node
+			} else if node.parent == nil && node.name == first {
+				return Node_FindChild(node, rest)
+			}
+		}
+		return nil
+	}
+	if found := search(scene.nodes[:], first, rest, path); found != nil do return found
+	return search(scene.addQueue[:], first, rest, path)
+}
+
+/*
+Finds a descendant of a node by a path of child names: "Ship/Flame".
+
+Returns:
+- The node, or nil
+*/
+Node_FindChild :: proc(node: ^Node, path: string) -> ^Node {
+	if path == "" do return node
+	first, _, rest := strings.partition(path, "/")
+	for child in node.children {
+		if child.name == first do return Node_FindChild(child, rest)
+	}
+	return nil
 }

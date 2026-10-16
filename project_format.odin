@@ -11,7 +11,7 @@ A project is a folder:
 project.xml:
 
 	<?xml version="1.0" encoding="UTF-8"?>
-	<project formatVersion="2" name="Asteroids" width="1280" height="720"
+	<project formatVersion="3" name="Asteroids" width="1280" height="720"
 	         scaleMode="Letterbox" background="#0f121e" startScene="MenuScene">
 		<scene name="MenuScene" path="scenes/MenuScene.scene.xml"/>
 		<asset path="assets/ship.png" kind="Image"/>
@@ -21,7 +21,7 @@ A scene file holds a tree of nodes. Nesting is the hierarchy, and a node's `x`, 
 and scale are relative to its parent:
 
 	<?xml version="1.0" encoding="UTF-8"?>
-	<scene formatVersion="2" name="PlayScene">
+	<scene formatVersion="3" name="PlayScene">
 		<node kind="Node2D" name="World" x="0" y="0">
 			<node kind="Camera" name="Camera" x="640" y="360" zoom="1"/>
 			<node kind="Sprite" name="Ship" x="640" y="430" texture="assets/ship.png">
@@ -34,6 +34,11 @@ and scale are relative to its parent:
 		<node kind="Menu" name="MainMenu" x="640" y="300" layer="7">
 			<item label="Play" action="scene:PlayScene"/>
 			<item label="Quit" action="quit"/>
+		</node>
+		<node kind="Sprite" name="Player" x="640" y="600" texture="assets/ship.png">
+			<script name="PlayerController">
+				<prop name="speed" value="250"/>
+			</script>
 		</node>
 	</scene>
 
@@ -49,6 +54,9 @@ Current limits:
 - Only images are loaded; Audio and Font assets are listed but not used.
 
 Version history:
+- 3: a node can have a script: a `<script name="...">` child element holding `<prop name="..."
+  value="..."/>` values for its exported fields (script.odin). Version 2 files are valid version 3
+  files without scripts.
 - 2: positions, rotation and scale are relative to the parent. A Camera's rotation turns the
   view the way a rotated camera would (the world appears to turn the other way).
 - 1: positions were world coordinates and parents had no effect; Camera rotation rotated the
@@ -68,7 +76,7 @@ import "core:strings"
 import sdl "vendor:sdl3"
 
 // Version written by the editor. This loader also reads older versions
-PROJECT_FORMAT_VERSION :: 2
+PROJECT_FORMAT_VERSION :: 3
 
 /*
 Node kinds a scene file can contain.
@@ -157,6 +165,15 @@ SceneNodeData :: struct {
 	playMode: AnimationPlayMode,
 	// Menu
 	items: [dynamic]MenuItemData,
+	// Any kind: the script attached to the node ("" for none), and its exported field values
+	script: string,
+	props: [dynamic]ScriptPropData,
+}
+
+// A script field's value in a scene file: `<prop name="speed" value="250"/>`
+ScriptPropData :: struct {
+	name: string,
+	value: string,
 }
 
 // Values used for attributes a node doesn't specify
@@ -307,6 +324,9 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.text)
 		for item in node.items { delete(item.label); delete(item.action) }
 		delete(node.items)
+		delete(node.script)
+		for prop in node.props { delete(prop.name); delete(prop.value) }
+		delete(node.props)
 	}
 	delete(scene.nodes)
 	delete(scene.name)
@@ -389,6 +409,7 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.loop = attrBool(doc, element, "loop", true)
 	node.playMode = attrEnum(doc, element, "playMode", AnimationPlayMode.Forward)
 	node.items = make([dynamic]MenuItemData)
+	node.props = make([dynamic]ScriptPropData)
 
 	index := len(scene.nodes)
 	append(&scene.nodes, node)
@@ -402,6 +423,17 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 				cloneAttr(doc, child, "label", ""),
 				cloneAttr(doc, child, "action", ""),
 			})
+		case "script":
+			// One per node; a second one is ignored
+			if scene.nodes[index].script != "" do continue
+			scene.nodes[index].script = cloneAttr(doc, child, "name", "")
+			for prop in childElements(doc, child) {
+				if doc.elements[prop].ident != "prop" do continue
+				append(&scene.nodes[index].props, ScriptPropData{
+					cloneAttr(doc, prop, "name", ""),
+					cloneAttr(doc, prop, "value", ""),
+				})
+			}
 		}
 	}
 }

@@ -41,6 +41,9 @@ children too.
 */
 Node :: struct {
 	id: EntityId,
+	// The name from the scene file ("" for nodes made in code unless set). Used by
+	// `Scene_FindNode` and `Node_FindChild`; owned by the node's arena when set by `Scene_Build`
+	name: string,
 	layer: RenderLayer,
 	scene: ^Scene,
 	update: proc(node: ^Node, events: []sdl.Event, deltaTime: f64),
@@ -68,6 +71,8 @@ Node :: struct {
 	children: [dynamic]^Node,
 	// Set while the node is part of its scene (after it was added, until it's removed)
 	inScene: bool,
+	// The script attached to the node, if any (script.odin)
+	script: NodeScript,
 
 	onEnter: EventSubject,
 	onExit: EventSubject,
@@ -125,6 +130,7 @@ Inputs:
 */
 Node_Destroy :: proc(node: ^Node) {
 	if node == nil do return
+	if node.script.info != nil && node.script.info.destroy != nil do node.script.info.destroy(node.script.data)
 	if node.destroy != nil do node.destroy(node)
 
 	// The arena lives inside its own memory, so destroy a copy: freeing the blocks would

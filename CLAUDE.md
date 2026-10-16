@@ -12,7 +12,7 @@ import e "odin_sdl_engine"   // or "../odin_sdl_engine" from a sibling package
 
 ```bash
 odin check . -no-entry-point -vet-unused    # type-check the library (it has no main)
-odin test . -vet-unused                     # unit tests (project format parser)
+odin test . -vet-unused                     # unit tests (format parser, transforms, scripts)
 odin check player -vet-unused               # type-check the player program
 odin build player -out:player_bin           # build the player: player_bin <project folder>
 ```
@@ -48,7 +48,10 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `layers.odin` | `RenderLayer` (draw order, `Layer1` first) |
 | `project_format.odin` | **Project/scene XML format spec** (doc comment) and parser: `ParseProject`, `ParseScene` → plain data (`ProjectData`, `SceneData`), no SDL |
 | `project_loader.odin` | Builds scenes from parsed data: `LoadProjectFile`, `Game_LoadProject`, `Scene_Build`; data-driven `Sprite` and `AnimatedSprite` nodes; menu actions `scene:<Name>` / `quit` |
-| `player/main.odin` | The **player** program (`package player`): `player <project folder>` loads project.xml and runs it. Used by the editor's Play and, later, exports |
+| `script.odin` | **Scripts**: Odin game code attached to nodes. `Script_Register`, the registry, exported fields (`export:""` tags) set from scene files by reflection, `Node_AttachScript`, `Script_DescribeJSON` |
+| `player.odin` | `Player_Run(args)`: the whole player program (`player <project folder>`, `player --describe-scripts`) |
+| `player/main.odin` | The **player** for projects without scripts: calls `Player_Run`. A project with scripts gets its own generated main that also imports its `scripts` package. Used by the editor's Play and, later, exports |
+| `script_test.odin` | Tests: script registration, fields and tags, lifecycle on a node, bad values, `Scene_FindNode` paths, format v3 scripts |
 | `project_format_test.odin`, `transform_test.odin` | Tests: parser and v1 migration; transform math, hierarchy, subtree removal, draw order/transform/tint/visibility, camera node |
 
 ## Rules that keep the engine correct
@@ -103,6 +106,27 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 
 **Node types** embed `using node: e.Node` as their **first** field. Casting and node allocation both
 depend on it.
+
+**Scripts** (`script.odin`, doc comment at the top has the full example):
+- A script struct's first field is `using script: e.Script` (checked at registration). It's
+  allocated in its node's arena by `Node_AttachScript`, so it's freed with the node.
+- Scripts register from `@(init)` procedures, which **this Odin requires to be
+  `proc "contextless"`**; `Script_Register` is contextless and sets up its own context.
+- **Never use `@(init)` in a `_test.odin` file**: those files are compiled into normal builds too,
+  so it would run in every game. Register test scripts lazily (`sync.once_do`, see script_test.odin).
+- Lifecycle: `ready` once on the first `Scene_Update` after the node is in the scene (all nodes exist
+  then; `Scene_FindNode(scene, "World/Ship")`), `update` after the node's own update, `draw` after
+  its draw in the same local space, `destroy` in `Node_Destroy`.
+- Exported fields: tagged `export:""`, options `default=`, `min=`, `max=`, `kind=scene` (each runs to
+  the next key, so values may contain spaces/commas). Types: f32, f64, int, i32, bool, string,
+  [2]f32, enums, sdl.Color. Values are text in scene files (`Script_SetField`); bad ones fall back
+  to the default with a warning.
+- Hooks are stored type-erased (`transmute` of `proc(^T)` to `proc(rawptr)`).
+- One script per node. `Scene_Build(..., attachScripts = false)` is for the editor viewport, where
+  scripts don't run.
+- **Later (decided, not built):** several scripts per node; custom node kinds registered by game code
+  (a struct embedding e.g. `e.Sprite`, used as `kind="Player"`); hot reload of scripts as a shared
+  library (`core:dynlib`) in development builds.
 
 ## Conventions
 
@@ -179,8 +203,8 @@ don't exist yet.
   - Menus and labels in a scene with a camera are drawn through it, because scene files can't set
     `screenLayers` yet.
   - Audio assets aren't loaded.
-- **Format version 2** stores local positions; version 1 files are migrated when parsed
-  (`migrateSceneFromV1`). Bump `PROJECT_FORMAT_VERSION` and add a migration for any incompatible
+- **Format version 3** adds `<script>` elements; version 2 stores local positions, and version 1
+  files are migrated when parsed (`migrateSceneFromV1`). Bump `PROJECT_FORMAT_VERSION` and add a migration for any incompatible
   format change.
 - `RenderLayer` has 8 fixed layers. The editor will probably want named layers.
 
