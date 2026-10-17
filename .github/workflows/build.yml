@@ -53,6 +53,8 @@ jobs:
           odin check player -vet-unused
 
       - name: Test
+        # The tests take seconds: a hang (a crashed test thread on Windows) shouldn't hold the runner
+        timeout-minutes: 10
         run: odin test . -vet-unused $ODIN_LINK_FLAGS
 
       - name: Package the player

@@ -3,6 +3,7 @@ package engine
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:sync"
 import b2 "box2d"
 
 /*
@@ -67,6 +68,11 @@ PhysicsWorld :: struct {
 The scene's physics world, created with the game's settings (`Game.physics`) the first time it's
 needed.
 */
+// Box2D keeps its worlds in one global table, unlocked: creating and destroying them is serialized
+// (scenes on other threads, the tests running in parallel; a race crashed CI's tests)
+@(private="file")
+worldTableLock: sync.Mutex
+
 Scene_GetPhysics :: proc(scene: ^Scene) -> ^PhysicsWorld {
 	if scene.physics != nil do return scene.physics
 	world := new(PhysicsWorld)
@@ -78,6 +84,7 @@ Scene_GetPhysics :: proc(scene: ^Scene) -> ^PhysicsWorld {
 	world.shapes = make(map[b2.ShapeId]ShapeOwner)
 	def := b2.DefaultWorldDef()
 	def.gravity = world.settings.gravity / world.settings.pixelsPerMeter
+	sync.guard(&worldTableLock)
 	world.id = b2.CreateWorld(def)
 	scene.physics = world
 	return world
@@ -94,7 +101,10 @@ Physics_SetGravity :: proc(scene: ^Scene, gravity: [2]f32) {
 Physics_Destroy :: proc(scene: ^Scene) {
 	world := scene.physics
 	if world == nil do return
-	if b2.World_IsValid(world.id) do b2.DestroyWorld(world.id)
+	{
+		sync.guard(&worldTableLock)
+		if b2.World_IsValid(world.id) do b2.DestroyWorld(world.id)
+	}
 	delete(world.bodies)
 	delete(world.rayCasts)
 	delete(world.joints)
