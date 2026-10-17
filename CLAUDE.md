@@ -222,6 +222,19 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
 - Helpers are `@(private="file")`. Cross-file internals are `@(private)`.
 - Prefer defaults that work zero-initialized (e.g. a camera with `zoom == 0` acts as 1).
 
+## CI and releases (`.github/workflows/build.yml`)
+
+Pushing a `v*` tag builds and tests on Linux x86_64 (ubuntu-24.04), Windows x86_64 (windows-2022)
+and macOS x86_64 (macos-15-intel), then publishes a GitHub release of the three archives if all
+pass (tags with a `-`, like `v0.1.0-dev.1`, make pre-releases). The README's badge shows the
+latest run. The workspace's `ci-fix` skill (`.claude/skills/ci-fix/`) watches a run, finds why it
+failed, fixes it and builds again with the next tag.
+- `tools/ci/setup.sh` installs Odin (`dev-2026-10` from its release; Homebrew's on macOS, which
+  has no Intel release) and SDL3 (built from source on Linux, cached; Homebrew on macOS; Odin's
+  own files on Windows), and builds Odin's STB libraries. The editor's workflow runs it too.
+- `tools/build_box2d.sh` builds Box2D for each (Windows: clang targeting MSVC, `llvm-lib`).
+- `tools/ci/package_player.sh` packs the player with its SDL3 libraries.
+
 ## Documentation (required)
 
 All public code has **Odin-style doc comments** in the format of Odin's own `core` library, which

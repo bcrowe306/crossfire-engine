@@ -19,6 +19,12 @@ when ODIN_ARCH == .wasm32 || ODIN_ARCH == .wasm64p32 {
 	@(private) LIB_PATH :: "lib/box2d_web.o"
 } else when ODIN_OS == .Linux && ODIN_ARCH == .amd64 {
 	@(private) LIB_PATH :: "lib/box2d_linux_amd64.a"
+} else when ODIN_OS == .Darwin && ODIN_ARCH == .amd64 {
+	@(private) LIB_PATH :: "lib/box2d_darwin_amd64.a"
+} else when ODIN_OS == .Darwin && ODIN_ARCH == .arm64 {
+	@(private) LIB_PATH :: "lib/box2d_darwin_arm64.a"
+} else when ODIN_OS == .Windows && ODIN_ARCH == .amd64 {
+	@(private) LIB_PATH :: "lib/box2d_windows_amd64.lib"
 } else {
 	@(private) LIB_PATH :: "lib/box2d_unsupported.a"
 }

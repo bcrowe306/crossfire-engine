@@ -1,0 +1,84 @@
+# Builds and tests the engine on Linux, Windows and macOS (x86_64) when a version tag is pushed
+# (v1.2.3, v0.1.0-dev.4), and makes a GitHub release of the player for each, if all pass.
+# Tags with a "-" (v0.1.0-dev.1) make pre-releases. Can also be run by hand (Actions > Build).
+name: Build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, platform: linux-x64 }
+          - { os: windows-2022, platform: windows-x64 }
+          - { os: macos-15-intel, platform: macos-x64 }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Tests open SDL without a display or sound card
+      SDL_VIDEO_DRIVER: dummy
+      SDL_AUDIO_DRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Cache SDL3 (Linux builds it from source)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/sdl3
+          key: sdl3-${{ runner.os }}-3.4.16-3.4.6-3.2.2-3.2.4
+
+      - name: Set up Odin and SDL3
+        run: tools/ci/setup.sh
+
+      - name: Build Box2D
+        run: tools/build_box2d.sh
+
+      - name: Check
+        run: |
+          odin check . -no-entry-point -vet-unused
+          odin check player -vet-unused
+
+      - name: Test
+        run: odin test . -vet-unused $ODIN_LINK_FLAGS
+
+      - name: Package the player
+        run: tools/ci/package_player.sh ${{ matrix.platform }} ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: player-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flags=(--title "odin_sdl_engine $TAG" --generate-notes)
+          [[ "$TAG" == *-* ]] && flags+=(--prerelease)
+          gh release create "$TAG" dist/* "${flags[@]}" -R "$GITHUB_REPOSITORY"

@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Builds the engine's player (optimized) and packs it for a release:
+#   dist/odin_sdl_engine-player-<version>-<platform>.tar.gz (.zip on Windows)
+# with the SDL3 libraries it needs (Linux: in lib/, found through rpath $ORIGIN/lib; Windows:
+# the DLLs next to it; macOS: Homebrew's, not bundled).
+#
+# Usage: tools/ci/package_player.sh <platform> <version>   (after tools/ci/setup.sh)
+set -euo pipefail
+platform=$1
+version=$2
+engine=$(cd "$(dirname "$0")/../.." && pwd)
+name="odin_sdl_engine-player-$version-$platform"
+stage="$engine/dist/$name"
+rm -rf "$stage"
+mkdir -p "$stage"
+cd "$engine"
+
+case "$(uname -s)" in
+Linux)
+	odin build player -o:speed "-out:$stage/player" "-extra-linker-flags:-Wl,-rpath,\$ORIGIN/lib"
+	mkdir -p "$stage/lib"
+	ldd "$stage/player" | awk '/libSDL3/ { print $3 }' | while read -r lib; do cp -L "$lib" "$stage/lib/"; done
+	;;
+Darwin)
+	odin build player -o:speed "-out:$stage/player" ${ODIN_LINK_FLAGS:-}
+	;;
+*)
+	odin build player -o:speed "-out:$stage/player.exe"
+	root=$(odin root)
+	for d in sdl3 sdl3/image sdl3/ttf sdl3/mixer; do cp "${root%/}/vendor/$d"/*.dll "$stage/"; done
+	;;
+esac
+
+cat > "$stage/README.txt" <<TXT
+odin_sdl_engine player $version ($platform)
+
+Runs a project saved by odin_sdl_editor:
+
+    player <project folder>                 from its start scene
+    player <project folder> --scene <name>  from another scene
+
+The editor builds its own players for projects with scripts; this one runs projects without.
+TXT
+if [[ "$(uname -s)" == Darwin ]]; then
+	echo "Needs SDL3 from Homebrew: brew install sdl3 sdl3_image sdl3_ttf sdl3_mixer" >> "$stage/README.txt"
+fi
+
+cd "$engine/dist"
+case "$(uname -s)" in
+MINGW* | MSYS* | CYGWIN*) 7z a -tzip -bso0 "$name.zip" "$name" ;;
+*) tar -czf "$name.tar.gz" "$name" ;;
+esac
+rm -rf "$stage"
+ls -la "$engine/dist"

@@ -8,3 +8,6 @@
 
 # Box2D, built by tools/build_box2d.sh
 box2d/lib/
+
+# CI packages (tools/ci/package_player.sh)
+dist/
