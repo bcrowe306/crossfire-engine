@@ -10,8 +10,9 @@
 #   Windows: Odin from its GitHub release; it carries SDL3's .lib/.dll files, whose folders go
 #            on PATH so tests and tools find the DLLs
 #
-# Writes to $GITHUB_PATH and $GITHUB_ENV (ODIN_ROOT, ODIN_LINK_FLAGS: extra linker flags for
-# `odin build`/`odin test`, empty where none are needed).
+# Writes to $GITHUB_PATH and $GITHUB_ENV (ODIN_LINK_FLAGS: extra linker flags for `odin build` /
+# `odin test`, empty where none are needed). Not ODIN_ROOT: Odin reads that as an override of
+# where it's installed (Windows then rejected the path).
 set -euo pipefail
 
 ODIN_VERSION=${ODIN_VERSION:-dev-2026-10}
@@ -111,7 +112,6 @@ esac
 root=$(odin root)
 root=${root%/}
 odin version
-echo "ODIN_ROOT=$root" >> "$GITHUB_ENV"
 case "$(uname -s)" in
 MINGW* | MSYS* | CYGWIN*)
 	cygpath -w "$HOME/odin" >> "$GITHUB_PATH"
