@@ -36,8 +36,11 @@ build() { # <compiler> <archiver> <library> <flags...>
 	for pid in "${pids[@]}"; do wait "$pid" || { echo "Compiling Box2D failed" >&2; exit 1; }; done
 	rm -f "$lib"
 	if [[ "$lib" == *.lib ]]; then
-		# MSVC's linker wants a COFF archive
-		"$ar" "/out:$lib" "$work"/*.o
+		# MSVC's linker wants a COFF archive. Git Bash rewrites arguments that start with "/" as
+		# paths (it turned /out: into C:\Program Files\Git\out): pass Windows paths, unconverted
+		local objects=()
+		for o in "$work"/*.o; do objects+=("$(cygpath -w "$o")"); done
+		MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$ar" "/out:$(cygpath -w "$lib")" "${objects[@]}"
 	elif [[ "$lib" == *.o ]]; then
 		# One relocatable object (the web): Odin keeps C symbol names on wasm only for .o files
 		"$ar" -r "$work"/*.o -o "$lib"

@@ -5,7 +5,8 @@
 #   Linux:   Odin from its GitHub release; SDL3, SDL3_image, SDL3_ttf, SDL3_mixer built from
 #            source into $SDL_PREFIX (the workflow caches it) and installed into /usr/local,
 #            because Ubuntu has no SDL3 packages
-#   macOS:   Odin and SDL3 from Homebrew (Odin ships no Intel macOS build)
+#   macOS:   (Apple Silicon) Odin from its GitHub release, SDL3 from Homebrew. Not Homebrew's
+#            odin: it lags behind (2026-08 when dev-2026-10 was current), and the code needs dev-2026-10
 #   Windows: Odin from its GitHub release; it carries SDL3's .lib/.dll files, whose folders go
 #            on PATH so tests and tools find the DLLs
 #
@@ -89,8 +90,10 @@ Linux)
 	echo "ODIN_LINK_FLAGS=" >> "$GITHUB_ENV"
 	;;
 Darwin)
-	step "Homebrew: Odin, SDL3"
-	brew install odin sdl3 sdl3_image sdl3_ttf sdl3_mixer > /dev/null
+	# Apple Silicon (the workflow's macOS runner): Odin's release; SDL3 from Homebrew
+	install_odin_release "odin-macos-arm64-$ODIN_VERSION.tar.gz"
+	step "Homebrew: SDL3"
+	brew install sdl3 sdl3_image sdl3_ttf sdl3_mixer > /dev/null
 	done_
 	prefix=$(brew --prefix)
 	echo "ODIN_LINK_FLAGS=-extra-linker-flags:-L$prefix/lib" >> "$GITHUB_ENV"
@@ -114,13 +117,19 @@ MINGW* | MSYS* | CYGWIN*)
 	cygpath -w "$HOME/odin" >> "$GITHUB_PATH"
 	for d in sdl3 sdl3/image sdl3/ttf sdl3/mixer; do cygpath -w "$root/vendor/$d" >> "$GITHUB_PATH"; done
 	;;
-Linux)
+Linux | Darwin)
 	echo "$HOME/odin" >> "$GITHUB_PATH"
 	;;
 esac
 
-# Odin's STB libraries (Skald needs them); Windows' release has them built
-if [[ ! -f "$root/vendor/stb/lib/stb_image.a" && ! -f "$root/vendor/stb/lib/darwin/stb_image.a" && ! -f "$root/vendor/stb/lib/stb_image.lib" ]]; then
+# Odin's STB libraries (Skald needs them), checked for this OS: the Linux release carries the
+# macOS ones (lib/darwin/) but not its own; Windows' are built
+case "$(uname -s)" in
+Linux) stb="$root/vendor/stb/lib/stb_truetype.a" ;;
+Darwin) stb="$root/vendor/stb/lib/darwin/stb_truetype.a" ;;
+*) stb="$root/vendor/stb/lib/stb_truetype.lib" ;;
+esac
+if [[ ! -f "$stb" ]]; then
 	step "STB"
 	(cd "$root/vendor/stb/src" && sh build_stb.sh) > /dev/null
 	done_

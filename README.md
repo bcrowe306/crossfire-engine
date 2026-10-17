@@ -27,7 +27,7 @@ Use it from a game as a package: `import e "engine:."` with `-collection:engine=
 ## Releases
 
 Pushing a version tag (`v0.2.0`, or `v0.2.0-dev.1` for a pre-release) builds and tests the engine on
-Linux x86_64, Windows x86_64 and macOS x86_64 (`.github/workflows/build.yml`) and, when all pass,
+Linux x86_64, Windows x86_64 and macOS arm64 (`.github/workflows/build.yml`) and, when all pass,
 publishes the player for each as a [release](https://github.com/bcrowe306/odin_sdl_engine/releases).
 `tools/ci/` holds the scripts the workflow runs (and the editor's reuses).
 
