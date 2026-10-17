@@ -224,6 +224,10 @@ Scene_Build :: proc(scene: ^Scene, data: ^SceneData, projectDir: string, allocat
 			joint.enableSpring, joint.hertz, joint.dampingRatio = node.enableSpring, node.hertz, node.dampingRatio
 			joint.collideConnected = node.collideConnected
 			n = joint
+		case .ParticleEmitter:
+			emitter := CreateParticleEmitter(scene, node.particles)
+			emitter.texture = loadAsset(rm, projectDir, node.texture)
+			n = emitter
 		}
 		if Node_IsPhysicsBody(n) {
 			body := cast(^PhysicsBody)n

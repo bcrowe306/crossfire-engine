@@ -71,6 +71,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `box2d/` | Box2D 3.1.1 bindings: a copy of Odin's `vendor:box2d` linking our own `box2d/lib/` (why: its doc comment). `lib/` is built, not committed |
 | `third_party/box2d`, `tools/build_box2d.sh` | Box2D's sources (submodule) and the script that compiles them (no CMake) |
 | `physics_test.odin`, `physics2_test.odin` | Tests: falling and landing, events, layers, Areas, ray casts, the mover (landing, walls, pushing), shapes with baked transforms, removal, scene files, debug drawing; smoothing at 144 fps, areas seen from bodies, one event per body pair, exits on removal, every joint kind |
+| `particles.odin` | **Particle emitters**: `ParticleEmitter` node (`CreateParticleEmitter`), `ParticleSettings` (every setting; tags describe them for editors: `ParticleSettings_Fields`), `ColorRamp` (stops, `ColorRamp_Evaluate` / `Sort` / `AddStop` / `RemoveStop`), Start / Stop / Clear, text format (`ParticleSettings_Get` / `Set`, `FormatParticleSettings`) |
+| `particles_test.odin` | Tests: ramps, settings text round trip, cycles and bursts, world and local space, forces, collisions with the view, scene files, batched drawing (pixels) |
 | `audio.odin` | SDL3_mixer setup (`Audio_Init`: no device means silence, not an error), loading, and `Game_PlaySound(game, path)` (paths relative to `game.projectDir`, cached). The same on desktop and web |
 | `player/main.odin` | The **player** for projects without scripts: calls `Player_Main` (`Player_Run` with the command line; nothing in the browser). A project with scripts gets its own generated main that also imports its `scripts` package. Used by the editor's Play and, later, exports |
 | `script_test.odin` | Tests: script registration, fields and tags, lifecycle on a node, bad values, `Scene_FindNode` paths, format v3 scripts |
@@ -188,6 +190,20 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
   CollisionShape has a `getBounds` (its extent), so editors can pick and outline it.
 - The web build links `box2d/lib/box2d_web.o`: one relocatable object, because Odin keeps plain C
   symbol names on wasm only for `.o` foreign imports (an `.a` gets `lib/x.a..b2Foo` names).
+
+**Particles** (particles.odin; its doc comment has the details):
+- A `ParticleEmitter`'s `settings` is a plain value (no pointers): scene files store it as a
+  `<particles>` element of the fields that differ from `DEFAULT_PARTICLE_SETTINGS`, by reflection
+  (`FormatParticleSettings`, `ParticleSettings_Set`), so **a new setting needs only the field**
+  (with its tags and a default), plus a case in `ParticleSettings_Get` / `Set` for a new field type.
+  Field order is the editor's order; `group` starts a group.
+- Each update moves the live particles first, then emits (new ones start at age 0), so those
+  emitted at the start of a cycle die exactly as the next cycle starts.
+- Particles live in the world (positions there, emission turned by the node's world rotation) or,
+  with `localSpace`, in the node's space. Drawing is batched: one `RenderGeometry` for all shapes
+  (another for the texture), through `view × inverse(render world)` for world-space particles.
+- `settings.emitting` is how an emitter starts; `emitter.emitting` is whether it's emitting now (a
+  non-continuous one stops after a cycle).
 
 **Scripts** (`script.odin`, doc comment at the top has the full example):
 - A script struct's first field is `using script: e.Script` (checked at registration). It's
@@ -326,6 +342,7 @@ comment. What was needed, and why:
   - Menus and labels in a scene with a camera are drawn through it, because scene files can't set
     `screenLayers` yet.
   - Audio assets aren't loaded with the scene (play them from scripts: `Game_PlaySound`, loaded on first use).
+- **Format version 6** adds ParticleEmitter nodes and their `<particles>` element.
 - **Format version 5** adds `<global>` elements to project.xml and assets of kind "Data".
 - **Format version 4** adds the physics node kinds and the project's physics settings.
 - **Format version 3** adds `<script>` elements; version 2 stores local positions, and version 1

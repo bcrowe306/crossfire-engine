@@ -55,7 +55,15 @@ and scale are relative to its parent:
 		<node kind="Area" name="Goal" x="1200" y="640" collisionMask="2">
 			<node kind="CollisionShape" shape="Polygon" points="-20,20 20,20 0,-20"/>
 		</node>
+		<node kind="ParticleEmitter" name="Sparks" x="640" y="500" texture="assets/spark.png">
+			<particles amount="80" angle="270" angleSpread="40" angleVariance="1"
+			           colorRamp="0:#ffe664 0.5:#e63228 1:#28282800"/>
+		</node>
 	</scene>
+
+ParticleEmitter nodes (particles.odin) keep their settings in a `<particles>` child element: one
+attribute per `ParticleSettings` field that differs from `DEFAULT_PARTICLE_SETTINGS`, named like
+the field, in `ParticleSettings_Get`'s format. The node's `texture` is the Texture shape's image.
 
 Physics (physics.odin, physics_nodes.odin): body nodes (StaticBody, DynamicBody, CharacterMover,
 Area) get their shape from the CollisionShape nodes under them. Collision layers are lists of
@@ -73,6 +81,8 @@ Current limits:
 - Only images are loaded; Audio and Font assets are listed but not used.
 
 Version history:
+- 6: ParticleEmitter nodes and their `<particles>` element. Version 5 files are valid version 6
+  files.
 - 5: global scripts (`<global script="..."><prop name value/></global>` in project.xml) and
   assets of kind "Data" (data resources, `data/<name>.data.json`: data.odin). Version 4 files are
   valid version 5 files.
@@ -102,7 +112,7 @@ import "core:strings"
 import sdl "vendor:sdl3"
 
 // Version written by the editor. This loader also reads older versions
-PROJECT_FORMAT_VERSION :: 5
+PROJECT_FORMAT_VERSION :: 6
 
 /*
 Node kinds a scene file can contain.
@@ -130,6 +140,8 @@ SceneNodeKind :: enum {
 	RayCast,
 	// Connects two physics bodies: a hinge, rope, spring, slider, weld or wheel
 	Joint,
+	// Emits particles: sparks, smoke, fire, rain (particles.odin)
+	ParticleEmitter,
 }
 
 /*
@@ -163,6 +175,7 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.CollisionShape = {"The shape of the physics body above it: rectangle, circle, capsule, polygon, segment"},
 	.RayCast        = {"A ray that reports the first physics body in its way: line of sight, ground checks"},
 	.Joint          = {"Connects two physics bodies: a hinge, rope, spring, slider, weld or wheel"},
+	.ParticleEmitter = {"Emits particles that move, spin, grow and change color: sparks, smoke, fire, rain"},
 }
 
 /*
@@ -191,7 +204,7 @@ SceneNodeData :: struct {
 	// Hidden nodes, and everything under them, aren't drawn
 	visible: bool,
 
-	// Sprite, AnimatedSprite: image path relative to the project folder
+	// Sprite, AnimatedSprite, ParticleEmitter (its Texture shape): image path relative to the project folder
 	texture: string,
 	// Label
 	text: string,
@@ -257,6 +270,8 @@ SceneNodeData :: struct {
 	hertz: f32,
 	dampingRatio: f32,
 	collideConnected: bool,
+	// ParticleEmitter: its `<particles>` element (particles.odin)
+	particles: ParticleSettings,
 }
 
 // A script field's value in a scene file: `<prop name="speed" value="250"/>`
@@ -291,6 +306,7 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	excludeParent = true,
 	jointOffset = {0, 100},
 	dampingRatio = 0.5,
+	particles = DEFAULT_PARTICLE_SETTINGS,
 }
 
 SceneData :: struct {
@@ -662,6 +678,9 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		switch doc.elements[child].ident {
 		case "node":
 			parseNode(doc, child, index, scene)
+		case "particles":
+			// Unknown or bad attributes keep the default
+			for a in doc.elements[child].attribs do ParticleSettings_Set(&scene.nodes[index].particles, a.key, a.val)
 		case "item":
 			append(&scene.nodes[index].items, MenuItemData{
 				cloneAttr(doc, child, "label", ""),

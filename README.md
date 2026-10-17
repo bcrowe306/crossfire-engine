@@ -4,7 +4,7 @@
 
 A 2D game engine in [Odin](https://odin-lang.org) on SDL3: scenes of nodes with transforms, sprites
 and animation, text and menus, a camera, Box2D physics (bodies, areas, ray casts, joints, a
-character mover), scripts in Odin, global game state with JSON saves, data resources, and a player
+character mover), particle emitters (with color ramps), scripts in Odin, global game state with JSON saves, data resources, and a player
 that runs projects made with [odin_sdl_editor](https://github.com/bcrowe306/odin_sdl_editor). It
 builds for Linux, Windows, macOS and the web (WebAssembly).
 
