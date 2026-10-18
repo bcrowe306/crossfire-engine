@@ -127,6 +127,7 @@ ScriptFieldType :: enum {
 	Font,
 	Data,
 	Component,
+	Music,
 }
 
 // An exported field of a script
@@ -293,7 +294,7 @@ Script_SetField :: proc(self: rawptr, field: ScriptField, text: string, allocato
 		case "false", "0", "": (cast(^bool)at)^ = false
 		case: return false
 		}
-	case .String, .Texture, .Sound, .Font, .Data, .Component:
+	case .String, .Texture, .Sound, .Font, .Data, .Component, .Music:
 		// The handles are a struct holding a path: laid out like a string
 		(cast(^string)at)^ = strings.clone(text, allocator)
 	case .Vector2:
@@ -407,6 +408,7 @@ exportedFields :: proc(T: typeid) -> []ScriptField {
 		case f.type.id == FontAsset: field.type = .Font
 		case f.type.id == DataAsset: field.type = .Data
 		case f.type.id == ComponentAsset: field.type = .Component
+		case f.type.id == MusicAsset: field.type = .Music
 		case reflect.is_enum(base):
 			field.type = .Enum
 			field.enumNames = reflect.enum_field_names(f.type.id)

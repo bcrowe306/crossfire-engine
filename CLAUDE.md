@@ -76,6 +76,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `input_test.odin` | Tests: key, mouse and wheel edges, focus loss, actions from keys, buttons and sticks (deadzones, strength, vectors), project file actions |
 | `particles.odin` | **Particle emitters**: `ParticleEmitter` node (`CreateParticleEmitter`), `ParticleSettings` (every setting; tags describe them for editors: `ParticleSettings_Fields`), `ColorRamp` (stops, `ColorRamp_Evaluate` / `Sort` / `AddStop` / `RemoveStop`), Start / Stop / Clear, text format (`ParticleSettings_Get` / `Set`, `FormatParticleSettings`) |
 | `particles_test.odin` | Tests: ramps, settings text round trip, cycles and bursts, world and local space, forces, collisions with the view, scene files, batched drawing (pixels) |
+| `audio_nodes.odin` | **Sound nodes and mix buses**: `AudioPlayer` (a sound: volume, pitch, pan, loop, autostart), `AudioPlayer2D` (panned and faded by its position from the listener: the camera, else the game area's middle; `Audio_Positional`), `MusicPlayer` (streams a Music asset; fades, seek, position); `AudioSettings`; buses (`Game.buses`, Master first: `Audio_SetBuses` from project.xml, `Audio_AddBus`, `Audio_SetBusVolume` / `Pan` / `Mute`), `Audio_Output` (node × bus × Master, applied per track every frame) |
+| `audio_test.odin` | Tests: bus output (volume, pan laws, mute, unknown bus), positional volume and pan, sound nodes and buses from scene files (no device needed) |
 | `audio.odin` | SDL3_mixer setup (`Audio_Init`: no device means silence, not an error), loading, and `Game_PlaySound(game, path)` (paths relative to `game.projectDir`, cached). The same on desktop and web |
 | `player/main.odin` | The **player** for projects without scripts: calls `Player_Main` (`Player_Run` with the command line; nothing in the browser). A project with scripts gets its own generated main that also imports its `scripts` package. Used by the editor's Play and, later, exports |
 | `script_test.odin` | Tests: script registration, fields and tags, lifecycle on a node, bad values, `Scene_FindNode` paths, format v3 scripts |
@@ -216,6 +218,18 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
 - An action's strength is the strongest binding: 1 for keys and buttons, a stick's travel past
   the deadzone rescaled to 0..1. The wheel's directions are buttons pressed for one frame.
 - Losing window focus releases every key and mouse button.
+
+**Sound** (audio_nodes.odin; its doc comment has the details):
+- Each player owns one SDL3_mixer track (made on first use, so no device means no track and
+  silence). Sounds come from the resource manager (decoded once, shared); music is loaded per node
+  with predecode off (streamed) and freed with the node.
+- Output is recomputed every frame (`applyOutput`): gain = node volume × bus volume × Master volume
+  (0 when either is muted), stereo gains from the balance law `L = min(1, 1 - p)`, `R = min(1, 1 + p)`
+  multiplied across the node's pan, a 2D player's positional pan, its bus and Master. Pitch is the
+  track's frequency ratio (speed and pitch together).
+- A bus also has a `mix.Group` its players' tracks join: that's where bus effects go later.
+- A scene switch stops the old scene's players (`Audio_SceneExited`) and clears `started`, so
+  autostart players start again when the scene is back. Players unregister in their destroy.
 
 **Particles** (particles.odin; its doc comment has the details):
 - A `ParticleEmitter`'s `settings` is a plain value (no pointers): scene files store it as a
@@ -367,7 +381,11 @@ comment. What was needed, and why:
   writer must stay in sync with it.
   - Menus and labels in a scene with a camera are drawn through it, because scene files can't set
     `screenLayers` yet.
-  - Audio assets aren't loaded with the scene (play them from scripts: `Game_PlaySound`, loaded on first use).
+  - Sound nodes load their sound when the scene is built (`Scene_Build` with scripts attached; the
+    editor's viewport doesn't); `Game_PlaySound` still plays any sound from code, loaded on first use.
+- **Format version 10** adds sound nodes (`AudioPlayer`, `AudioPlayer2D`, `MusicPlayer`: `sound`,
+  `bus`, `volume`, `pitch`, `pan`, `loop`, `autostart`, `maxDistance`, `attenuation`, `fadeIn`,
+  `fadeOut`), `<bus>` elements in project.xml and assets of kind "Music".
 - **Format version 9** adds components (`.component.xml` files, assets of kind "Component") and
   `Component` nodes.
 - **Format version 8** adds input actions (`<action>` in project.xml).

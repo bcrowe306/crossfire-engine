@@ -59,6 +59,9 @@ Game :: struct {
 	physics: PhysicsSettings,
 	// The keyboard, mouse, gamepads and the project's actions (input.odin)
 	input: InputState,
+	// Mix buses, Master first, and every sound node (audio_nodes.odin)
+	buses: [dynamic]AudioBus,
+	audioPlayers: [dynamic]^AudioPlayer,
 	// Components read so far, by path (nil: couldn't be read); in the game's memory (project_loader.odin)
 	components: map[string]^SceneData,
 	// The folder asset paths are relative to (owned; set by Game_LoadProject, "" for the working directory)
@@ -119,6 +122,7 @@ Game_Destroy :: proc(game: ^Game) {
 		delete(name)
 	}
 	delete(game.scenes)
+	Audio_DestroyBuses(game)
 	delete(game.projectDir)
 	game.resourceManager->destroy()
 	delete(game.globals)
@@ -181,6 +185,8 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 		log.info("Switching to next scene: ")
 		if game.currentScene != nil {
 			game.currentScene.onExit->notify(game.currentScene, nil)
+			// Its sounds stop (and start again when it's back)
+			Audio_SceneExited(game, game.currentScene)
 		}
 		game.nextScenePtr.onEnter->notify(game.nextScenePtr, nil)
 		game.currentScene = game.nextScenePtr

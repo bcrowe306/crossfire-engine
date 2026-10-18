@@ -100,9 +100,12 @@ Current limits:
 - A scene's Camera applies to every node in it, including Labels and Menus (scene files can't
   set `scene.screenLayers` yet).
 - Labels and Menus follow their position only; their rotation and scale are ignored.
-- Only images are loaded; Audio and Font assets are listed but not used.
+- Assets aren't preloaded: images load with the nodes that use them, sounds and music with their
+  sound nodes (and from code on first use); Font assets are listed but not used.
 
 Version history:
+- 10: sound nodes (AudioPlayer, AudioPlayer2D, MusicPlayer), mix buses (`<bus>` in project.xml),
+  assets of kind "Music". Version 9 files are valid version 10 files.
 - 9: components (`<component>` files, assets of kind "Component") and `Component` nodes. Version 8
   files are valid version 9 files.
 - 8: input actions (`<action>` in project.xml). Version 7 files are valid version 8 files.
@@ -139,7 +142,7 @@ import "core:strings"
 import sdl "vendor:sdl3"
 
 // Version written by the editor. This loader also reads older versions
-PROJECT_FORMAT_VERSION :: 9
+PROJECT_FORMAT_VERSION :: 10
 
 /*
 Node kinds a scene file can contain.
@@ -171,6 +174,10 @@ SceneNodeKind :: enum {
 	ParticleEmitter,
 	// An instance of a component (a saved node tree): its nodes are built in its place
 	Component,
+	// Sound nodes (audio_nodes.odin): a sound; a sound in the world; streamed music
+	AudioPlayer,
+	AudioPlayer2D,
+	MusicPlayer,
 }
 
 /*
@@ -206,6 +213,9 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.Joint          = {"Connects two physics bodies: a hinge, rope, spring, slider, weld or wheel"},
 	.ParticleEmitter = {"Emits particles that move, spin, grow and change color: sparks, smoke, fire, rain"},
 	.Component      = {"An instance of a component: a node tree saved in the assets, reused in any scene"},
+	.AudioPlayer    = {"Plays a sound: volume, pitch, pan, looping, through a mix bus"},
+	.AudioPlayer2D  = {"Plays a sound in the world: panned and quieter with distance from the camera"},
+	.MusicPlayer    = {"Streams music: fades, looping, seeking, through a mix bus"},
 }
 
 /*
@@ -310,6 +320,11 @@ SceneNodeData :: struct {
 	particles: ParticleSettings,
 	// Component: the component file it's an instance of (relative to the project folder)
 	component: string,
+	// AudioPlayer, AudioPlayer2D, MusicPlayer: the sound (or music) file, the bus ("" Master),
+	// and `volume`, `pitch`, `pan`, `loop`, `autostart`, `maxDistance`, `attenuation`, `fadeIn`, `fadeOut`
+	sound: string,
+	bus: string,
+	audio: AudioSettings,
 }
 
 /*
@@ -360,6 +375,7 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	jointOffset = {0, 100},
 	dampingRatio = 0.5,
 	particles = DEFAULT_PARTICLE_SETTINGS,
+	audio = DEFAULT_AUDIO_SETTINGS,
 }
 
 SceneData :: struct {
@@ -375,7 +391,7 @@ SceneRef :: struct {
 
 AssetRef :: struct {
 	path: string,
-	// "Image", "Audio", "Font", "Data" or "Component"
+	// "Image", "Audio", "Music", "Font", "Data" or "Component"
 	kind: string,
 }
 
@@ -393,6 +409,8 @@ ProjectData :: struct {
 	globals: [dynamic]GlobalData,
 	// Input actions, in order: `<action name="jump"><key key="Space"/></action>` (input.odin)
 	actions: [dynamic]InputActionData,
+	// Mix buses (Master's settings too, if listed): `<bus name="Music" volume="0.8"/>` (audio_nodes.odin)
+	buses: [dynamic]AudioBusData,
 }
 
 ProjectError :: enum {
@@ -436,6 +454,7 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		assets = make([dynamic]AssetRef),
 		globals = make([dynamic]GlobalData),
 		actions = make([dynamic]InputActionData),
+		buses = make([dynamic]AudioBusData),
 		physics = {
 			pixelsPerMeter = max(attrF32(doc, 0, "pixelsPerMeter", DEFAULT_PHYSICS.pixelsPerMeter), 1),
 			gravity = {attrF32(doc, 0, "gravityX", DEFAULT_PHYSICS.gravity.x), attrF32(doc, 0, "gravityY", DEFAULT_PHYSICS.gravity.y)},
@@ -456,6 +475,13 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 				append(&global.props, ScriptPropData{cloneAttr(doc, prop, "name", ""), cloneAttr(doc, prop, "value", "")})
 			}
 			append(&project.globals, global)
+		case "bus":
+			append(&project.buses, AudioBusData{
+				name = cloneAttr(doc, child, "name", MASTER_BUS),
+				volume = max(attrF32(doc, child, "volume", 1), 0),
+				pan = clamp(attrF32(doc, child, "pan", 0), -1, 1),
+				mute = attrBool(doc, child, "mute", false),
+			})
 		case "action":
 			action := InputActionData{
 				name = cloneAttr(doc, child, "name", ""),
@@ -564,6 +590,8 @@ ProjectData_Destroy :: proc(project: ^ProjectData, allocator := context.allocato
 		delete(a.bindings)
 	}
 	delete(project.actions)
+	for b in project.buses do delete(b.name)
+	delete(project.buses)
 	delete(project.name)
 	delete(project.startScene)
 	project^ = {}
@@ -590,6 +618,8 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.animations)
 		delete(node.autoplay)
 		delete(node.component)
+		delete(node.sound)
+		delete(node.bus)
 	}
 	delete(scene.nodes)
 	delete(scene.name)
@@ -754,6 +784,21 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.animations = make([dynamic]AnimationData)
 	node.autoplay = cloneAttr(doc, element, "autoplay", "")
 	node.component = cloneAttr(doc, element, "component", "")
+	node.sound = cloneAttr(doc, element, "sound", "")
+	node.bus = cloneAttr(doc, element, "bus", "")
+	d := DEFAULT_AUDIO_SETTINGS
+	node.audio = {
+		volume = max(attrF32(doc, element, "volume", d.volume), 0),
+		pitch = clamp(attrF32(doc, element, "pitch", d.pitch), 0.01, 100),
+		pan = clamp(attrF32(doc, element, "pan", d.pan), -1, 1),
+		// Not AnimatedSprite's `loop` (its default is on)
+		loop = node.kind == .AudioPlayer || node.kind == .AudioPlayer2D || node.kind == .MusicPlayer ? attrBool(doc, element, "loop", false) : false,
+		autostart = attrBool(doc, element, "autostart", false),
+		maxDistance = max(attrF32(doc, element, "maxDistance", d.maxDistance), 1),
+		attenuation = max(attrF32(doc, element, "attenuation", d.attenuation), 0.01),
+		fadeIn = max(attrF32(doc, element, "fadeIn", 0), 0),
+		fadeOut = max(attrF32(doc, element, "fadeOut", 0), 0),
+	}
 	node.items = make([dynamic]MenuItemData)
 	node.props = make([dynamic]ScriptPropData)
 	node.collisionLayer = attrLayers(doc, element, "collisionLayer", DEFAULT_SCENE_NODE.collisionLayer)

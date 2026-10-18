@@ -86,8 +86,9 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 	if game.name == "" do game.name = strings.clone(project.name)
 	// Data, Global and Save_Game use the game that's playing
 	currentGame = game
-	// The project's input actions (input.odin)
+	// The project's input actions (input.odin) and mix buses (audio_nodes.odin)
 	Input_SetActions(game, project.actions[:])
+	Audio_SetBuses(game, project.buses[:])
 	// Globals exist before the scenes (their nodes' scripts may look them up in `ready`)
 	Globals_Start(game, project.globals[:])
 	delete(game.projectDir)
@@ -308,6 +309,14 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			emitter := CreateParticleEmitter(scene, node.particles)
 			emitter.texture = loadAsset(rm, projectDir, node.texture)
 			n = emitter
+		case .AudioPlayer, .AudioPlayer2D, .MusicPlayer:
+			kind := node.kind == .MusicPlayer ? AudioPlayerKind.Music : node.kind == .AudioPlayer2D ? AudioPlayerKind.Positional : AudioPlayerKind.Sound
+			player := CreateAudioPlayer(scene, kind, node.audio)
+			player.bus = strings.clone(node.bus, Node_GetAllocator(player))
+			// Sounds don't play in tools that build scenes without scripts (the editor's viewport)
+			if attachScripts do AudioPlayer_SetSound(player, node.sound)
+			else do player.sound = strings.clone(node.sound, Node_GetAllocator(player))
+			n = player
 		case .Component:
 			// The component's tree in its place; its root takes this node's name, transform,
 			// layer and visibility (below). A missing component leaves an empty node

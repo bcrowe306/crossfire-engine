@@ -43,6 +43,11 @@ DataAsset :: struct {
 	path: string,
 }
 
+// Music in the project: streamed by a MusicPlayer as it plays (not loaded whole like a sound)
+MusicAsset :: struct {
+	path: string,
+}
+
 // A component in the project (a saved node tree, `.component.xml`): `Scene_Instantiate` adds one
 ComponentAsset :: struct {
 	path: string,
