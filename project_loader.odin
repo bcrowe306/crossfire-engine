@@ -16,8 +16,9 @@ Sprite :: struct {
 }
 
 /*
-A sprite sheet animation drawn centered on the node's origin. Created from AnimatedSprite nodes;
-it plays its single animation, "default", from the start.
+A sprite sheet animation drawn centered on the node's origin. Created from AnimatedSprite nodes:
+its player holds the node's animations (by name; "default" when the scene file has none) and
+starts the autoplay one. Scripts switch with `AnimationPlayer_Play(&sprite.animation, "jump")`.
 */
 AnimatedSprite :: struct {
 	using node: Node,
@@ -163,9 +164,16 @@ Scene_Build :: proc(scene: ^Scene, data: ^SceneData, projectDir: string, allocat
 			AnimationPlayer_Init(&sprite.animation, allocator)
 			texture := loadAsset(rm, projectDir, node.texture)
 			if texture != nil {
-				AnimationPlayer_Add(&sprite.animation, CreateSpriteSheetAnimation("default", texture,
-					node.columns, node.rows, node.fps, node.loop, playMode = node.playMode, allocator = allocator))
-				AnimationPlayer_Play(&sprite.animation, "default")
+				if len(node.animations) == 0 {
+					AnimationPlayer_Add(&sprite.animation, CreateSpriteSheetAnimation("default", texture, node.columns, node.rows,
+						node.fps, node.loop, playMode = node.playMode, margin = node.margin, spacing = node.spacing, allocator = allocator))
+				}
+				for a in node.animations {
+					AnimationPlayer_Add(&sprite.animation, CreateSpriteSheetAnimation(a.name, texture, node.columns, node.rows,
+						a.fps, a.loop, a.start, a.end, a.playMode, node.margin, node.spacing, allocator))
+				}
+				// The autoplay animation, else the first
+				if node.autoplay == "" || !AnimationPlayer_Play(&sprite.animation, node.autoplay) do AnimationPlayer_Play(&sprite.animation, 0)
 			}
 			n = sprite
 

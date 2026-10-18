@@ -186,6 +186,28 @@ SpriteSheetAnimation_FrameRect :: proc(animation: ^SpriteSheetAnimation, frame: 
 	}
 }
 
+/*
+A cell's rectangle in a sprite sheet of a given size, without an animation (editors use it for
+thumbnails). Cells are numbered left to right, top to bottom.
+
+Inputs:
+- sheetSize: The texture's size in pixels
+- columns, rows: The grid
+- margin: Pixels around the grid
+- spacing: Pixels between cells
+- frame: The cell
+
+Returns:
+- The cell's rectangle in texture pixels
+*/
+SpriteSheet_CellRect :: proc(sheetSize: [2]f32, columns, rows: int, margin, spacing: f32, frame: int) -> sdl.FRect {
+	cells := [2]f32{f32(max(columns, 1)), f32(max(rows, 1))}
+	size := (sheetSize - margin * 2 - spacing * (cells - 1)) / cells
+	column := frame % max(columns, 1)
+	row := frame / max(columns, 1)
+	return {margin + f32(column) * (size.x + spacing), margin + f32(row) * (size.y + spacing), size.x, size.y}
+}
+
 @(private="file")
 spriteSheetFrameCount :: proc(animation: ^Animation) -> int {
 	sheet := cast(^SpriteSheetAnimation)animation

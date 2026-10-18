@@ -33,6 +33,11 @@ and scale are relative to its parent:
 				<node kind="AnimatedSprite" name="Flame" x="0" y="40" texture="assets/flame.png"
 				      columns="4" rows="1" fps="12"/>
 			</node>
+			<node kind="AnimatedSprite" name="Hero" x="200" y="400" texture="assets/hero.png"
+			      columns="4" rows="2" margin="0" spacing="2" autoplay="walk">
+				<animation name="walk" start="0" end="3" fps="10" loop="true"/>
+				<animation name="jump" start="4" end="7" fps="12" playMode="PingPong"/>
+			</node>
 		</node>
 		<node kind="Label" name="Title" x="640" y="180" text="ASTEROIDS" fontSize="64"
 		      color="#ebf0ff" centered="true" layer="7"/>
@@ -61,6 +66,13 @@ and scale are relative to its parent:
 		</node>
 	</scene>
 
+An AnimatedSprite's texture is a sprite sheet of `columns` x `rows` cells (`margin` pixels around
+the grid, `spacing` between cells), numbered left to right, top to bottom from 0. Its
+`<animation>` elements are named ranges of cells (`start`, `end` inclusive; `end` -1 is the last
+cell), each with its `fps`, `loop` and `playMode`; `autoplay` names the one it plays from the start
+(else the first). Without `<animation>` elements it plays one animation, "default": every cell, at
+the node's `fps`, `loop` and `playMode` (the format before version 7).
+
 ParticleEmitter nodes (particles.odin) keep their settings in a `<particles>` child element: one
 attribute per `ParticleSettings` field that differs from `DEFAULT_PARTICLE_SETTINGS`, named like
 the field, in `ParticleSettings_Get`'s format. The node's `texture` is the Texture shape's image.
@@ -81,6 +93,8 @@ Current limits:
 - Only images are loaded; Audio and Font assets are listed but not used.
 
 Version history:
+- 7: AnimatedSprite `<animation>` elements, `margin`, `spacing` and `autoplay`. Version 6 files are
+  valid version 7 files.
 - 6: ParticleEmitter nodes and their `<particles>` element. Version 5 files are valid version 6
   files.
 - 5: global scripts (`<global script="..."><prop name value/></global>` in project.xml) and
@@ -112,7 +126,7 @@ import "core:strings"
 import sdl "vendor:sdl3"
 
 // Version written by the editor. This loader also reads older versions
-PROJECT_FORMAT_VERSION :: 6
+PROJECT_FORMAT_VERSION :: 7
 
 /*
 Node kinds a scene file can contain.
@@ -219,6 +233,12 @@ SceneNodeData :: struct {
 	fps: f32,
 	loop: bool,
 	playMode: AnimationPlayMode,
+	// AnimatedSprite: the sheet's grid margin and spacing (pixels), its animations (none: one
+	// "default" animation of every cell, from fps/loop/playMode above), and the one played first
+	margin: f32,
+	spacing: f32,
+	animations: [dynamic]AnimationData,
+	autoplay: string,
 	// Menu
 	items: [dynamic]MenuItemData,
 	// Any kind: the script attached to the node ("" for none), and its exported field values
@@ -272,6 +292,21 @@ SceneNodeData :: struct {
 	collideConnected: bool,
 	// ParticleEmitter: its `<particles>` element (particles.odin)
 	particles: ParticleSettings,
+}
+
+/*
+An AnimatedSprite's animation: a named range of its sheet's cells.
+
+	<animation name="walk" start="0" end="3" fps="10" loop="true" playMode="Forward"/>
+*/
+AnimationData :: struct {
+	name: string,
+	// First and last cell played, inclusive; end -1 is the sheet's last cell
+	start: int,
+	end: int,
+	fps: f32,
+	loop: bool,
+	playMode: AnimationPlayMode,
 }
 
 // A script field's value in a scene file: `<prop name="speed" value="250"/>`
@@ -472,6 +507,9 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.points)
 		delete(node.bodyA)
 		delete(node.bodyB)
+		for a in node.animations do delete(a.name)
+		delete(node.animations)
+		delete(node.autoplay)
 	}
 	delete(scene.nodes)
 	delete(scene.name)
@@ -631,6 +669,10 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.fps = attrF32(doc, element, "fps", DEFAULT_SCENE_NODE.fps)
 	node.loop = attrBool(doc, element, "loop", true)
 	node.playMode = attrEnum(doc, element, "playMode", AnimationPlayMode.Forward)
+	node.margin = attrF32(doc, element, "margin", 0)
+	node.spacing = attrF32(doc, element, "spacing", 0)
+	node.animations = make([dynamic]AnimationData)
+	node.autoplay = cloneAttr(doc, element, "autoplay", "")
 	node.items = make([dynamic]MenuItemData)
 	node.props = make([dynamic]ScriptPropData)
 	node.collisionLayer = attrLayers(doc, element, "collisionLayer", DEFAULT_SCENE_NODE.collisionLayer)
@@ -678,6 +720,15 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		switch doc.elements[child].ident {
 		case "node":
 			parseNode(doc, child, index, scene)
+		case "animation":
+			append(&scene.nodes[index].animations, AnimationData{
+				name = cloneAttr(doc, child, "name", "default"),
+				start = max(attrInt(doc, child, "start", 0), 0),
+				end = attrInt(doc, child, "end", -1),
+				fps = attrF32(doc, child, "fps", DEFAULT_SCENE_NODE.fps),
+				loop = attrBool(doc, child, "loop", false),
+				playMode = attrEnum(doc, child, "playMode", AnimationPlayMode.Forward),
+			})
 		case "particles":
 			// Unknown or bad attributes keep the default
 			for a in doc.elements[child].attribs do ParticleSettings_Set(&scene.nodes[index].particles, a.key, a.val)

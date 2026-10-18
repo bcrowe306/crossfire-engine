@@ -342,6 +342,8 @@ comment. What was needed, and why:
   - Menus and labels in a scene with a camera are drawn through it, because scene files can't set
     `screenLayers` yet.
   - Audio assets aren't loaded with the scene (play them from scripts: `Game_PlaySound`, loaded on first use).
+- **Format version 7** adds AnimatedSprite `<animation>` elements (named cell ranges), `margin`,
+  `spacing` and `autoplay`; without them the node plays one "default" animation as before.
 - **Format version 6** adds ParticleEmitter nodes and their `<particles>` element.
 - **Format version 5** adds `<global>` elements to project.xml and assets of kind "Data".
 - **Format version 4** adds the physics node kinds and the project's physics settings.

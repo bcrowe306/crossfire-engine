@@ -96,3 +96,33 @@ colors_round_trip :: proc(t: ^testing.T) {
 	_, ok = ParseColor("#12345")
 	testing.expect_value(t, ok, false)
 }
+
+@(test)
+parse_animated_sprite_animations :: proc(t: ^testing.T) {
+	text := `<scene formatVersion="7" name="S">
+		<node kind="AnimatedSprite" name="Hero" texture="hero.png" columns="4" rows="2" margin="1" spacing="2" autoplay="jump">
+			<animation name="walk" start="0" end="3" fps="10" loop="true"/>
+			<animation name="jump" start="4" fps="12" playMode="PingPong"/>
+		</node>
+		<node kind="AnimatedSprite" name="Old" texture="old.png" columns="4" fps="6"/>
+	</scene>`
+	scene, err := ParseScene(text)
+	defer SceneData_Destroy(&scene)
+	testing.expect_value(t, err, ProjectError.None)
+	hero := scene.nodes[0]
+	testing.expect_value(t, hero.margin, 1)
+	testing.expect_value(t, hero.spacing, 2)
+	testing.expect_value(t, hero.autoplay, "jump")
+	testing.expect_value(t, len(hero.animations), 2)
+	testing.expect_value(t, hero.animations[0], AnimationData{"walk", 0, 3, 10, true, .Forward})
+	testing.expect_value(t, hero.animations[1].end, -1) // Missing: to the last cell
+	testing.expect_value(t, hero.animations[1].playMode, AnimationPlayMode.PingPong)
+	testing.expect(t, !hero.animations[1].loop, "loop defaults to off")
+	// Before version 7: no animations, the node's fps
+	testing.expect_value(t, len(scene.nodes[1].animations), 0)
+	testing.expect_value(t, scene.nodes[1].fps, 6)
+
+	// Cells of a 4x2 sheet of 44x22 px with a 1 px margin and 2 px spacing: 9 x 9 px each
+	cell := SpriteSheet_CellRect({44, 22}, 4, 2, 1, 2, 5)
+	testing.expect_value(t, cell, sdl.FRect{12, 12, 9, 9})
+}
