@@ -19,8 +19,9 @@ Sound nodes and mix buses, on SDL3_mixer.
 
 Every player goes to a **bus** (`player.bus`; "" is Master), and every bus to **Master**.
 A bus has a volume, a pan and a mute; what a player sounds like is its own settings times its
-bus's times Master's (`Audio_Output`), applied every frame, so changing a bus changes everything
-on it at once. Projects list their buses in project.xml (`<bus name="Music" volume="0.8"/>`, the
+bus's times Master's (`Audio_Output`), so changing a bus changes everything on it at once. The
+player's and its bus's gains go on its track (every frame); Master's go on the final mix
+(audio_meter.odin), so each bus's level meter reads it after its fader, Master's the output. Projects list their buses in project.xml (`<bus name="Music" volume="0.8"/>`, the
 editor's Mixer tab); code can add more (`Audio_AddBus`). Each bus has an SDL3_mixer group its
 players' tracks join, where effects will go.
 
@@ -48,6 +49,8 @@ AudioBus :: struct {
 	mute: bool,
 	// Its SDL3_mixer group (nil without a device), where effects will go
 	group: ^mix.Group,
+	// Its level (`Audio_GetBusLevel`); Master's is the final mix, where its gain and pan apply
+	meter: ^AudioMeter,
 }
 
 // A bus in project.xml: `<bus name="Music" volume="0.8" pan="0" mute="false"/>` (format 10)
@@ -268,7 +271,24 @@ Audio_SetBuses :: proc(game: ^Game, buses: []AudioBusData) {
 		}
 		append(&game.buses, AudioBus{name = strings.clone(b.name, allocator), volume = b.volume, pan = b.pan, mute = b.mute})
 	}
-	if game.mixer != nil do for &b in game.buses do b.group = mix.CreateGroup(game.mixer)
+	for &b in game.buses do b.meter = new(AudioMeter, allocator)
+	if game.mixer != nil {
+		for &b in game.buses {
+			b.group = mix.CreateGroup(game.mixer)
+			AudioMeter_AttachGroup(b.meter, b.group)
+		}
+		AudioMeter_AttachMixer(game.buses[0].meter, game.mixer)
+	}
+	Audio_Update(game)
+}
+
+// Applies Master's volume, pan and mute to the final mix (Game_Update, every frame)
+Audio_Update :: proc(game: ^Game) {
+	if len(game.buses) == 0 do return
+	master := game.buses[0]
+	gain := master.mute ? 0 : max(master.volume, 0)
+	left, right := balance(master.pan)
+	AudioMeter_SetGains(master.meter, gain * left, gain * right)
 }
 
 // Adds a bus from code (going to Master); one by that name already there is kept
@@ -278,7 +298,11 @@ Audio_AddBus :: proc(name: string, volume: f32 = 1, game: ^Game = nil) -> ^Audio
 	if b := Audio_GetBus(name, game); b != nil && (b.name == name) do return b
 	if len(game.buses) == 0 do Audio_SetBuses(game, nil)
 	bus := AudioBus{name = strings.clone(name, Game_GetAllocator(game)), volume = volume}
-	if game.mixer != nil do bus.group = mix.CreateGroup(game.mixer)
+	bus.meter = new(AudioMeter, Game_GetAllocator(game))
+	if game.mixer != nil {
+		bus.group = mix.CreateGroup(game.mixer)
+		AudioMeter_AttachGroup(bus.meter, bus.group)
+	}
 	append(&game.buses, bus)
 	return &game.buses[len(game.buses) - 1]
 }
@@ -312,11 +336,12 @@ nothing, fully right silences the left side. An unknown bus is Master.
 
 Inputs:
 - volume, pan: The player's own (positional players: with distance and position applied)
+- master: Include Master's stage (false: the track's part; the final mix applies Master's)
 
 Returns:
 - The track gain, and the left and right gains
 */
-Audio_Output :: proc(game: ^Game, bus: string, volume, pan: f32) -> (gain, left, right: f32) {
+Audio_Output :: proc(game: ^Game, bus: string, volume, pan: f32, master := true) -> (gain, left, right: f32) {
 	gain = max(volume, 0)
 	left, right = balance(pan)
 	stage :: proc(b: ^AudioBus, gain, left, right: ^f32) {
@@ -327,9 +352,9 @@ Audio_Output :: proc(game: ^Game, bus: string, volume, pan: f32) -> (gain, left,
 		right^ *= r
 	}
 	own := Audio_GetBus(bus, game)
-	master := Audio_GetBus(MASTER_BUS, game)
-	if own != nil && own != master do stage(own, &gain, &left, &right)
-	stage(master, &gain, &left, &right)
+	masterBus := Audio_GetBus(MASTER_BUS, game)
+	if own != nil && own != masterBus do stage(own, &gain, &left, &right)
+	if master do stage(masterBus, &gain, &left, &right)
 	return
 }
 
@@ -360,6 +385,7 @@ Audio_SceneExited :: proc(game: ^Game, scene: ^Scene) {
 
 // Frees the buses' groups and forgets the players (Game_Destroy; the players go with their scenes)
 Audio_DestroyBuses :: proc(game: ^Game) {
+	if game.mixer != nil do _ = mix.SetPostMixCallback(game.mixer, nil, nil)
 	for b in game.buses do if b.group != nil do mix.DestroyGroup(b.group)
 	game.buses = nil
 	delete(game.audioPlayers)
@@ -369,7 +395,7 @@ Audio_DestroyBuses :: proc(game: ^Game) {
 // INTERNAL
 
 // A balance pan: center 1, 1; right 0, 1; left 1, 0
-@(private="file")
+@(private)
 balance :: proc(pan: f32) -> (left, right: f32) {
 	p := math.clamp(pan, -1, 1)
 	return min(1, 1 - p), min(1, 1 + p)
@@ -394,7 +420,7 @@ applyOutput :: proc(player: ^AudioPlayer) {
 		volume *= distanceVolume
 		pan = math.clamp(pan + distancePan, -1, 1)
 	}
-	gain, left, right := Audio_Output(game, player.bus, volume, pan)
+	gain, left, right := Audio_Output(game, player.bus, volume, pan, master = false)
 	_ = mix.SetTrackGain(player.track, gain)
 	gains := mix.StereoGains{left, right}
 	_ = mix.SetTrackStereo(player.track, &gains)

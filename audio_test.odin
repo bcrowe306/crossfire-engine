@@ -2,6 +2,7 @@
 package engine
 
 import "core:testing"
+import sdl "vendor:sdl3"
 
 // Audio tests: buses, panning and distance math, sound nodes from scene files (no audio device)
 
@@ -108,4 +109,29 @@ sound_nodes_from_scene_files :: proc(t: ^testing.T) {
 	// Leaving the scene stops them; autostart starts again when it's back
 	Audio_SceneExited(&game, scene)
 	testing.expect(t, !fire.playing && !fire.started && !jumpPlayer.playing, "stopped")
+}
+
+@(test)
+audio_meters_measure_and_apply :: proc(t: ^testing.T) {
+	// A group's meter measures; a mixer's applies its gains first
+	meter: AudioMeter
+	spec := sdl.AudioSpec{format = .F32, channels = 2, freq = 48000}
+	pcm := []f32{0.5, -0.25, -0.75, 0.1}
+	audioMeterMeasure(&meter, &spec, raw_data(pcm), len(pcm), false)
+	left, right := AudioMeter_Read(&meter)
+	testing.expect_value(t, left, 0.75)
+	testing.expect_value(t, right, 0.25)
+	left, right = AudioMeter_Read(&meter)
+	testing.expect_value(t, left, 0)
+
+	AudioMeter_SetGains(&meter, 0.5, 0)
+	audioMeterMeasure(&meter, &spec, raw_data(pcm), len(pcm), true)
+	testing.expect_value(t, pcm[0], 0.25)
+	testing.expect_value(t, pcm[1], 0)
+	left, right = AudioMeter_Read(&meter)
+	testing.expect_value(t, left, 0.375)
+	testing.expect_value(t, right, 0)
+
+	testing.expect_value(t, AudioLevel_ToDecibels(0), AUDIO_SILENCE_DB)
+	testing.expect(t, abs(AudioLevel_ToDecibels(0.5) + 6.0206) < 0.001, "half is -6 dB")
 }

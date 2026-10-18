@@ -77,6 +77,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `particles.odin` | **Particle emitters**: `ParticleEmitter` node (`CreateParticleEmitter`), `ParticleSettings` (every setting; tags describe them for editors: `ParticleSettings_Fields`), `ColorRamp` (stops, `ColorRamp_Evaluate` / `Sort` / `AddStop` / `RemoveStop`), Start / Stop / Clear, text format (`ParticleSettings_Get` / `Set`, `FormatParticleSettings`) |
 | `particles_test.odin` | Tests: ramps, settings text round trip, cycles and bursts, world and local space, forces, collisions with the view, scene files, batched drawing (pixels) |
 | `audio_nodes.odin` | **Sound nodes and mix buses**: `AudioPlayer` (a sound: volume, pitch, pan, loop, autostart), `AudioPlayer2D` (panned and faded by its position from the listener: the camera, else the game area's middle; `Audio_Positional`), `MusicPlayer` (streams a Music asset; fades, seek, position); `AudioSettings`; buses (`Game.buses`, Master first: `Audio_SetBuses` from project.xml, `Audio_AddBus`, `Audio_SetBusVolume` / `Pan` / `Mute`), `Audio_Output` (node × bus × Master, applied per track every frame) |
+| `audio_meter.odin` | **Level meters** on SDL3_mixer's mix callbacks: `AudioMeter` (atomic peaks), `AudioMeter_AttachGroup` (a bus's group) / `AttachMixer` (the final stage: applies Master's gains, then meters), `Audio_GetBusLevel`, `AudioLevel_ToDecibels`; its own C-convention declarations of the two callback setters |
 | `audio_test.odin` | Tests: bus output (volume, pan laws, mute, unknown bus), positional volume and pan, sound nodes and buses from scene files (no device needed) |
 | `audio.odin` | SDL3_mixer setup (`Audio_Init`: no device means silence, not an error), loading, and `Game_PlaySound(game, path)` (paths relative to `game.projectDir`, cached). The same on desktop and web |
 | `player/main.odin` | The **player** for projects without scripts: calls `Player_Main` (`Player_Run` with the command line; nothing in the browser). A project with scripts gets its own generated main that also imports its `scripts` package. Used by the editor's Play and, later, exports |
@@ -227,7 +228,17 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
   (0 when either is muted), stereo gains from the balance law `L = min(1, 1 - p)`, `R = min(1, 1 + p)`
   multiplied across the node's pan, a 2D player's positional pan, its bus and Master. Pitch is the
   track's frequency ratio (speed and pitch together).
-- A bus also has a `mix.Group` its players' tracks join: that's where bus effects go later.
+- A bus also has a `mix.Group` its players' tracks join: that's where bus effects go later. Its
+  post-mix callback meters it (audio_meter.odin).
+- **Master's gain and pan go on the final mix** (the mixer's post-mix callback, gains set every
+  frame by `Audio_Update`), not on the tracks: tracks carry player × bus (`Audio_Output(...,
+  master = false)`), so a bus's meter reads it after its fader and Master's meter the output.
+  `Game_PlaySound`'s tracks (no bus) get Master too.
+- **Odin's `vendor:sdl3/mixer` declares the mix callback types without `"c"`**: passing a
+  `proc "c"` doesn't compile and an Odin proc would be called from C without a context.
+  audio_meter.odin declares `MIX_SetGroupPostMixCallback` / `MIX_SetPostMixCallback` again with C
+  callbacks, from the same import path (so the web's `system:SDL3_mixer..` aliases match). The
+  callbacks run on the audio thread: contextless, atomics only.
 - A scene switch stops the old scene's players (`Audio_SceneExited`) and clears `started`, so
   autostart players start again when the scene is back. Players unregister in their destroy.
 

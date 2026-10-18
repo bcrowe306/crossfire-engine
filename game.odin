@@ -163,6 +163,7 @@ Game_SwitchScene :: proc(game: ^Game, name: string) -> bool {
 Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 	// Input first: everything this frame sees the same state
 	Input_Update(&game.input, events)
+	Audio_Update(game)
 	for &event in events {
 		if event.type == .WINDOW_RESIZED {
 			game.windowSize = {f32(event.window.data1), f32(event.window.data2)}
