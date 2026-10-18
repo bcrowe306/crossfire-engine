@@ -1,6 +1,7 @@
 package engine
 
 import "core:log"
+import "core:mem"
 import "core:strings"
 import sdl "vendor:sdl3"
 
@@ -133,10 +134,79 @@ Returns:
   nodes in sync with their own data; the caller owns the slice
 */
 Scene_Build :: proc(scene: ^Scene, data: ^SceneData, projectDir: string, allocator := context.temp_allocator, attachScripts := true) -> []^Node {
-	rm := &scene.game.resourceManager
-	created := make([]^Node, len(data.nodes), allocator)
+	return buildNodes(scene, data.nodes[:], projectDir, allocator, attachScripts, 0)
+}
 
-	for &node, i in data.nodes {
+/*
+Adds an instance of a component to a scene: its whole node tree, built like a scene file's, with
+its scripts (their `ready` runs on the scene's next update). Call it as often as needed: each
+call makes another instance. The component's file is read once per game and cached.
+
+Inputs:
+- scene: The scene
+- component: The component (a `COMPONENT_...` constant, or an exported `e.ComponentAsset` field)
+- parent: The node to add it under (nil: the top level)
+- position: Where its root goes, relative to the parent
+
+Returns:
+- The instance's root node (nil, logged, if the component can't be read)
+
+Example:
+	bullet := e.Scene_Instantiate(self.scene, COMPONENT_BULLET, position = e.Node_GetWorldPosition(self.node))
+*/
+Scene_Instantiate :: proc(scene: ^Scene, component: ComponentAsset, parent: ^Node = nil, position: [2]f32 = {}) -> ^Node {
+	if scene == nil || scene.game == nil do return nil
+	instance := DEFAULT_SCENE_NODE
+	instance.kind = .Component
+	instance.component = component.path
+	instance.position = position
+	data, ok := Game_LoadComponent(scene.game, component.path)
+	if !ok do return nil
+	instance.name = data.name
+	created := buildNodes(scene, {instance}, scene.game.projectDir, context.temp_allocator, true, 0)
+	root := created[0]
+	if root != nil && parent != nil do Node_AddChild(parent, root)
+	return root
+}
+
+/*
+A component's parsed file, read the first time and kept for the game's life (instances share it).
+
+Returns:
+- The component's nodes, and false (logged) if it can't be read
+*/
+Game_LoadComponent :: proc(game: ^Game, path: string) -> (^SceneData, bool) {
+	if data, found := game.components[path]; found do return data, data != nil
+	allocator := Game_GetAllocator(game)
+	if game.components == nil do game.components = make(map[string]^SceneData, allocator)
+	full := JoinPath(game.projectDir, path)
+	text, read := Platform_ReadFile(full)
+	data: ^SceneData
+	if !read {
+		log.errorf("Couldn't read component %s", full)
+	} else if parsed, err := ParseComponent(string(text), allocator); err != .None {
+		log.errorf("Couldn't load component %s: %v", full, err)
+	} else if len(parsed.nodes) == 0 {
+		log.errorf("Component %s has no nodes", full)
+	} else {
+		data = new_clone(parsed, allocator)
+	}
+	game.components[strings.clone(path, allocator)] = data
+	return data, data != nil
+}
+
+// Components can hold instances of other components, this many deep (a component that holds
+// itself would never end)
+@(private="file")
+MAX_COMPONENT_DEPTH :: 16
+
+// Builds nodes (a scene's or a component's), components' instances included
+@(private="file")
+buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, allocator: mem.Allocator, attachScripts: bool, depth: int) -> []^Node {
+	rm := &scene.game.resourceManager
+	created := make([]^Node, len(nodes), allocator)
+
+	for &node, i in nodes {
 		n: ^Node
 		switch node.kind {
 		case .Node2D:
@@ -238,6 +308,21 @@ Scene_Build :: proc(scene: ^Scene, data: ^SceneData, projectDir: string, allocat
 			emitter := CreateParticleEmitter(scene, node.particles)
 			emitter.texture = loadAsset(rm, projectDir, node.texture)
 			n = emitter
+		case .Component:
+			// The component's tree in its place; its root takes this node's name, transform,
+			// layer and visibility (below). A missing component leaves an empty node
+			data: ^SceneData
+			ok: bool
+			if node.component != "" && depth < MAX_COMPONENT_DEPTH {
+				data, ok = Game_LoadComponent(scene.game, node.component)
+			} else if depth >= MAX_COMPONENT_DEPTH {
+				log.errorf("%s: components nested more than %d deep (does %s hold itself?)", node.name, MAX_COMPONENT_DEPTH, node.component)
+			}
+			if ok {
+				n = buildNodes(scene, data.nodes[:], projectDir, context.temp_allocator, attachScripts, depth + 1)[0]
+			} else {
+				n = CreateNode(scene, Node)
+			}
 		}
 		if Node_IsPhysicsBody(n) {
 			body := cast(^PhysicsBody)n
@@ -258,7 +343,9 @@ Scene_Build :: proc(scene: ^Scene, data: ^SceneData, projectDir: string, allocat
 			Node_AddChild(created[node.parent], n)
 		}
 		if node.script != "" && attachScripts {
-			if info := Script_Find(node.script); info != nil {
+			if n.script.info != nil {
+				log.warnf("%s: its component's root has a script already; '%s' isn't attached", node.name, node.script)
+			} else if info := Script_Find(node.script); info != nil {
 				Node_AttachScript(n, info, node.props[:])
 			} else {
 				log.warnf("%s: no script named '%s' (is the project's scripts package built into this player?)", node.name, node.script)

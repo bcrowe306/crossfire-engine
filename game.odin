@@ -59,6 +59,8 @@ Game :: struct {
 	physics: PhysicsSettings,
 	// The keyboard, mouse, gamepads and the project's actions (input.odin)
 	input: InputState,
+	// Components read so far, by path (nil: couldn't be read); in the game's memory (project_loader.odin)
+	components: map[string]^SceneData,
 	// The folder asset paths are relative to (owned; set by Game_LoadProject, "" for the working directory)
 	projectDir: string,
 	update: proc(game: ^Game, events: []sdl.Event, deltaTime: f64),
@@ -109,6 +111,8 @@ Game_GetAllocator :: proc(game: ^Game) -> runtime.Allocator {
 Game_Destroy :: proc(game: ^Game) {
 	Globals_Destroy(game)
 	Input_Destroy(&game.input)
+	// Their memory is the game's arena, freed below
+	game.components = nil
 	for name, scene in game.scenes {
 		Scene_Destroy(scene)
 		free(scene)

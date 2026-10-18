@@ -103,6 +103,8 @@ Current limits:
 - Only images are loaded; Audio and Font assets are listed but not used.
 
 Version history:
+- 9: components (`<component>` files, assets of kind "Component") and `Component` nodes. Version 8
+  files are valid version 9 files.
 - 8: input actions (`<action>` in project.xml). Version 7 files are valid version 8 files.
 - 7: AnimatedSprite `<animation>` elements, `margin`, `spacing` and `autoplay`. Version 6 files are
   valid version 7 files.
@@ -137,7 +139,7 @@ import "core:strings"
 import sdl "vendor:sdl3"
 
 // Version written by the editor. This loader also reads older versions
-PROJECT_FORMAT_VERSION :: 8
+PROJECT_FORMAT_VERSION :: 9
 
 /*
 Node kinds a scene file can contain.
@@ -167,6 +169,8 @@ SceneNodeKind :: enum {
 	Joint,
 	// Emits particles: sparks, smoke, fire, rain (particles.odin)
 	ParticleEmitter,
+	// An instance of a component (a saved node tree): its nodes are built in its place
+	Component,
 }
 
 /*
@@ -201,6 +205,7 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.RayCast        = {"A ray that reports the first physics body in its way: line of sight, ground checks"},
 	.Joint          = {"Connects two physics bodies: a hinge, rope, spring, slider, weld or wheel"},
 	.ParticleEmitter = {"Emits particles that move, spin, grow and change color: sparks, smoke, fire, rain"},
+	.Component      = {"An instance of a component: a node tree saved in the assets, reused in any scene"},
 }
 
 /*
@@ -303,6 +308,8 @@ SceneNodeData :: struct {
 	collideConnected: bool,
 	// ParticleEmitter: its `<particles>` element (particles.odin)
 	particles: ParticleSettings,
+	// Component: the component file it's an instance of (relative to the project folder)
+	component: string,
 }
 
 /*
@@ -368,7 +375,7 @@ SceneRef :: struct {
 
 AssetRef :: struct {
 	path: string,
-	// "Image", "Audio", "Font" or "Data"
+	// "Image", "Audio", "Font", "Data" or "Component"
 	kind: string,
 }
 
@@ -502,6 +509,42 @@ ParseScene :: proc(text: string, allocator := context.allocator) -> (scene: Scen
 }
 
 /*
+Parses the text of a component file: one node tree saved to be reused in any scene.
+
+	<?xml version="1.0" encoding="UTF-8"?>
+	<component formatVersion="9" name="Ship">
+		<node kind="Sprite" name="Ship" texture="assets/ship.png">
+			<node kind="ParticleEmitter" name="Exhaust" y="30"/>
+		</node>
+	</component>
+
+Its first top-level node is the root (others are ignored). Scenes use it through a `Component`
+node, `<node kind="Component" name="Ship2" x="100" y="50" component="components/ship.component.xml"/>`:
+the component's nodes are built in its place, the root taking the instance's name, transform,
+layer and visibility (Scene_Build); `Scene_Instantiate` adds one from code.
+
+Returns:
+- The nodes (depth-first, the root first), and .None or what went wrong. Free with `SceneData_Destroy`
+*/
+ParseComponent :: proc(text: string, allocator := context.allocator) -> (component: SceneData, err: ProjectError) {
+	doc := parseXML(text) or_return
+	defer xml.destroy(doc)
+	if doc.elements[0].ident != "component" do return {}, .Wrong_Root
+	checkVersion(doc, 0) or_return
+
+	context.allocator = allocator
+	component.name = cloneAttr(doc, 0, "name", "")
+	component.nodes = make([dynamic]SceneNodeData)
+	for child in childElements(doc, 0) {
+		if doc.elements[child].ident == "node" {
+			parseNode(doc, child, -1, &component)
+			break
+		}
+	}
+	return component, .None
+}
+
+/*
 Frees everything `ParseProject` allocated. Must use the same allocator.
 */
 ProjectData_Destroy :: proc(project: ^ProjectData, allocator := context.allocator) {
@@ -546,6 +589,7 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		for a in node.animations do delete(a.name)
 		delete(node.animations)
 		delete(node.autoplay)
+		delete(node.component)
 	}
 	delete(scene.nodes)
 	delete(scene.name)
@@ -709,6 +753,7 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.spacing = attrF32(doc, element, "spacing", 0)
 	node.animations = make([dynamic]AnimationData)
 	node.autoplay = cloneAttr(doc, element, "autoplay", "")
+	node.component = cloneAttr(doc, element, "component", "")
 	node.items = make([dynamic]MenuItemData)
 	node.props = make([dynamic]ScriptPropData)
 	node.collisionLayer = attrLayers(doc, element, "collisionLayer", DEFAULT_SCENE_NODE.collisionLayer)

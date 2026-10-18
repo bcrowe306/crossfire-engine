@@ -61,7 +61,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `globals.odin` | **Global scripts**: scripts listed in project.xml (`<global>`), one instance per run, before the scenes; `Global(T)`; ready / update / draw (screen space, `hidden`) / sceneChanged / destroy |
 | `data.odin` | **Data resources**: `Data_Register(T)`, `.data.json` files (`ParseDataResource` / `FormatDataResource`), `Data(T, asset)` (loaded once, shared) |
 | `save.odin` | **Saves**: `Save_Game` / `Load_Game` / `Save_Exists` / `Save_Delete`: every global's fields as JSON (`save:"-"` skips one); desktop files in SDL's pref path, web localStorage; `--dev` runs save apart |
-| `assets.odin` | **Typed asset handles**: `TextureAsset`, `SoundAsset`, `FontAsset`, `DataAsset`; `Asset_Texture` / `Asset_Sound` / `Asset_Font`, `Game_PlaySound` (handle or path) |
+| `assets.odin` | **Typed asset handles**: `TextureAsset`, `SoundAsset`, `FontAsset`, `DataAsset`, `ComponentAsset`; `Asset_Texture` / `Asset_Sound` / `Asset_Font`, `Game_PlaySound` (handle or path) |
 | `globals_test.odin` | Tests: globals' lifecycle and reset per run, data resources, saves (nested structs, arrays, maps, enums, `save:"-"`, older saves) |
 | `physics.odin` | **Physics world** (Box2D, one per scene): settings and units, `Physics_Sync` / `Physics_Update` (fixed steps, pose sync, ray casts), `Physics_RayCast`, `CharacterMover_Move` |
 | `physics_events.odin` | Contact and Area events per body pair (counted over shape pairs), `PhysicsBody_GetAreas` / `IsInArea` / `GetContacts` / `IsTouching`, exits when a body is removed, the world's shape table |
@@ -71,6 +71,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `box2d/` | Box2D 3.1.1 bindings: a copy of Odin's `vendor:box2d` linking our own `box2d/lib/` (why: its doc comment). `lib/` is built, not committed |
 | `third_party/box2d`, `tools/build_box2d.sh` | Box2D's sources (submodule) and the script that compiles them (no CMake) |
 | `physics_test.odin`, `physics2_test.odin` | Tests: falling and landing, events, layers, Areas, ray casts, the mover (landing, walls, pushing), shapes with baked transforms, removal, scene files, debug drawing; smoothing at 144 fps, areas seen from bodies, one event per body pair, exits on removal, every joint kind |
+| `component_test.odin` | Tests: component files, instances in scene files (names, transforms, under parents, nested), `Scene_Instantiate` |
 | `input.odin` | **Input**: keyboard, mouse and gamepad state (`Input_IsKeyPressed`, `Input_IsMouseButtonJustPressed`, `Input_GetMousePosition`, `Input_GetGamepadAxis`...) through the engine's own `Key`, `MouseButton`, `GamepadButton`, `GamepadAxis`; **actions** like Godot's input map (`Input_IsActionPressed` / `JustPressed` / `JustReleased`, `Input_GetActionStrength`, `Input_GetAxis`, `Input_GetVector`); bindings' text format; `Game.input`, updated first in `Game_Update` |
 | `input_test.odin` | Tests: key, mouse and wheel edges, focus loss, actions from keys, buttons and sticks (deadzones, strength, vectors), project file actions |
 | `particles.odin` | **Particle emitters**: `ParticleEmitter` node (`CreateParticleEmitter`), `ParticleSettings` (every setting; tags describe them for editors: `ParticleSettings_Fields`), `ColorRamp` (stops, `ColorRamp_Evaluate` / `Sort` / `AddStop` / `RemoveStop`), Start / Stop / Clear, text format (`ParticleSettings_Get` / `Set`, `FormatParticleSettings`) |
@@ -192,6 +193,18 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
   CollisionShape has a `getBounds` (its extent), so editors can pick and outline it.
 - The web build links `box2d/lib/box2d_web.o`: one relocatable object, because Odin keeps plain C
   symbol names on wasm only for `.o` foreign imports (an `.a` gets `lib/x.a..b2Foo` names).
+
+**Components** (project_loader.odin, project_format.odin's `ParseComponent`):
+- A component is a node tree in its own file (`<component>` root, the first node is the root),
+  an asset of kind "Component". A `Component` node in a scene is an instance: `buildNodes` builds
+  the component's nodes in its place, and the root takes the instance's name, position,
+  rotation, scale, layer and visibility (replacing the root's own transform). The instance's
+  children in the scene file go under the root; its script, if any, only when the root has none.
+- `Game_LoadComponent` reads each file once (`Game.components`, in the game's arena); editors
+  fill that map with their in-memory components before building, so unsaved edits show.
+- `Scene_Instantiate(scene, COMPONENT_X, parent, position)` adds one from code (scripts attach,
+  `ready` next update). Components nest, at most MAX_COMPONENT_DEPTH deep (one holding itself
+  stops there with an error).
 
 **Input** (input.odin):
 - `Input_Update` runs first in `Game_Update` with the frame's SDL events: it clears last frame's
@@ -355,6 +368,8 @@ comment. What was needed, and why:
   - Menus and labels in a scene with a camera are drawn through it, because scene files can't set
     `screenLayers` yet.
   - Audio assets aren't loaded with the scene (play them from scripts: `Game_PlaySound`, loaded on first use).
+- **Format version 9** adds components (`.component.xml` files, assets of kind "Component") and
+  `Component` nodes.
 - **Format version 8** adds input actions (`<action>` in project.xml).
 - **Format version 7** adds AnimatedSprite `<animation>` elements (named cell ranges), `margin`,
   `spacing` and `autoplay`; without them the node plays one "default" animation as before.

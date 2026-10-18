@@ -43,6 +43,11 @@ DataAsset :: struct {
 	path: string,
 }
 
+// A component in the project (a saved node tree, `.component.xml`): `Scene_Instantiate` adds one
+ComponentAsset :: struct {
+	path: string,
+}
+
 // A texture asset's texture, loaded the first time (nil, logged, if it can't be)
 Asset_Texture :: proc(game: ^Game, asset: TextureAsset) -> ^sdl.Texture {
 	if asset.path == "" do return nil
