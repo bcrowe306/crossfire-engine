@@ -85,6 +85,8 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 	if game.name == "" do game.name = strings.clone(project.name)
 	// Data, Global and Save_Game use the game that's playing
 	currentGame = game
+	// The project's input actions (input.odin)
+	Input_SetActions(game, project.actions[:])
 	// Globals exist before the scenes (their nodes' scripts may look them up in `ready`)
 	Globals_Start(game, project.globals[:])
 	delete(game.projectDir)

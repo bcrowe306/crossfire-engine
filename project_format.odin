@@ -20,7 +20,17 @@ project.xml:
 		<global script="GameState">
 			<prop name="lives" value="3"/>
 		</global>
+		<action name="jump" deadzone="0.5">
+			<key key="Space"/>
+			<gamepad button="South"/>
+			<axis axis="LeftY" direction="-1"/>
+		</action>
 	</project>
+
+`<action>` elements are the game's input actions (input.odin): a name, a deadzone for sticks, and
+its bindings: `<key key="..."/>` (a `Key` name), `<mouse button="..."/>` (`MouseButton`),
+`<gamepad button="..." device="0"/>` (`GamepadButton`; no device = any gamepad) and
+`<axis axis="..." direction="1|-1" device="0"/>` (`GamepadAxis`).
 
 A scene file holds a tree of nodes. Nesting is the hierarchy, and a node's `x`, `y`, `rotation`
 and scale are relative to its parent:
@@ -93,6 +103,7 @@ Current limits:
 - Only images are loaded; Audio and Font assets are listed but not used.
 
 Version history:
+- 8: input actions (`<action>` in project.xml). Version 7 files are valid version 8 files.
 - 7: AnimatedSprite `<animation>` elements, `margin`, `spacing` and `autoplay`. Version 6 files are
   valid version 7 files.
 - 6: ParticleEmitter nodes and their `<particles>` element. Version 5 files are valid version 6
@@ -126,7 +137,7 @@ import "core:strings"
 import sdl "vendor:sdl3"
 
 // Version written by the editor. This loader also reads older versions
-PROJECT_FORMAT_VERSION :: 7
+PROJECT_FORMAT_VERSION :: 8
 
 /*
 Node kinds a scene file can contain.
@@ -373,6 +384,8 @@ ProjectData :: struct {
 	physics: PhysicsSettings,
 	// Global scripts, in start order: `<global script="GameState"><prop .../></global>` (globals.odin)
 	globals: [dynamic]GlobalData,
+	// Input actions, in order: `<action name="jump"><key key="Space"/></action>` (input.odin)
+	actions: [dynamic]InputActionData,
 }
 
 ProjectError :: enum {
@@ -415,6 +428,7 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		scenes = make([dynamic]SceneRef),
 		assets = make([dynamic]AssetRef),
 		globals = make([dynamic]GlobalData),
+		actions = make([dynamic]InputActionData),
 		physics = {
 			pixelsPerMeter = max(attrF32(doc, 0, "pixelsPerMeter", DEFAULT_PHYSICS.pixelsPerMeter), 1),
 			gravity = {attrF32(doc, 0, "gravityX", DEFAULT_PHYSICS.gravity.x), attrF32(doc, 0, "gravityY", DEFAULT_PHYSICS.gravity.y)},
@@ -435,6 +449,23 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 				append(&global.props, ScriptPropData{cloneAttr(doc, prop, "name", ""), cloneAttr(doc, prop, "value", "")})
 			}
 			append(&project.globals, global)
+		case "action":
+			action := InputActionData{
+				name = cloneAttr(doc, child, "name", ""),
+				deadzone = clamp(attrF32(doc, child, "deadzone", DEFAULT_ACTION_DEADZONE), 0, 0.99),
+				bindings = make([dynamic]InputBinding),
+			}
+			for b in childElements(doc, child) {
+				Lookup :: struct { doc: ^xml.Document, element: xml.Element_ID }
+				lookup := Lookup{doc, b}
+				get :: proc(user: rawptr, key: string) -> (string, bool) {
+					l := cast(^Lookup)user
+					return xml.find_attribute_val_by_key(l.doc, l.element, key)
+				}
+				// Unknown bindings (a newer engine's) are skipped
+				if binding, ok := ParseInputBinding(doc.elements[b].ident, get, &lookup); ok do append(&action.bindings, binding)
+			}
+			append(&project.actions, action)
 		}
 	}
 	if project.startScene == "" && len(project.scenes) > 0 {
@@ -485,6 +516,11 @@ ProjectData_Destroy :: proc(project: ^ProjectData, allocator := context.allocato
 		delete(g.props)
 	}
 	delete(project.globals)
+	for &a in project.actions {
+		delete(a.name)
+		delete(a.bindings)
+	}
+	delete(project.actions)
 	delete(project.name)
 	delete(project.startScene)
 	project^ = {}

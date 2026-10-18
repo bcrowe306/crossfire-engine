@@ -57,6 +57,8 @@ Game :: struct {
 	// How its scenes' physics behave (physics.odin); zero means DEFAULT_PHYSICS. Set before
 	// scenes create physics nodes
 	physics: PhysicsSettings,
+	// The keyboard, mouse, gamepads and the project's actions (input.odin)
+	input: InputState,
 	// The folder asset paths are relative to (owned; set by Game_LoadProject, "" for the working directory)
 	projectDir: string,
 	update: proc(game: ^Game, events: []sdl.Event, deltaTime: f64),
@@ -106,6 +108,7 @@ Game_GetAllocator :: proc(game: ^Game) -> runtime.Allocator {
 
 Game_Destroy :: proc(game: ^Game) {
 	Globals_Destroy(game)
+	Input_Destroy(&game.input)
 	for name, scene in game.scenes {
 		Scene_Destroy(scene)
 		free(scene)
@@ -150,6 +153,8 @@ Game_SwitchScene :: proc(game: ^Game, name: string) -> bool {
 }
 
 Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
+	// Input first: everything this frame sees the same state
+	Input_Update(&game.input, events)
 	for &event in events {
 		if event.type == .WINDOW_RESIZED {
 			game.windowSize = {f32(event.window.data1), f32(event.window.data2)}

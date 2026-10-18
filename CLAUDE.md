@@ -71,6 +71,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `box2d/` | Box2D 3.1.1 bindings: a copy of Odin's `vendor:box2d` linking our own `box2d/lib/` (why: its doc comment). `lib/` is built, not committed |
 | `third_party/box2d`, `tools/build_box2d.sh` | Box2D's sources (submodule) and the script that compiles them (no CMake) |
 | `physics_test.odin`, `physics2_test.odin` | Tests: falling and landing, events, layers, Areas, ray casts, the mover (landing, walls, pushing), shapes with baked transforms, removal, scene files, debug drawing; smoothing at 144 fps, areas seen from bodies, one event per body pair, exits on removal, every joint kind |
+| `input.odin` | **Input**: keyboard, mouse and gamepad state (`Input_IsKeyPressed`, `Input_IsMouseButtonJustPressed`, `Input_GetMousePosition`, `Input_GetGamepadAxis`...) through the engine's own `Key`, `MouseButton`, `GamepadButton`, `GamepadAxis`; **actions** like Godot's input map (`Input_IsActionPressed` / `JustPressed` / `JustReleased`, `Input_GetActionStrength`, `Input_GetAxis`, `Input_GetVector`); bindings' text format; `Game.input`, updated first in `Game_Update` |
+| `input_test.odin` | Tests: key, mouse and wheel edges, focus loss, actions from keys, buttons and sticks (deadzones, strength, vectors), project file actions |
 | `particles.odin` | **Particle emitters**: `ParticleEmitter` node (`CreateParticleEmitter`), `ParticleSettings` (every setting; tags describe them for editors: `ParticleSettings_Fields`), `ColorRamp` (stops, `ColorRamp_Evaluate` / `Sort` / `AddStop` / `RemoveStop`), Start / Stop / Clear, text format (`ParticleSettings_Get` / `Set`, `FormatParticleSettings`) |
 | `particles_test.odin` | Tests: ramps, settings text round trip, cycles and bursts, world and local space, forces, collisions with the view, scene files, batched drawing (pixels) |
 | `audio.odin` | SDL3_mixer setup (`Audio_Init`: no device means silence, not an error), loading, and `Game_PlaySound(game, path)` (paths relative to `game.projectDir`, cached). The same on desktop and web |
@@ -190,6 +192,17 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
   CollisionShape has a `getBounds` (its extent), so editors can pick and outline it.
 - The web build links `box2d/lib/box2d_web.o`: one relocatable object, because Odin keeps plain C
   symbol names on wasm only for `.o` foreign imports (an `.a` gets `lib/x.a..b2Foo` names).
+
+**Input** (input.odin):
+- `Input_Update` runs first in `Game_Update` with the frame's SDL events: it clears last frame's
+  just-pressed/released, applies the events, opens gamepads as they're added (numbered 0.. in
+  connection order; device -1 = any), and works out every action. Everything after (globals,
+  scenes, scripts) sees the same state. The raw `[]sdl.Event` still reach `update` hooks.
+- Enum values are SDL's (`Key` is a scancode, `#sparse`), so converting is a cast; their names are
+  the file format's and the editor's.
+- An action's strength is the strongest binding: 1 for keys and buttons, a stick's travel past
+  the deadzone rescaled to 0..1. The wheel's directions are buttons pressed for one frame.
+- Losing window focus releases every key and mouse button.
 
 **Particles** (particles.odin; its doc comment has the details):
 - A `ParticleEmitter`'s `settings` is a plain value (no pointers): scene files store it as a
@@ -342,6 +355,7 @@ comment. What was needed, and why:
   - Menus and labels in a scene with a camera are drawn through it, because scene files can't set
     `screenLayers` yet.
   - Audio assets aren't loaded with the scene (play them from scripts: `Game_PlaySound`, loaded on first use).
+- **Format version 8** adds input actions (`<action>` in project.xml).
 - **Format version 7** adds AnimatedSprite `<animation>` elements (named cell ranges), `margin`,
   `spacing` and `autoplay`; without them the node plays one "default" animation as before.
 - **Format version 6** adds ParticleEmitter nodes and their `<particles>` element.
