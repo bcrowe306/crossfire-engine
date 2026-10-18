@@ -27,6 +27,10 @@ project.xml:
 		</action>
 	</project>
 
+The optional `renderer` attribute picks the renderer games draw with: a `RenderBackend` name
+(`Auto`, the default: SDL's choice; `OpenGL`, `OpenGLES2`, `Vulkan`, `GPU`, `Direct3D11`,
+`Direct3D12`, `Metal`, `Software`). See render_backend.odin.
+
 `<action>` elements are the game's input actions (input.odin): a name, a deadzone for sticks, and
 its bindings: `<key key="..."/>` (a `Key` name), `<mouse button="..."/>` (`MouseButton`),
 `<gamepad button="..." device="0"/>` (`GamepadButton`; no device = any gamepad) and
@@ -104,6 +108,7 @@ Current limits:
   sound nodes (and from code on first use); Font assets are listed but not used.
 
 Version history:
+- 11: the project's `renderer`. Version 10 files are valid version 11 files.
 - 10: sound nodes (AudioPlayer, AudioPlayer2D, MusicPlayer), mix buses (`<bus>` in project.xml),
   assets of kind "Music". Version 9 files are valid version 10 files.
 - 9: components (`<component>` files, assets of kind "Component") and `Component` nodes. Version 8
@@ -142,7 +147,7 @@ import "core:strings"
 import sdl "vendor:sdl3"
 
 // Version written by the editor. This loader also reads older versions
-PROJECT_FORMAT_VERSION :: 10
+PROJECT_FORMAT_VERSION :: 11
 
 /*
 Node kinds a scene file can contain.
@@ -411,6 +416,8 @@ ProjectData :: struct {
 	actions: [dynamic]InputActionData,
 	// Mix buses (Master's settings too, if listed): `<bus name="Music" volume="0.8"/>` (audio_nodes.odin)
 	buses: [dynamic]AudioBusData,
+	// The renderer games draw with (`renderer="Vulkan"`, format 11; Auto: SDL's choice)
+	renderer: RenderBackend,
 }
 
 ProjectError :: enum {
@@ -448,6 +455,7 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		name = cloneAttr(doc, 0, "name", ""),
 		size = {attrF32(doc, 0, "width", 1280), attrF32(doc, 0, "height", 720)},
 		scaleMode = attrEnum(doc, 0, "scaleMode", ScaleMode.Letterbox),
+		renderer = attrEnum(doc, 0, "renderer", RenderBackend.Auto),
 		background = attrColor(doc, 0, "background", {0, 0, 0, 255}),
 		startScene = cloneAttr(doc, 0, "startScene", ""),
 		scenes = make([dynamic]SceneRef),

@@ -13,6 +13,8 @@ The game player: runs a project saved by the editor.
 	player <project folder> --scene <name>    play it from another scene (the editor's Play Scene)
 	player ... --physics-debug                draw every physics shape, whatever the project says
 	player ... --dev                          developer keys (the editor's Play): F9 shows / hides shapes
+	player ... --renderer <name>              draw with this renderer (vulkan, opengl, software, ...),
+	                                          whatever the project says
 	player --describe-scripts                 print the registered scripts as JSON, and exit
 
 `Player_Run` is the whole program. The engine's own `player/` package calls it with no game code;
@@ -89,7 +91,11 @@ Player_Setup :: proc(options: PlayerOptions, app: ^Application) -> bool {
 	log.infof("Playing '%s' (%d scenes, start: %s, %d scripts registered)",
 		playerProject.name, len(playerProject.scenes), playerProject.startScene, len(Script_All()))
 
-	if !Application_Setup(app, fmt.tprintf("%s", playerProject.name), playerProject.size) {
+	if options.renderer != "" {
+		if backend, ok := RenderBackend_Parse(options.renderer); ok do playerProject.renderer = backend
+		else do log.warnf("Unknown renderer '%s': using the project's", options.renderer)
+	}
+	if !Application_Setup(app, fmt.tprintf("%s", playerProject.name), playerProject.size, playerProject.renderer) {
 		return false
 	}
 
@@ -127,6 +133,8 @@ PlayerOptions :: struct {
 	dev: bool,
 	// A project folder was named on the command line (otherwise an exported game finds its own)
 	folderGiven: bool,
+	// `--renderer <name>`: draw with this one, whatever the project says ("" for the project's)
+	renderer: string,
 }
 
 /*
@@ -169,6 +177,10 @@ Player_ParseArgs :: proc(args: []string) -> (PlayerOptions, bool) {
 		case "--scene":
 			if i + 1 >= len(args) do return options, false
 			options.scene = args[i + 1]
+			i += 1
+		case "--renderer":
+			if i + 1 >= len(args) do return options, false
+			options.renderer = args[i + 1]
 			i += 1
 		case:
 			if options.folderGiven do return options, false

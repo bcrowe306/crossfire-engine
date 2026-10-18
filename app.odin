@@ -18,7 +18,14 @@ Application :: struct {
 	queuedGame: ^Game,
 }
 
-Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2]f32) -> bool {
+/*
+Starts SDL, opens the window with a renderer (`backend`: render_backend.odin; Auto lets SDL
+choose), the audio device and SDL_ttf.
+
+Returns:
+- false (logged) if any of them couldn't start
+*/
+Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2]f32, backend := RenderBackend.Auto) -> bool {
 	if !sdl.Init({ .VIDEO, .AUDIO, .GAMEPAD, .EVENTS}) {
 		log.error("Error initializing SDL: ", sdl.GetError())
 		return false
@@ -30,12 +37,8 @@ Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2
 		return false
 	}
 
-	// The browser has WebGL only: let SDL pick there
-	app.renderer = sdl.CreateRenderer(app.window, PLATFORM_WEB ? nil : "opengl")
-	if app.renderer == nil {
-		log.error("Error creating renderer:", sdl.GetError())
-		return false
-	}
+	app.renderer = Application_CreateRenderer(app.window, backend)
+	if app.renderer == nil do return false
 
 	// In the browser, vsync means "frames on requestAnimationFrame", which SDL can only set once
 	// Emscripten's main loop exists (before that, Present blocks): see Player_StartWeb

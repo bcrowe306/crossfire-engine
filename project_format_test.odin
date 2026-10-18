@@ -126,3 +126,27 @@ parse_animated_sprite_animations :: proc(t: ^testing.T) {
 	cell := SpriteSheet_CellRect({44, 22}, 4, 2, 1, 2, 5)
 	testing.expect_value(t, cell, sdl.FRect{12, 12, 9, 9})
 }
+
+@(test)
+project_renderer_setting :: proc(t: ^testing.T) {
+	project, err := ParseProject(`<project formatVersion="11" name="R" renderer="Vulkan"/>`)
+	defer ProjectData_Destroy(&project)
+	testing.expect_value(t, err, ProjectError.None)
+	testing.expect_value(t, project.renderer, RenderBackend.Vulkan)
+	old, _ := ParseProject(`<project formatVersion="10" name="R"/>`)
+	defer ProjectData_Destroy(&old)
+	testing.expect_value(t, old.renderer, RenderBackend.Auto)
+
+	backend, ok := RenderBackend_Parse("software")
+	testing.expect(t, ok && backend == .Software, "by driver name")
+	backend, ok = RenderBackend_Parse("direct3d11")
+	testing.expect(t, ok && backend == .Direct3D11, "by driver name")
+	backend, ok = RenderBackend_Parse("OpenGLES2")
+	testing.expect(t, ok && backend == .OpenGLES2, "by enum name")
+	_, ok = RenderBackend_Parse("glide")
+	testing.expect(t, !ok, "unknown")
+	testing.expect(t, RenderBackend_Available(.Auto), "Auto is always there")
+
+	options, valid := Player_ParseArgs({"player", "game", "--renderer", "vulkan"})
+	testing.expect(t, valid && options.renderer == "vulkan" && options.projectDir == "game", "--renderer")
+}

@@ -53,6 +53,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `project_format.odin` | **Project/scene XML format spec** (doc comment) and parser: `ParseProject`, `ParseScene` → plain data (`ProjectData`, `SceneData`), no SDL |
 | `project_loader.odin` | Builds scenes from parsed data: `LoadProjectFile`, `Game_LoadProject`, `Scene_Build`; data-driven `Sprite` and `AnimatedSprite` nodes; menu actions `scene:<Name>` / `quit` |
 | `script.odin` | **Scripts**: Odin game code attached to nodes. `Script_Register`, the registry, exported fields (`export:""` tags) set from scene files by reflection, `Node_AttachScript`, `Script_DescribeJSON` |
+| `render_backend.odin` | **Renderer choice**: `RenderBackend` (Auto, OpenGL, OpenGLES2, Vulkan, GPU, Direct3D11/12, Metal, Software), `RENDER_BACKENDS` (SDL driver names, labels, platforms), `RenderBackend_Available` / `Parse`, `Application_CreateRenderer` (falls back to SDL's choice, logs the one in use) |
 | `player.odin` | `Player_Run(args)`: the whole player program (`player <project folder>`, `player --scene <name>`, `player --describe-scripts`); `Player_Setup`, shared with the web; with no folder, an exported game finds its project next to itself (`data/project.xml`) |
 | `platform_native.odin`, `platform_web.odin` | **Platform layer** (`#+build !js` / `#+build js`): memory arenas, reading files, the executable's folder, loading textures. Code outside these files must not import `core:os`, `core:mem/virtual`, `core:path/filepath` or SDL_image: they don't build for the browser (SDL_mixer does: see "Web build") |
 | `player_web.odin` | The browser player: `odin_web_main` (called by `web/main.c`), `Web_Context` (Emscripten's malloc, a per-frame temp arena, console logger), `Player_StartWeb` (Emscripten's main loop drives `Application_Frame`) |
@@ -85,6 +86,14 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `project_format_test.odin`, `transform_test.odin` | Tests: parser and v1 migration; transform math, hierarchy, subtree removal, draw order/transform/tint/visibility, camera node |
 
 ## Rules that keep the engine correct
+
+**Renderer** (render_backend.odin): the window's SDL renderer comes from the project's
+`renderer` (`Application_Setup`'s `backend`), or the player's `--renderer <name>`. It used to be
+hard-coded to "opengl"; Auto lets SDL choose, which is OpenGL on Linux too, so Linux games draw
+as before (Windows gets Direct3D 11, macOS Metal). A backend this SDL lacks or that fails to
+start falls back to SDL's choice with a warning; the one in use is logged ("Renderer: vulkan").
+The browser always uses WebGL. Checked on Linux: OpenGL, OpenGL ES 2, Vulkan, GPU and Software
+draw shapes and SDL_ttf text alike (pixels read back), and the demo runs with each.
 
 **Memory ownership:**
 - `CreateNode` puts each node in its **own** virtual-memory arena. Anything the node owns is allocated
@@ -394,6 +403,7 @@ comment. What was needed, and why:
     `screenLayers` yet.
   - Sound nodes load their sound when the scene is built (`Scene_Build` with scripts attached; the
     editor's viewport doesn't); `Game_PlaySound` still plays any sound from code, loaded on first use.
+- **Format version 11** adds the project's `renderer` (a `RenderBackend`; Auto when absent).
 - **Format version 10** adds sound nodes (`AudioPlayer`, `AudioPlayer2D`, `MusicPlayer`: `sound`,
   `bus`, `volume`, `pitch`, `pan`, `loop`, `autostart`, `maxDistance`, `attenuation`, `fadeIn`,
   `fadeOut`), `<bus>` elements in project.xml and assets of kind "Music".
