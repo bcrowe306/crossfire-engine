@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the engine's player (optimized) and packs it for a release:
-#   dist/odin_sdl_engine-player-<version>-<platform>.tar.gz (.zip on Windows)
+#   dist/crossfire-engine-player-<version>-<platform>.tar.gz (.zip on Windows)
 # with the SDL3 libraries it needs (Linux: in lib/, found through rpath $ORIGIN/lib; Windows:
 # the DLLs next to it; macOS: Homebrew's, not bundled), unless the static SDL is built
 # (tools/build_sdl_static.sh): then SDL is inside it, which is checked.
@@ -10,7 +10,7 @@ set -euo pipefail
 platform=$1
 version=$2
 engine=$(cd "$(dirname "$0")/../.." && pwd)
-name="odin_sdl_engine-player-$version-$platform"
+name="crossfire-engine-player-$version-$platform"
 stage="$engine/dist/$name"
 rm -rf "$stage"
 mkdir -p "$stage"
@@ -68,7 +68,7 @@ elif $static && command -v ldd > /dev/null; then
 fi
 
 cat > "$stage/README.txt" <<TXT
-odin_sdl_engine player $version ($platform)
+Crossfire Engine player $version ($platform)
 
 Runs a project saved by odin_sdl_editor:
 

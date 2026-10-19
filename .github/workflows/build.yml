@@ -91,6 +91,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          flags=(--title "odin_sdl_engine $TAG" --generate-notes)
+          flags=(--title "Crossfire Engine $TAG" --generate-notes)
           [[ "$TAG" == *-* ]] && flags+=(--prerelease)
           gh release create "$TAG" dist/* "${flags[@]}" -R "$GITHUB_REPOSITORY"

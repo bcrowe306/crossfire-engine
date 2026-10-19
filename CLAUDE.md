@@ -1,4 +1,8 @@
-# odin_sdl_engine
+# odin_sdl_engine: the Crossfire Engine
+
+The product name is **Crossfire Engine** (its editor: **Crossfire Editor**, the odin_sdl_editor
+repository). Use the names in anything users see (docs, release titles and archives, the
+player's window); the repository, the Odin package (`engine`) and file names keep `odin_sdl`.
 
 A 2D game engine in Odin on SDL3 (renderer, SDL_image, SDL_ttf, SDL_mixer). It is a library
 package, `package engine`, used by games (the `asteroids` sample in the workspace) and by the
@@ -36,7 +40,7 @@ shared libraries are linked: `libSDL3`, `libSDL3_image`, `libSDL3_ttf`, `libSDL3
   SDL's symbols) and `-Wl,-dead_strip_dylibs` drops the unused dylibs. `package_player.sh`
   checks with `otool -L`.
 - The `-L` folder is **quoted**: the linker runs through a shell, and an engine inside
-  "Odin SDL Editor.app" (or any folder with a space) failed to link.
+  "Crossfire Editor.app" (or any folder with a space) failed to link.
 - **Windows** (the script builds with Visual Studio and the static CRT, `/MT`, like Odin and
   Box2D): the bindings name Odin's own `SDL3.lib` import libraries by path, which no search path
   replaces. MSVC's linker takes each symbol from the first library on its command line that has
