@@ -31,7 +31,13 @@ Linux)
 	fi
 	;;
 Darwin)
-	odin build player -o:speed "-out:$stage/player" ${ODIN_LINK_FLAGS:-}
+	# Homebrew's -L only without the static SDL: macOS's linker takes the first folder with a
+	# library, so Homebrew's dylibs would win over the static ones
+	if $static; then
+		odin build player -o:speed "-out:$stage/player"
+	else
+		odin build player -o:speed "-out:$stage/player" ${ODIN_LINK_FLAGS:-}
+	fi
 	;;
 *)
 	odin build player -o:speed "-out:$stage/player.exe"
@@ -42,8 +48,15 @@ Darwin)
 	;;
 esac
 
-# Static: the player mustn't load any SDL library
-if $static && command -v ldd > /dev/null; then
+# Static: the player mustn't load any SDL library (otool on macOS, which has no ldd)
+if $static && [[ "$(uname -s)" == Darwin ]]; then
+	if otool -L "$stage/player" | grep -i "sdl3"; then
+		echo "The player still links SDL dynamically" >&2
+		exit 1
+	fi
+	echo "The player has SDL inside it:"
+	otool -L "$stage/player"
+elif $static && command -v ldd > /dev/null; then
 	program="$stage/player"
 	[[ -f "$program.exe" ]] && program="$program.exe"
 	if ldd "$program" | grep -i "sdl3"; then
