@@ -89,7 +89,9 @@ declared again here with "c" callbacks, from the same library (the same import p
 build's `system:SDL3_mixer..` aliases cover them too).
 */
 when ODIN_OS == .Windows {
-	foreign import mixLib "SDL3_mixer.lib"
+	// Odin's own import library, the one vendor:sdl3/mixer names (a bare "SDL3_mixer.lib" would
+	// be looked for next to this file); with the static SDL, sdl_static.odin's comes first
+	foreign import mixLib "vendor:sdl3/mixer/SDL3_mixer.lib"
 } else {
 	foreign import mixLib "system:SDL3_mixer"
 }
