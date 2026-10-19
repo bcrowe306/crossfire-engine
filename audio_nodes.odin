@@ -1,6 +1,5 @@
 package engine
 
-import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:strings"
@@ -160,7 +159,7 @@ AudioPlayer_SetSound :: proc(player: ^AudioPlayer, path: string) {
 	if path == "" || game == nil || game.mixer == nil do return
 	full := game.projectDir == "" ? path : JoinPath(game.projectDir, path)
 	if player.kind == .Music {
-		player.audio = mix.LoadAudio(game.mixer, fmt.ctprint(full), false)
+		player.audio = Audio_Load(game.mixer, full, false)
 		player.ownsAudio = player.audio != nil
 		if player.audio == nil do log.warnf("%s: couldn't open music %s: %s", player.name, path, sdl.GetError())
 	} else {

@@ -47,6 +47,18 @@ jobs:
       - name: Build Box2D
         run: tools/build_box2d.sh
 
+      - name: Cache static SDL
+        if: runner.os != 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: sdl/lib
+          key: sdl-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/build_sdl_static.sh', '.gitmodules') }}-3.4.16-3.4.6-3.2.2-3.2.4
+
+      - name: Build static SDL (games and the editor link it; Windows later)
+        if: runner.os != 'Windows'
+        run: |
+          if [ ! -f sdl/lib/*/libSDL3.a ]; then tools/build_sdl_static.sh; fi
+
       - name: Check
         run: |
           odin check . -no-entry-point -vet-unused

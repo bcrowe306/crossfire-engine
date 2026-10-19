@@ -12,13 +12,16 @@ builds for Linux, Windows, macOS and the web (WebAssembly).
 
 ## Building
 
-Needs Odin (`dev-2026-10`) and SDL3 with SDL3_image, SDL3_ttf and SDL3_mixer (on Windows, Odin
-ships them).
+Needs Odin (`dev-2026-10`). With `tools/build_sdl_static.sh` (Linux and macOS, needs CMake) SDL3,
+SDL3_image, SDL3_ttf and SDL3_mixer are built from the submodules and linked into every program,
+so games are a single executable; without it, the system's SDL3 libraries are used (on Windows,
+Odin ships them).
 
 ```bash
 git clone --recursive https://github.com/bcrowe306/odin_sdl_engine
 cd odin_sdl_engine
 tools/build_box2d.sh                         # once: Box2D (third_party/box2d) into box2d/lib
+tools/build_sdl_static.sh                    # once (Linux, macOS; needs CMake): SDL linked statically
 odin check . -no-entry-point -vet-unused     # the library
 odin test . -vet-unused                      # the tests
 odin build player -out:player_bin            # the player: player_bin <project folder>

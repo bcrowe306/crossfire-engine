@@ -105,6 +105,9 @@ ResourceManager_loadFont :: proc(rm: ^ResourceManager, filePath: string, size: f
 		// frees the stream (not the data) when the font is closed
 		io := sdl.IOFromConstMem(raw_data(DEFAULT_FONT_DATA), len(DEFAULT_FONT_DATA))
 		font = ttf.OpenFontIO(io, true, size)
+	} else if data, packed := Pack_Bytes(filePath); packed {
+		// The data pack's memory lives as long as the program
+		font = ttf.OpenFontIO(sdl.IOFromConstMem(raw_data(data), uint(len(data))), true, size)
 	} else {
 		font = ttf.OpenFont(fmt.ctprint(filePath), size)
 	}

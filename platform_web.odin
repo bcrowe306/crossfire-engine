@@ -60,6 +60,12 @@ Platform_ReadFile :: proc(path: string) -> ([]byte, bool) {
 	return copy, true
 }
 
+// The data pack is the desktop exports' (pack.odin): the browser preloads files instead
+PACK_ROOT :: "<pack>"
+Pack_Open :: proc() -> bool { return false }
+Pack_Bytes :: proc(path: string) -> ([]byte, bool) { return nil, false }
+Pack_Has :: proc(path: string) -> bool { return false }
+
 Platform_FileExists :: proc(path: string) -> bool {
 	return sdl.GetPathInfo(fmt.ctprint(path), nil)
 }

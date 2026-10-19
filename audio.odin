@@ -42,6 +42,10 @@ Audio_Quit :: proc(mixer: ^mix.Mixer) {
 
 // Loads a sound file (predecode: decode it all now, for short effects)
 Audio_Load :: proc(mixer: ^mix.Mixer, path: string, predecode: bool) -> ^mix.Audio {
+	// From the data pack's memory, which lives as long as the program (music streams from it)
+	if data, packed := Pack_Bytes(path); packed {
+		return mix.LoadAudio_IO(mixer, sdl.IOFromConstMem(raw_data(data), uint(len(data))), predecode, true)
+	}
 	return mix.LoadAudio(mixer, fmt.ctprint(path), predecode)
 }
 

@@ -12,6 +12,7 @@ import e "odin_sdl_engine"   // or "../odin_sdl_engine" from a sibling package
 
 ```bash
 tools/build_box2d.sh [<emsdk>]              # once: build Box2D into box2d/lib/ (with an emsdk: the web library too)
+tools/build_sdl_static.sh                   # once: SDL3 + _image/_ttf/_mixer as static libraries (Linux, macOS; needs CMake)
 odin check . -no-entry-point -vet-unused    # type-check the library (it has no main)
 odin test . -vet-unused                     # unit tests (format parser, transforms, scripts)
 odin check player -vet-unused               # type-check the player program
@@ -21,7 +22,25 @@ odin build player -out:player_bin           # build the player: player_bin <proj
 
 To run something, build a game that uses it. In the workspace root, `odin run .` runs asteroids.
 
-Runtime libraries: `libSDL3`, `libSDL3_image`, `libSDL3_ttf`, `libSDL3_mixer`. Box2D is linked
+**SDL is linked statically** once `tools/build_sdl_static.sh` has built it (sdl/lib/<os>_<arch>/,
+from the `third_party/SDL*` submodules: SDL 3.4.16, SDL_image 3.4.6, SDL_ttf 3.2.2, SDL_mixer
+3.2.4): every program that imports the engine (the player, project players, the editor, the
+sample) then needs no SDL libraries, only libc (SDL itself loads the window system, GL/Vulkan and
+the audio server at run time). `sdl_static.odin` does it: an `extra_linker_flags` `-L` to that
+folder makes the vendor bindings' `-lSDL3`... resolve to the archives, which are listed again so
+their order doesn't matter. Without the build, or with `-define:SDL_STATIC=false`, the system's
+shared libraries are linked: `libSDL3`, `libSDL3_image`, `libSDL3_ttf`, `libSDL3_mixer`. Windows
+isn't static yet (its binding names a fixed `SDL3.lib`).
+- What's built in: images through stb_image (PNG, JPEG) plus SDL_image's own formats (no AVIF,
+  TIFF, WebP, JXL, animated PNG); SDL_ttf with its bundled FreeType (no HarfBuzz shaping, no
+  color emoji); SDL_mixer with WAV, AIFF, VOC, AU, FLAC, MP3, Ogg Vorbis, MIDI. FreeType's
+  license asks games to credit it.
+- **glibc:** a Linux build runs on the glibc it was built against or newer. Built on this Arch
+  machine (2.44) a game needs GLIBC_2.43 (C23 `__isoc23_*`, versioned math), so it won't start on
+  Ubuntu 24.04 (2.39) or Steam's runtime (2.31): release builds belong on an old glibc (CI's
+  Ubuntu, a Steam Runtime container, or `zig cc` with a glibc target: the planned experiment).
+
+Runtime libraries without the static build: `libSDL3`, `libSDL3_image`, `libSDL3_ttf`, `libSDL3_mixer`. Box2D is linked
 statically from `box2d/lib/` (built from the `third_party/box2d` submodule, v3.1.1, by
 `tools/build_box2d.sh`; nothing to install). Without it, compiling stops with a message saying so. The default font is
 compiled in with `#load` (`Open_Sans/static/OpenSans-Regular.ttf`).
@@ -81,11 +100,24 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `audio_meter.odin` | **Level meters** on SDL3_mixer's mix callbacks: `AudioMeter` (atomic peaks), `AudioMeter_AttachGroup` (a bus's group) / `AttachMixer` (the final stage: applies Master's gains, then meters), `Audio_GetBusLevel`, `AudioLevel_ToDecibels`; its own C-convention declarations of the two callback setters |
 | `audio_test.odin` | Tests: bus output (volume, pan laws, mute, unknown bus), positional volume and pan, sound nodes and buses from scene files (no device needed) |
 | `audio.odin` | SDL3_mixer setup (`Audio_Init`: no device means silence, not an error), loading, and `Game_PlaySound(game, path)` (paths relative to `game.projectDir`, cached). The same on desktop and web |
+| `pack.odin` | **The data pack**: a game's files appended to its own executable (`Pack_Append`; the footer's `ODINPAK1`), read back by `Pack_Open` at start (the project is then `PACK_ROOT`); `Pack_Bytes` / `Pack_Has`, a `Pack` value for tools and tests (`Pack_OpenFile`) |
+| `pack_test.odin` | Tests: a pack appended to a file and read back by path |
+| `sdl_static.odin` | Links the static SDL (tools/build_sdl_static.sh) when it's built: `SDL_STATIC`, `SDL_LINKED_STATICALLY` |
 | `player/main.odin` | The **player** for projects without scripts: calls `Player_Main` (`Player_Run` with the command line; nothing in the browser). A project with scripts gets its own generated main that also imports its `scripts` package. Used by the editor's Play and, later, exports |
 | `script_test.odin` | Tests: script registration, fields and tags, lifecycle on a node, bad values, `Scene_FindNode` paths, format v3 scripts |
 | `project_format_test.odin`, `transform_test.odin` | Tests: parser and v1 migration; transform math, hierarchy, subtree removal, draw order/transform/tint/visibility, camera node |
 
 ## Rules that keep the engine correct
+
+**The data pack** (pack.odin): a single-file export is the player with the project's files
+appended (ELF and PE ignore trailing bytes; macOS games will keep theirs in the .app, since
+appending breaks code signing). `Player_FindExportedProject` takes the pack first. Everything
+that reads a project file goes through the platform layer, which looks in the pack first:
+`Platform_ReadFile` / `Platform_FileExists` / `Platform_LoadTexture`, `Audio_Load` (sounds and
+streamed music: `LoadAudio_IO` from memory), fonts (`OpenFontIO`). A file is read from the
+executable the first time it's asked for and **kept for the program's life**: SDL keeps
+streaming music and fonts from that memory. **New file loading must go through these** (or
+`Pack_Bytes`), or packed games won't find the file. The web build stubs them (it preloads files).
 
 **Renderer** (render_backend.odin): the window's SDL renderer comes from the project's
 `renderer` (`Application_Setup`'s `backend`), or the player's `--renderer <name>`. It used to be

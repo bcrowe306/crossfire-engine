@@ -42,14 +42,16 @@ MemoryArena_BootstrapNew :: proc($T: typeid, offset: uintptr, blockSize: uint) -
 	return object, err == nil
 }
 
-// A whole file's contents (temp allocated), or false
+// A whole file's contents (temp allocated, or the data pack's: don't free it), or false
 Platform_ReadFile :: proc(path: string) -> ([]byte, bool) {
+	if data, packed := Pack_Bytes(path); packed do return data, true
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	return data, err == nil
 }
 
+// Whether a file exists (on disk, or in the data pack)
 Platform_FileExists :: proc(path: string) -> bool {
-	return os.exists(path)
+	return Pack_Has(path) || os.exists(path)
 }
 
 // The folder the program is in (temp allocated)
@@ -60,6 +62,9 @@ Platform_ExecutableDir :: proc() -> (string, bool) {
 
 // An image file as a texture: any format SDL3_image reads
 Platform_LoadTexture :: proc(renderer: ^sdl.Renderer, path: string) -> ^sdl.Texture {
+	if data, packed := Pack_Bytes(path); packed {
+		return img.LoadTexture_IO(renderer, sdl.IOFromConstMem(raw_data(data), uint(len(data))), true)
+	}
 	return img.LoadTexture(renderer, fmt.ctprint(path))
 }
 

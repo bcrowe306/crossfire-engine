@@ -138,7 +138,8 @@ PlayerOptions :: struct {
 }
 
 /*
-Where an exported game's project is: the `data` folder next to the program (how the editor's
+Where an exported game's project is: the data pack at the end of the program (a single-file
+export: `PACK_ROOT`), else the `data` folder next to the program (how the editor's
 desktop exports lay a game out), or the program's own folder, or else the current folder. Asset
 paths are relative to it, so the game runs from wherever it's started.
 
@@ -146,6 +147,8 @@ Returns:
 - The folder (temp allocated)
 */
 Player_FindExportedProject :: proc() -> string {
+	// A single-file export: the project is in the data pack at the end of the program (pack.odin)
+	if Pack_Open() && Pack_Has(JoinPath(PACK_ROOT, "project.xml")) do return PACK_ROOT
 	exeDir, ok := Platform_ExecutableDir()
 	if ok {
 		for candidate in ([]string{"data", "."}) {

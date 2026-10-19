@@ -15,11 +15,18 @@ rm -rf "$stage"
 mkdir -p "$stage"
 cd "$engine"
 
+# With the static SDL built (tools/build_sdl_static.sh), SDL is inside the player
+static=false
+compgen -G "$engine/sdl/lib/*/libSDL3.a" > /dev/null && static=true
 case "$(uname -s)" in
 Linux)
-	odin build player -o:speed "-out:$stage/player" "-extra-linker-flags:-Wl,-rpath,\$ORIGIN/lib"
-	mkdir -p "$stage/lib"
-	ldd "$stage/player" | awk '/libSDL3/ { print $3 }' | while read -r lib; do cp -L "$lib" "$stage/lib/"; done
+	if $static; then
+		odin build player -o:speed "-out:$stage/player"
+	else
+		odin build player -o:speed "-out:$stage/player" "-extra-linker-flags:-Wl,-rpath,\$ORIGIN/lib"
+		mkdir -p "$stage/lib"
+		ldd "$stage/player" | awk '/libSDL3/ { print $3 }' | while read -r lib; do cp -L "$lib" "$stage/lib/"; done
+	fi
 	;;
 Darwin)
 	odin build player -o:speed "-out:$stage/player" ${ODIN_LINK_FLAGS:-}
@@ -41,7 +48,7 @@ Runs a project saved by odin_sdl_editor:
 
 The editor builds its own players for projects with scripts; this one runs projects without.
 TXT
-if [[ "$(uname -s)" == Darwin ]]; then
+if [[ "$(uname -s)" == Darwin ]] && ! $static; then
 	echo "Needs SDL3 from Homebrew: brew install sdl3 sdl3_image sdl3_ttf sdl3_mixer" >> "$stage/README.txt"
 fi
 

@@ -11,3 +11,7 @@ box2d/lib/
 
 # CI packages (tools/ci/package_player.sh)
 dist/
+
+# Static SDL, built by tools/build_sdl_static.sh
+sdl/lib/
+sdl/build/
