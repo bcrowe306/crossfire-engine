@@ -12,7 +12,7 @@ builds for Linux, Windows, macOS and the web (WebAssembly).
 
 ## Building
 
-Needs Odin (`dev-2026-10`). With `tools/build_sdl_static.sh` (Linux and macOS, needs CMake) SDL3,
+Needs Odin (`dev-2026-10`). With `tools/build_sdl_static.sh` (Linux, macOS and Windows; needs CMake, and Visual Studio on Windows) SDL3,
 SDL3_image, SDL3_ttf and SDL3_mixer are built from the submodules and linked into every program,
 so games are a single executable; without it, the system's SDL3 libraries are used (on Windows,
 Odin ships them).

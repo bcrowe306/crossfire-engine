@@ -2,7 +2,8 @@
 # Builds the engine's player (optimized) and packs it for a release:
 #   dist/odin_sdl_engine-player-<version>-<platform>.tar.gz (.zip on Windows)
 # with the SDL3 libraries it needs (Linux: in lib/, found through rpath $ORIGIN/lib; Windows:
-# the DLLs next to it; macOS: Homebrew's, not bundled).
+# the DLLs next to it; macOS: Homebrew's, not bundled), unless the static SDL is built
+# (tools/build_sdl_static.sh): then SDL is inside it, which is checked.
 #
 # Usage: tools/ci/package_player.sh <platform> <version>   (after tools/ci/setup.sh)
 set -euo pipefail
@@ -18,6 +19,7 @@ cd "$engine"
 # With the static SDL built (tools/build_sdl_static.sh), SDL is inside the player
 static=false
 compgen -G "$engine/sdl/lib/*/libSDL3.a" > /dev/null && static=true
+compgen -G "$engine/sdl/lib/*/sdl3_static.lib" > /dev/null && static=true
 case "$(uname -s)" in
 Linux)
 	if $static; then
@@ -33,10 +35,24 @@ Darwin)
 	;;
 *)
 	odin build player -o:speed "-out:$stage/player.exe"
-	root=$(odin root)
-	for d in sdl3 sdl3/image sdl3/ttf sdl3/mixer; do cp "${root%/}/vendor/$d"/*.dll "$stage/"; done
+	if ! $static; then
+		root=$(odin root)
+		for d in sdl3 sdl3/image sdl3/ttf sdl3/mixer; do cp "${root%/}/vendor/$d"/*.dll "$stage/"; done
+	fi
 	;;
 esac
+
+# Static: the player mustn't load any SDL library
+if $static && command -v ldd > /dev/null; then
+	program="$stage/player"
+	[[ -f "$program.exe" ]] && program="$program.exe"
+	if ldd "$program" | grep -i "sdl3"; then
+		echo "The player still links SDL dynamically" >&2
+		exit 1
+	fi
+	echo "The player has SDL inside it:"
+	ldd "$program"
+fi
 
 cat > "$stage/README.txt" <<TXT
 odin_sdl_engine player $version ($platform)

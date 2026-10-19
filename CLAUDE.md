@@ -29,8 +29,14 @@ sample) then needs no SDL libraries, only libc (SDL itself loads the window syst
 the audio server at run time). `sdl_static.odin` does it: an `extra_linker_flags` `-L` to that
 folder makes the vendor bindings' `-lSDL3`... resolve to the archives, which are listed again so
 their order doesn't matter. Without the build, or with `-define:SDL_STATIC=false`, the system's
-shared libraries are linked: `libSDL3`, `libSDL3_image`, `libSDL3_ttf`, `libSDL3_mixer`. Windows
-isn't static yet (its binding names a fixed `SDL3.lib`).
+shared libraries are linked: `libSDL3`, `libSDL3_image`, `libSDL3_ttf`, `libSDL3_mixer`.
+- **Windows** (the script builds with Visual Studio and the static CRT, `/MT`, like Odin and
+  Box2D): the bindings name Odin's own `SDL3.lib` import libraries by path, which no search path
+  replaces. MSVC's linker takes each symbol from the first library on its command line that has
+  it, and Odin sorts foreign imports by `@(priority_index)` first: sdl_static.odin's are -1, before
+  the bindings' 0, so the static `sdl3_static.lib`... define everything and SDL3.dll isn't loaded.
+  The names avoid `SDL3.lib` on purpose. Odin ignores `priority_index` elsewhere (its order only
+  matters to MSVC).
 - What's built in: images through stb_image (PNG, JPEG) plus SDL_image's own formats (no AVIF,
   TIFF, WebP, JXL, animated PNG); SDL_ttf with its bundled FreeType (no HarfBuzz shaping, no
   color emoji); SDL_mixer with WAV, AIFF, VOC, AU, FLAC, MP3, Ogg Vorbis, MIDI. FreeType's
@@ -341,7 +347,9 @@ failed, fixes it and builds again with the next tag.
   which lags behind) and SDL3 (built from source on Linux, cached; Homebrew on macOS; Odin's
   own files on Windows), and builds Odin's STB libraries. The editor's workflow runs it too.
 - `tools/build_box2d.sh` builds Box2D for each (Windows: clang targeting MSVC, `llvm-lib`).
-- `tools/ci/package_player.sh` packs the player with its SDL3 libraries.
+- `tools/ci/package_player.sh` packs the player, with its SDL3 libraries unless SDL is static; a
+  static player is checked with `ldd` (no SDL library may show up).
+- **Odin's Windows `process_wait` always sets `Process_State.success`**: check `exit_code`.
 
 ## Documentation (required)
 

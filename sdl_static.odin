@@ -1,4 +1,4 @@
-#+build linux, darwin
+#+build linux, darwin, windows
 package engine
 
 /*
@@ -12,8 +12,16 @@ linker takes the first folder in its search path that has a match, so `-L` to a 
 static archives wins over the system's .so files. The archives are also listed again here, so
 symbols SDL3_ttf, _image and _mixer need from SDL3 resolve whatever order the -l flags came in.
 
-`-define:SDL_STATIC=false` links the system's shared libraries even when the static ones are
-built. Windows isn't covered yet (its binding names a fixed SDL3.lib, an import library).
+**Windows:** the vendor bindings name Odin's own `SDL3.lib` (and `SDL3_image.lib`...), import
+libraries of the DLLs, by path: no search path can replace them. But MSVC's linker resolves a
+symbol from the first library on its command line that has it, and Odin orders foreign imports by
+`priority_index` first: this file's, -1, come before the bindings' (0), so the static libraries
+define every SDL function and the import libraries go unused (the game doesn't load SDL3.dll).
+The static libraries need Windows' own: user32, gdi32, winmm, imm32, ole32, oleaut32, version,
+uuid, advapi32, setupapi, shell32.
+
+`-define:SDL_STATIC=false` links the system's shared libraries (the DLLs on Windows) even when the
+static ones are built.
 */
 
 // Link the static SDL libraries when they're built (false: always the system's shared ones)
@@ -25,7 +33,7 @@ SDL_STATIC_LIBS :: "sdl/lib/" + ODIN_OS_STRING + "_" + ODIN_ARCH_STRING
 SDL_STATIC_DIR :: #directory + SDL_STATIC_LIBS
 
 // Whether this build links SDL statically
-SDL_LINKED_STATICALLY :: SDL_STATIC && #exists(SDL_STATIC_LIBS + "/libSDL3.a")
+SDL_LINKED_STATICALLY :: SDL_STATIC && (#exists(SDL_STATIC_LIBS + "/libSDL3.a") || #exists(SDL_STATIC_LIBS + "/sdl3_static.lib"))
 
 when SDL_LINKED_STATICALLY {
 	when ODIN_OS == .Darwin {
@@ -35,6 +43,32 @@ when SDL_LINKED_STATICALLY {
 			SDL_STATIC_LIBS + "/libSDL3_ttf.a",
 			SDL_STATIC_LIBS + "/libSDL3_mixer.a",
 			SDL_STATIC_LIBS + "/libSDL3.a",
+		}
+	} else when ODIN_OS == .Windows {
+		// Before the vendor bindings' import libraries (see above)
+		when #exists(SDL_STATIC_LIBS + "/freetype_static.lib") {
+			@(priority_index = -1)
+			foreign import sdl_static {
+				SDL_STATIC_LIBS + "/sdl3_image_static.lib",
+				SDL_STATIC_LIBS + "/sdl3_ttf_static.lib",
+				SDL_STATIC_LIBS + "/freetype_static.lib",
+				SDL_STATIC_LIBS + "/sdl3_mixer_static.lib",
+				SDL_STATIC_LIBS + "/sdl3_static.lib",
+				"system:user32.lib", "system:gdi32.lib", "system:winmm.lib", "system:imm32.lib", "system:ole32.lib",
+				"system:oleaut32.lib", "system:version.lib", "system:uuid.lib", "system:advapi32.lib",
+				"system:setupapi.lib", "system:shell32.lib",
+			}
+		} else {
+			@(priority_index = -1)
+			foreign import sdl_static {
+				SDL_STATIC_LIBS + "/sdl3_image_static.lib",
+				SDL_STATIC_LIBS + "/sdl3_ttf_static.lib",
+				SDL_STATIC_LIBS + "/sdl3_mixer_static.lib",
+				SDL_STATIC_LIBS + "/sdl3_static.lib",
+				"system:user32.lib", "system:gdi32.lib", "system:winmm.lib", "system:imm32.lib", "system:ole32.lib",
+				"system:oleaut32.lib", "system:version.lib", "system:uuid.lib", "system:advapi32.lib",
+				"system:setupapi.lib", "system:shell32.lib",
+			}
 		}
 	} else {
 		@(extra_linker_flags = "-L" + SDL_STATIC_DIR + " -pthread -lm")
