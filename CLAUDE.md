@@ -30,6 +30,11 @@ the audio server at run time). `sdl_static.odin` does it: an `extra_linker_flags
 folder makes the vendor bindings' `-lSDL3`... resolve to the archives, which are listed again so
 their order doesn't matter. Without the build, or with `-define:SDL_STATIC=false`, the system's
 shared libraries are linked: `libSDL3`, `libSDL3_image`, `libSDL3_ttf`, `libSDL3_mixer`.
+- **macOS:** Odin's link command puts `-L/usr/local/lib -L/opt/homebrew/lib` (when it exists)
+  before every library, so the bindings' `-lSDL3` finds Homebrew's dylib first on any Mac with
+  Homebrew's SDL: sdl_static.odin's archives have `@(priority_index = -1)` (first, so they define
+  SDL's symbols) and `-Wl,-dead_strip_dylibs` drops the unused dylibs. `package_player.sh`
+  checks with `otool -L`.
 - The `-L` folder is **quoted**: the linker runs through a shell, and an engine inside
   "Odin SDL Editor.app" (or any folder with a space) failed to link.
 - **Windows** (the script builds with Visual Studio and the static CRT, `/MT`, like Odin and

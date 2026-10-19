@@ -38,7 +38,12 @@ SDL_LINKED_STATICALLY :: SDL_STATIC && (#exists(SDL_STATIC_LIBS + "/libSDL3.a") 
 
 when SDL_LINKED_STATICALLY {
 	when ODIN_OS == .Darwin {
-		@(extra_linker_flags = "-L\"" + SDL_STATIC_DIR + "\" -framework Cocoa -framework IOKit -framework CoreAudio -framework AudioToolbox -framework CoreVideo -framework Carbon -framework ForceFeedback -framework GameController -framework CoreHaptics -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers -framework AVFoundation -framework CoreMedia -framework CoreFoundation -framework ImageIO -framework CoreServices -liconv")
+		// Odin's macOS link puts -L/usr/local/lib and -L/opt/homebrew/lib (when it exists) before
+		// every library, so the bindings' -lSDL3 finds Homebrew's dylib first: these archives
+		// come first instead (priority_index, as on Windows) and define SDL's symbols, and
+		// -dead_strip_dylibs drops the then-unused Homebrew dylibs
+		@(priority_index = -1)
+		@(extra_linker_flags = "-Wl,-dead_strip_dylibs -L\"" + SDL_STATIC_DIR + "\" -framework Cocoa -framework IOKit -framework CoreAudio -framework AudioToolbox -framework CoreVideo -framework Carbon -framework ForceFeedback -framework GameController -framework CoreHaptics -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers -framework AVFoundation -framework CoreMedia -framework CoreFoundation -framework ImageIO -framework CoreServices -liconv")
 		foreign import sdl_static {
 			SDL_STATIC_LIBS + "/libSDL3_image.a",
 			SDL_STATIC_LIBS + "/libSDL3_ttf.a",
