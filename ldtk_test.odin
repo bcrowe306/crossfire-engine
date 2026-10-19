@@ -1,0 +1,275 @@
+#+build !js
+package engine
+
+import "core:os"
+import "core:path/filepath"
+import "core:strings"
+import "core:sync"
+import "core:testing"
+import sdl "vendor:sdl3"
+
+// LDtk tests: a small hand-written project (no tileset images, so nothing needs a renderer), one
+// level in the file and one saved apart, read, then built into a scene
+
+@(private="file")
+PROJECT :: `{
+	"jsonVersion": "1.5.3", "bgColor": "#40465B", "externalLevels": true, "worldLayout": "LinearHorizontal",
+	"worldGridWidth": 256, "worldGridHeight": 256, "worlds": [],
+	"defs": {
+		"layers": [
+			{"__type": "Entities", "identifier": "Things", "uid": 1, "gridSize": 16, "parallaxFactorX": 0, "parallaxFactorY": 0, "parallaxScaling": true, "intGridValues": []},
+			{"__type": "IntGrid", "identifier": "Walls", "uid": 2, "gridSize": 16, "parallaxFactorX": 0.5, "parallaxFactorY": 0, "parallaxScaling": false,
+			 "intGridValues": [{"value": 1, "identifier": "stone", "color": "#808080"}, {"value": 2, "identifier": "ladder", "color": "#A06020"}]}
+		],
+		"entities": [{"identifier": "Coin", "uid": 10, "width": 8, "height": 8, "pivotX": 0.5, "pivotY": 0.5, "color": "#FFD700", "tags": ["pickup"]}],
+		"tilesets": [{"identifier": "Icons", "uid": 20, "relPath": null, "embedAtlas": "LdtkIcons", "tileGridSize": 16, "spacing": 0, "padding": 0,
+			"pxWid": 256, "pxHei": 256, "__cWid": 16, "__cHei": 16, "tags": [], "customData": [{"tileId": 3, "data": "spikes"}],
+			"enumTags": [{"enumValueId": "Hurts", "tileIds": [3, 4]}]},
+			{"identifier": "Art", "uid": 21, "relPath": "art/tiles.png", "tileGridSize": 16, "spacing": 0, "padding": 0, "pxWid": 32, "pxHei": 32}],
+		"enums": [{"identifier": "Kind", "uid": 30, "values": [{"id": "Gold"}, {"id": "Silver"}]}],
+		"externalEnums": [],
+		"levelFields": []
+	},
+	"levels": [
+		{"identifier": "Level_0", "iid": "aaa", "uid": 0, "worldX": -1, "worldY": -1, "worldDepth": 0, "pxWid": 64, "pxHei": 48,
+		 "__bgColor": "#102030", "bgRelPath": null, "externalRelPath": null, "__neighbours": [{"levelIid": "bbb", "dir": "e"}],
+		 "fieldInstances": [{"__identifier": "music", "__type": "String", "__value": "cave"}],
+		 "layerInstances": [
+			{"__identifier": "Things", "__type": "Entities", "__cWid": 4, "__cHei": 3, "__gridSize": 16, "__opacity": 1,
+			 "__pxTotalOffsetX": 0, "__pxTotalOffsetY": 0, "__tilesetDefUid": null, "__tilesetRelPath": null, "iid": "l1", "visible": true,
+			 "intGridCsv": [], "gridTiles": [], "autoLayerTiles": [],
+			 "entityInstances": [
+				{"__identifier": "Coin", "iid": "c1", "__grid": [2, 1], "__pivot": [0.5, 0.5], "__tags": ["pickup"], "__smartColor": "#FFD700",
+				 "__tile": {"tilesetUid": 20, "x": 0, "y": 0, "w": 16, "h": 16}, "px": [40, 24], "width": 8, "height": 8,
+				 "fieldInstances": [
+					{"__identifier": "Value", "__type": "Int", "__value": 5},
+					{"__identifier": "kind", "__type": "LocalEnum.Kind", "__value": "Silver"},
+					{"__identifier": "glow", "__type": "Color", "__value": "#FF0000"},
+					{"__identifier": "home", "__type": "Point", "__value": {"cx": 3, "cy": 1}},
+					{"__identifier": "path", "__type": "Array<Point>", "__value": [{"cx": 0, "cy": 0}, {"cx": 1, "cy": 2}]},
+					{"__identifier": "target", "__type": "EntityRef", "__value": null},
+					{"__identifier": "speed", "__type": "Float", "__value": 2}
+				 ]}
+			 ]},
+			{"__identifier": "Walls", "__type": "IntGrid", "__cWid": 4, "__cHei": 3, "__gridSize": 16, "__opacity": 0.5,
+			 "__pxTotalOffsetX": 0, "__pxTotalOffsetY": 0, "__tilesetDefUid": null, "__tilesetRelPath": null, "iid": "l2", "visible": true,
+			 "intGridCsv": [1,1,0,0, 1,1,0,2, 1,1,1,1], "gridTiles": [], "autoLayerTiles": [], "entityInstances": []}
+		 ]},
+		{"identifier": "Level_1", "iid": "bbb", "uid": 1, "worldX": -1, "worldY": -1, "pxWid": 32, "pxHei": 48,
+		 "externalRelPath": "game/Level_1.ldtkl", "layerInstances": null, "fieldInstances": []}
+	]
+}`
+
+@(private="file")
+LEVEL_1 :: `{"identifier": "Level_1", "iid": "bbb", "uid": 1, "worldX": -1, "worldY": -1, "pxWid": 32, "pxHei": 48, "__bgColor": "#000000",
+	"fieldInstances": [],
+	"layerInstances": [
+		{"__identifier": "Walls", "__type": "IntGrid", "__cWid": 2, "__cHei": 3, "__gridSize": 16, "__opacity": 1,
+		 "__pxTotalOffsetX": 0, "__pxTotalOffsetY": 0, "iid": "l3", "visible": false,
+		 "intGridCsv": [0,0, 0,0, 1,1], "gridTiles": [],
+		 "autoLayerTiles": [{"px": [0, 32], "src": [16, 0], "f": 3, "t": 1, "a": 0.5}], "entityInstances": []}
+	]}`
+
+// A script named like the entity: the LDtk fields set its fields
+@(private="file")
+Coin :: struct {
+	using script: Script,
+	value: int `export:"" default=1`,
+	kind: string `export:""`,
+	glow: sdl.Color `export:""`,
+	home: [2]f32 `export:""`,
+	speed: f32 `export:""`,
+}
+
+@(private="file")
+registerCoin :: proc() {
+	@(static) once: sync.Once
+	sync.once_do(&once, proc() { Script_Register(Coin, {}) })
+}
+
+@(private="file")
+writeFixture :: proc() -> string {
+	base, _ := os.temp_directory(context.temp_allocator)
+	dir, _ := filepath.join({base, "engine_test_ldtk"}, context.temp_allocator)
+	_ = os.remove_all(dir)
+	_ = os.make_directory_all(filepath.join({dir, "game"}, context.temp_allocator) or_else dir)
+	_ = os.write_entire_file(filepath.join({dir, "game.ldtk"}, context.temp_allocator) or_else "", PROJECT)
+	_ = os.write_entire_file(filepath.join({dir, "game/Level_1.ldtkl"}, context.temp_allocator) or_else "", LEVEL_1)
+	return dir
+}
+
+@(test)
+ldtk_project_is_read :: proc(t: ^testing.T) {
+	dir := writeFixture()
+	defer os.remove_all(dir)
+	project, problem := LDtk_Load(JoinPath(dir, "game.ldtk"))
+	defer LDtk_Destroy(project)
+	testing.expect_value(t, problem, "")
+	if project == nil do return
+
+	// One world from the root, both levels (the second from its own file)
+	testing.expect_value(t, len(project.worlds), 1)
+	testing.expect_value(t, project.worlds[0].layout, LDtkWorldLayout.LinearHorizontal)
+	testing.expect_value(t, len(project.worlds[0].levels), 2)
+	level := LDtk_FindLevel(project, "Level_0")
+	testing.expect(t, level != nil && LDtk_FindLevel(project, "bbb") != nil, "levels by identifier and iid")
+	testing.expect_value(t, level.size, [2]f32{64, 48})
+	testing.expect_value(t, level.bgColor, sdl.Color{0x10, 0x20, 0x30, 255})
+	testing.expect_value(t, level.neighbours[0].dir, "e")
+	testing.expect_value(t, LDtk_FieldValue(level.fields, "music", ""), "cave")
+
+	// IntGrid, with its definition's names and parallax
+	walls := LDtk_FindLayer(level, "Walls")
+	testing.expect_value(t, walls.type, LDtkLayerType.IntGrid)
+	testing.expect_value(t, walls.opacity, 0.5)
+	testing.expect_value(t, LDtk_IntGridAt(walls, 3, 1), 2)
+	testing.expect_value(t, LDtk_IntGridAt(walls, 2, 0), 0)
+	testing.expect_value(t, LDtk_IntGridAt(walls, 9, 9), 0)
+	testing.expect_value(t, walls.parallax, [2]f32{0.5, 0})
+	def := LDtk_FindLayerDef(project, "Walls")
+	testing.expect_value(t, def.intGridValues[1].identifier, "ladder")
+
+	// An entity and every kind of field
+	coin := &LDtk_FindLayer(level, "Things").entities[0]
+	testing.expect_value(t, coin.identifier, "Coin")
+	testing.expect_value(t, coin.px, [2]f32{40, 24})
+	testing.expect_value(t, coin.grid, [2]int{2, 1})
+	testing.expect_value(t, coin.tags[0], "pickup")
+	testing.expect_value(t, LDtk_FieldValue(coin.fields, "Value", i64(0)), 5)
+	testing.expect_value(t, LDtk_FieldValue(coin.fields, "Value", 0), 5)
+	testing.expect_value(t, LDtk_FieldValue(coin.fields, "speed", f32(0)), 2)
+	testing.expect_value(t, LDtk_FieldValue(coin.fields, "kind", ""), "Silver")
+	testing.expect_value(t, LDtk_FieldValue(coin.fields, "glow", sdl.Color{}), sdl.Color{255, 0, 0, 255})
+	testing.expect_value(t, LDtk_FieldValue(coin.fields, "home", LDtkGridPoint{}), LDtkGridPoint{3, 1})
+	path := LDtk_FindField(coin.fields, "path").value.([]LDtkValue)
+	testing.expect_value(t, len(path), 2)
+	testing.expect_value(t, path[1].(LDtkGridPoint), LDtkGridPoint{1, 2})
+	testing.expect(t, LDtk_FindField(coin.fields, "target").value == nil, "null is nil")
+	text, _ := LDtk_ValueText(LDtk_FindField(coin.fields, "home").value, 16)
+	testing.expect_value(t, text, "56,24")
+
+	// The separate level: tiles with flips and alpha
+	other := LDtk_FindLevel(project, "Level_1")
+	tiles := other.layers[0].tiles
+	testing.expect_value(t, len(tiles), 1)
+	testing.expect(t, tiles[0].flipX && tiles[0].flipY && tiles[0].alpha == 0.5, "flip bits and alpha")
+	testing.expect(t, !other.layers[0].visible, "visibility")
+
+	// Definitions
+	icons := LDtk_FindTileset(project, 20)
+	testing.expect(t, icons.embedded && icons.path == "", "LDtk's icon atlas has no image")
+	testing.expect_value(t, icons.customData[0].data, "spikes")
+	testing.expect_value(t, icons.enumTags[0].tileIds[1], 4)
+	testing.expect_value(t, project.enums[0].values[1], "Silver")
+	// Paths outlive the frame (they're the project's, not temp memory)
+	free_all(context.temp_allocator)
+	art := LDtk_FindTileset(project, 21)
+	testing.expect(t, strings.has_suffix(art.path, "engine_test_ldtk/art/tiles.png"), art.path)
+
+	deps := LDtk_Dependencies(PROJECT)
+	testing.expect_value(t, len(deps), 2)
+	testing.expect_value(t, deps[0], "art/tiles.png")
+	testing.expect_value(t, deps[1], "game/Level_1.ldtkl")
+
+	_, bad := LDtk_Parse(`{"not": "ldtk"}`, "x.ldtk")
+	testing.expect(t, bad != "", "a JSON file that isn't LDtk")
+	free_all(context.temp_allocator)
+}
+
+@(test)
+ldtk_level_is_built :: proc(t: ^testing.T) {
+	registerCoin()
+	dir := writeFixture()
+	defer os.remove_all(dir)
+	game: Game
+	game.projectDir = dir
+	defer Game_ForgetLDtk(&game)
+	defer if game.arenaReady do MemoryArena_Destroy(&game.arena)
+	scene := new(Scene)
+	Scene_Init(scene)
+	scene.game = &game
+	scene.physicsPaused = true
+	defer { Scene_Destroy(scene); free(scene) }
+
+	text := `<scene formatVersion="12" name="S">
+		<node kind="LDtkLevel" name="Level" x="100" y="200" ldtk="game.ldtk" level="Level_0" intGridCollision="Walls" collisionValues="1" collisionLayer="2" friction="0.1"/>
+		<node kind="LDtkLevel" name="World" ldtk="game.ldtk" allLevels="true" spawnEntities="false">
+			<entity name="Coin" component="components/coin.component.xml"/>
+		</node>
+	</scene>`
+	data, err := ParseScene(text)
+	defer SceneData_Destroy(&data)
+	testing.expect_value(t, err, ProjectError.None)
+	testing.expect_value(t, data.nodes[0].ldtk.file, "game.ldtk")
+	testing.expect_value(t, data.nodes[0].ldtk.collisionValues[0], 1)
+	testing.expect(t, data.nodes[1].ldtk.allLevels && !data.nodes[1].ldtk.spawnEntities, "flags")
+	testing.expect_value(t, data.nodes[1].ldtk.entityComponents[0].component, "components/coin.component.xml")
+
+	created := Scene_Build(scene, &data, dir)
+	Scene_ProcessQueues(scene)
+	level := cast(^LDtkLevelNode)created[0]
+	testing.expect(t, Node_Is(level, LDtkLevelNode) && level.project != nil, "the project was read")
+	testing.expect_value(t, level.position, [2]f32{100, 200})
+	testing.expect_value(t, len(level.views), 1)
+	bounds, _ := level.getBounds(level)
+	testing.expect_value(t, bounds, sdl.FRect{0, 0, 64, 48})
+
+	// Layers back to front (Walls was LDtk's lower one), then the collision
+	view := level.views[0]
+	testing.expect_value(t, view.name, "Level_0")
+	testing.expect_value(t, view.children[0].name, "Walls")
+	testing.expect_value(t, view.children[1].name, "Things")
+	collision := Scene_FindNode(scene, "Level/Level_0/Collision")
+	testing.expect(t, Node_Is(collision, StaticBody), "a StaticBody for the IntGrid")
+	if collision == nil do return
+	body := cast(^StaticBody)collision
+	testing.expect_value(t, body.collisionLayer, PhysicsLayers(2))
+	testing.expect_value(t, body.friction, 0.1)
+	// Value 1 only: a 2x3 block and a 2x1 run, merged; the ladder (2) is left out
+	testing.expect_value(t, len(collision.children), 2)
+	first := cast(^CollisionShape)collision.children[0]
+	testing.expect_value(t, first.size, [2]f32{32, 48})
+	testing.expect_value(t, first.position, [2]f32{16, 24})
+	second := cast(^CollisionShape)collision.children[1]
+	testing.expect_value(t, second.size, [2]f32{32, 16})
+	testing.expect_value(t, second.position, [2]f32{48, 40})
+
+	// The entity got the script named like it, its fields from LDtk
+	coins := LDtk_FindEntityNodes(level, "Coin")
+	testing.expect_value(t, len(coins), 1)
+	coin := coins[0]
+	testing.expect_value(t, coin.position, [2]f32{40, 24})
+	script := Node_GetScript(coin, Coin)
+	testing.expect(t, script != nil, "the Coin script is attached")
+	if script != nil {
+		testing.expect_value(t, script.value, 5) // "Value" in LDtk
+		testing.expect_value(t, script.kind, "Silver")
+		testing.expect_value(t, script.glow, sdl.Color{255, 0, 0, 255})
+		testing.expect_value(t, script.home, [2]f32{56, 24})
+		testing.expect_value(t, script.speed, 2)
+	}
+	testing.expect(t, LDtk_EntityOf(coin) != nil && LDtk_EntityOf(coin).iid == "c1", "the entity's data from its node")
+	testing.expect(t, LDtk_EntityOf(level) == nil, "not an entity")
+
+	// IntGrid values under world positions (the node is at 100, 200)
+	testing.expect_value(t, LDtk_IntGridAtPosition(level, "Walls", {100 + 50, 200 + 20}), 2)
+	testing.expect_value(t, LDtk_IntGridAtPosition(level, "Walls", {100 + 40, 200 + 5}), 0)
+	testing.expect_value(t, LDtk_IntGridAtPosition(level, "Walls", {0, 0}), 0)
+
+	// Every level of the world, one after the other (a linear layout); no entities
+	world := cast(^LDtkLevelNode)created[1]
+	testing.expect_value(t, len(world.views), 2)
+	testing.expect_value(t, world.views[1].position, [2]f32{64, 0})
+	testing.expect_value(t, len(world.spawned), 0)
+	worldBounds, _ := world.getBounds(world)
+	testing.expect_value(t, worldBounds, sdl.FRect{0, 0, 96, 48})
+	testing.expect(t, !world.views[1].children[0].visible, "a hidden LDtk layer is hidden")
+	testing.expect(t, level.project == world.project, "one project per file, shared")
+
+	// No file: an empty node (a missing file or level is the same, and logs an error)
+	missing, _ := ParseScene(`<scene formatVersion="12" name="M"><node kind="LDtkLevel" name="L"/></scene>`)
+	defer SceneData_Destroy(&missing)
+	empty := cast(^LDtkLevelNode)Scene_Build(scene, &missing, dir)[0]
+	testing.expect_value(t, len(empty.views), 0)
+	free_all(context.temp_allocator)
+}

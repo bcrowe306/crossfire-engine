@@ -202,7 +202,7 @@ Game_LoadComponent :: proc(game: ^Game, path: string) -> (^SceneData, bool) {
 MAX_COMPONENT_DEPTH :: 16
 
 // Builds nodes (a scene's or a component's), components' instances included
-@(private="file")
+@(private)
 buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, allocator: mem.Allocator, attachScripts: bool, depth: int) -> []^Node {
 	rm := &scene.game.resourceManager
 	created := make([]^Node, len(nodes), allocator)
@@ -332,6 +332,8 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			} else {
 				n = CreateNode(scene, Node)
 			}
+		case .LDtkLevel:
+			n = ldtkBuildNode(scene, &node, projectDir, attachScripts, depth)
 		}
 		if Node_IsPhysicsBody(n) {
 			body := cast(^PhysicsBody)n

@@ -64,6 +64,8 @@ Game :: struct {
 	audioPlayers: [dynamic]^AudioPlayer,
 	// Components read so far, by path (nil: couldn't be read); in the game's memory (project_loader.odin)
 	components: map[string]^SceneData,
+	// LDtk projects read so far, by path (nil: couldn't be read); each in its own arena (ldtk_nodes.odin)
+	ldtk: map[string]^LDtkProject,
 	// The folder asset paths are relative to (owned; set by Game_LoadProject, "" for the working directory)
 	projectDir: string,
 	update: proc(game: ^Game, events: []sdl.Event, deltaTime: f64),
@@ -116,6 +118,7 @@ Game_Destroy :: proc(game: ^Game) {
 	Input_Destroy(&game.input)
 	// Their memory is the game's arena, freed below
 	game.components = nil
+	Game_ForgetLDtk(game)
 	for name, scene in game.scenes {
 		Scene_Destroy(scene)
 		free(scene)

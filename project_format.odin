@@ -108,6 +108,8 @@ Current limits:
   sound nodes (and from code on first use); Font assets are listed but not used.
 
 Version history:
+- 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
+  assets of kind "LDtk". Version 11 files are valid version 12 files.
 - 11: the project's `renderer`. Version 10 files are valid version 11 files.
 - 10: sound nodes (AudioPlayer, AudioPlayer2D, MusicPlayer), mix buses (`<bus>` in project.xml),
   assets of kind "Music". Version 9 files are valid version 10 files.
@@ -147,7 +149,7 @@ import "core:strings"
 import sdl "vendor:sdl3"
 
 // Version written by the editor. This loader also reads older versions
-PROJECT_FORMAT_VERSION :: 11
+PROJECT_FORMAT_VERSION :: 12
 
 /*
 Node kinds a scene file can contain.
@@ -183,6 +185,8 @@ SceneNodeKind :: enum {
 	AudioPlayer,
 	AudioPlayer2D,
 	MusicPlayer,
+	// A level (or every level of a world) of an LDtk project: tiles, entities, collision
+	LDtkLevel,
 }
 
 /*
@@ -221,6 +225,7 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.AudioPlayer    = {"Plays a sound: volume, pitch, pan, looping, through a mix bus"},
 	.AudioPlayer2D  = {"Plays a sound in the world: panned and quieter with distance from the camera"},
 	.MusicPlayer    = {"Streams music: fades, looping, seeking, through a mix bus"},
+	.LDtkLevel      = {"A level made in the LDtk level editor: its tile layers, entities and IntGrid collision"},
 }
 
 /*
@@ -330,6 +335,11 @@ SceneNodeData :: struct {
 	sound: string,
 	bus: string,
 	audio: AudioSettings,
+	// LDtkLevel: `ldtk` (the .ldtk file), `level`, `allLevels`, `intGridCollision`,
+	// `collisionValues`, `spawnEntities`, `background`, `smoothTiles`, and `<entity name="..."
+	// component="..."/>` children; the generated collision uses `collisionLayer`, `collisionMask`,
+	// `friction`, `restitution` (ldtk_nodes.odin)
+	ldtk: LDtkLevelSettings,
 }
 
 /*
@@ -381,6 +391,7 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	dampingRatio = 0.5,
 	particles = DEFAULT_PARTICLE_SETTINGS,
 	audio = DEFAULT_AUDIO_SETTINGS,
+	ldtk = DEFAULT_LDTK_LEVEL_SETTINGS,
 }
 
 SceneData :: struct {
@@ -396,7 +407,7 @@ SceneRef :: struct {
 
 AssetRef :: struct {
 	path: string,
-	// "Image", "Audio", "Music", "Font", "Data" or "Component"
+	// "Image", "Audio", "Music", "Font", "Data", "Component" or "LDtk"
 	kind: string,
 }
 
@@ -628,6 +639,7 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.component)
 		delete(node.sound)
 		delete(node.bus)
+		LDtkLevelSettings_Destroy(&node.ldtk)
 	}
 	delete(scene.nodes)
 	delete(scene.name)
@@ -846,6 +858,23 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.hertz = attrF32(doc, element, "hertz", 0)
 	node.dampingRatio = attrF32(doc, element, "damping", DEFAULT_SCENE_NODE.dampingRatio)
 	node.collideConnected = attrBool(doc, element, "collideConnected", false)
+	dl := DEFAULT_LDTK_LEVEL_SETTINGS
+	node.ldtk = {
+		file = cloneAttr(doc, element, "ldtk", ""),
+		level = cloneAttr(doc, element, "level", ""),
+		allLevels = attrBool(doc, element, "allLevels", dl.allLevels),
+		collisionLayer = cloneAttr(doc, element, "intGridCollision", ""),
+		collisionValues = make([dynamic]int),
+		spawnEntities = attrBool(doc, element, "spawnEntities", dl.spawnEntities),
+		background = attrBool(doc, element, "background", dl.background),
+		smoothTiles = attrBool(doc, element, "smoothTiles", dl.smoothTiles),
+		entityComponents = make([dynamic]LDtkEntityComponent),
+	}
+	if value, found := xml.find_attribute_val_by_key(doc, element, "collisionValues"); found {
+		for part in strings.fields(value, context.temp_allocator) {
+			if v, ok := strconv.parse_int(part); ok do append(&node.ldtk.collisionValues, v)
+		}
+	}
 
 	index := len(scene.nodes)
 	append(&scene.nodes, node)
@@ -866,6 +895,11 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		case "particles":
 			// Unknown or bad attributes keep the default
 			for a in doc.elements[child].attribs do ParticleSettings_Set(&scene.nodes[index].particles, a.key, a.val)
+		case "entity":
+			append(&scene.nodes[index].ldtk.entityComponents, LDtkEntityComponent{
+				cloneAttr(doc, child, "name", ""),
+				cloneAttr(doc, child, "component", ""),
+			})
 		case "item":
 			append(&scene.nodes[index].items, MenuItemData{
 				cloneAttr(doc, child, "label", ""),

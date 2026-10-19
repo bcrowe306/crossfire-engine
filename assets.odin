@@ -53,6 +53,24 @@ ComponentAsset :: struct {
 	path: string,
 }
 
+// An LDtk project in the project (`.ldtk`: ldtk.odin): its levels go in scenes as LDtkLevel nodes
+LDtkAsset :: struct {
+	path: string,
+}
+
+/*
+An LDtk asset's project, read the first time and kept for the game's life (nil, logged, if it
+can't be read): Game_LoadLDtk.
+
+Example:
+	world := e.Asset_LDtk(self.game, LDTK_WORLD)
+	for &level in world.worlds[0].levels do log.infof("%s: %v", level.identifier, level.size)
+*/
+Asset_LDtk :: proc(game: ^Game, asset: LDtkAsset) -> ^LDtkProject {
+	if asset.path == "" do return nil
+	return Game_LoadLDtk(game, asset.path)
+}
+
 // A texture asset's texture, loaded the first time (nil, logged, if it can't be)
 Asset_Texture :: proc(game: ^Game, asset: TextureAsset) -> ^sdl.Texture {
 	if asset.path == "" do return nil

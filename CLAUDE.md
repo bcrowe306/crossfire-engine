@@ -106,6 +106,9 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `audio_meter.odin` | **Level meters** on SDL3_mixer's mix callbacks: `AudioMeter` (atomic peaks), `AudioMeter_AttachGroup` (a bus's group) / `AttachMixer` (the final stage: applies Master's gains, then meters), `Audio_GetBusLevel`, `AudioLevel_ToDecibels`; its own C-convention declarations of the two callback setters |
 | `audio_test.odin` | Tests: bus output (volume, pan laws, mute, unknown bus), positional volume and pan, sound nodes and buses from scene files (no device needed) |
 | `audio.odin` | SDL3_mixer setup (`Audio_Init`: no device means silence, not an error), loading, and `Game_PlaySound(game, path)` (paths relative to `game.projectDir`, cached). The same on desktop and web |
+| `ldtk.odin` | **LDtk projects** (ldtk.io): `LDtk_Load` / `LDtk_Parse` into plain data (`LDtkProject`: worlds, levels, layers top-most first, tiles, IntGrid, entities and their `LDtkValue` fields, tilesets, layer/entity/enum definitions) in the project's own arena (`LDtk_Destroy`); lookups (`LDtk_FindLevel`, `LDtk_FindLayer`, `LDtk_IntGridAt`, `LDtk_FieldValue`), `LDtk_ValueText`, `LDtk_Dependencies` |
+| `ldtk_nodes.odin` | **LDtkLevel nodes**: `LDtkLevelSettings` (scene files), `LDtkLevelNode` / `LDtkLevelView` / `LDtkTileLayer` (one batched RenderGeometry per layer) / `LDtkEntityNode`; entities as mapped components, `LDtk_RegisterEntity` spawners or rectangles, scripts named like them with their fields; merged IntGrid collision; `Game_LoadLDtk` / `Game_ForgetLDtk`, `LDtk_FindEntityNodes`, `LDtk_EntityOf`, `LDtk_IntGridAtPosition` |
+| `ldtk_test.odin` | Tests: a hand-written project (one level in the file, one apart): every field kind, IntGrid, tiles' flips, definitions, paths outliving the frame; built: layer order, merged collision, the script's fields from LDtk, allLevels in a linear world, scene files |
 | `pack.odin` | **The data pack**: a game's files appended to its own executable (`Pack_Append`; the footer's `ODINPAK1`), read back by `Pack_Open` at start (the project is then `PACK_ROOT`); `Pack_Bytes` / `Pack_Has`, a `Pack` value for tools and tests (`Pack_OpenFile`) |
 | `pack_test.odin` | Tests: a pack appended to a file and read back by path |
 | `sdl_static.odin` | Links the static SDL (tools/build_sdl_static.sh) when it's built: `SDL_STATIC`, `SDL_LINKED_STATICALLY` |
@@ -289,6 +292,27 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
 - A scene switch stops the old scene's players (`Audio_SceneExited`) and clears `started`, so
   autostart players start again when the scene is back. Players unregister in their destroy.
 
+**LDtk** (ldtk.odin, ldtk_nodes.odin; their doc comments have the details):
+- A project is parsed from LDtk's JSON (`core:encoding/json` into a scratch arena, copied into
+  the project's arena, the tree dropped). **Every string and path in it is the project's**:
+  `JoinPath` is temp allocated, so joined paths are cloned (they once died at the end of the
+  frame and textures loaded from garbage). The struct itself is on the heap whatever the
+  caller's allocator (`LDtk_Destroy` frees it there).
+- Separate level files (`.ldtkl`) are read when a level's `layerInstances` is null. Without
+  Multi-worlds the root is one world.
+- An LDtkLevel node builds like a component instance: children made at build time, not in the
+  scene file; `buildNodes` (package-private for this) builds mapped components. Projects are
+  cached per game (`Game.ldtk`, `Game_LoadLDtk`, keyed by path; the build passes its project
+  folder, since editors' preview games have none): nodes point into that data, so
+  `Game_ForgetLDtk` only after the scene that used it is gone. Game_Destroy forgets them all.
+- LDtk lists layers top-most first: they're built in reverse. Entity `px` is the pivot.
+- Tile layers draw as one `RenderGeometry` through the draw transform and tint; tilesets get
+  nearest filtering unless `smoothTiles`. IntGrid layers without tiles draw their values' colors.
+- Script fields from LDtk fields: names match ignoring case and underscores; points become the
+  pixel middle of their cell; arrays, tiles and references are left to code (`LDtk_EntityOf`).
+- Checked against all 14 of LDtk's sample projects (parsed; the platformer rendered: the same
+  picture as LDtk's), not committed: their art has its own licenses.
+
 **Particles** (particles.odin; its doc comment has the details):
 - A `ParticleEmitter`'s `settings` is a plain value (no pointers): scene files store it as a
   `<particles>` element of the fields that differ from `DEFAULT_PARTICLE_SETTINGS`, by reflection
@@ -443,6 +467,9 @@ comment. What was needed, and why:
     `screenLayers` yet.
   - Sound nodes load their sound when the scene is built (`Scene_Build` with scripts attached; the
     editor's viewport doesn't); `Game_PlaySound` still plays any sound from code, loaded on first use.
+- **Format version 12** adds `LDtkLevel` nodes (`ldtk`, `level`, `allLevels`, `intGridCollision`,
+  `collisionValues`, `spawnEntities`, `background`, `smoothTiles`, `<entity name component/>`)
+  and assets of kind "LDtk".
 - **Format version 11** adds the project's `renderer` (a `RenderBackend`; Auto when absent).
 - **Format version 10** adds sound nodes (`AudioPlayer`, `AudioPlayer2D`, `MusicPlayer`: `sound`,
   `bus`, `volume`, `pitch`, `pan`, `loop`, `autostart`, `maxDistance`, `attenuation`, `fadeIn`,
