@@ -30,6 +30,8 @@ the audio server at run time). `sdl_static.odin` does it: an `extra_linker_flags
 folder makes the vendor bindings' `-lSDL3`... resolve to the archives, which are listed again so
 their order doesn't matter. Without the build, or with `-define:SDL_STATIC=false`, the system's
 shared libraries are linked: `libSDL3`, `libSDL3_image`, `libSDL3_ttf`, `libSDL3_mixer`.
+- The `-L` folder is **quoted**: the linker runs through a shell, and an engine inside
+  "Odin SDL Editor.app" (or any folder with a space) failed to link.
 - **Windows** (the script builds with Visual Studio and the static CRT, `/MT`, like Odin and
   Box2D): the bindings name Odin's own `SDL3.lib` import libraries by path, which no search path
   replaces. MSVC's linker takes each symbol from the first library on its command line that has

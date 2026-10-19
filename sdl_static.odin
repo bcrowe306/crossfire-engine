@@ -28,7 +28,8 @@ static ones are built.
 SDL_STATIC :: #config(SDL_STATIC, true)
 
 // Where tools/build_sdl_static.sh puts this platform's static SDL: relative to the engine (foreign
-// imports take that) and absolute (for the linker's -L)
+// imports take that) and absolute (for the linker's -L, quoted: the linker runs through a shell,
+// and the engine may be in a folder with a space, like a macOS app bundle's)
 SDL_STATIC_LIBS :: "sdl/lib/" + ODIN_OS_STRING + "_" + ODIN_ARCH_STRING
 SDL_STATIC_DIR :: #directory + SDL_STATIC_LIBS
 
@@ -37,7 +38,7 @@ SDL_LINKED_STATICALLY :: SDL_STATIC && (#exists(SDL_STATIC_LIBS + "/libSDL3.a") 
 
 when SDL_LINKED_STATICALLY {
 	when ODIN_OS == .Darwin {
-		@(extra_linker_flags = "-L" + SDL_STATIC_DIR + " -framework Cocoa -framework IOKit -framework CoreAudio -framework AudioToolbox -framework CoreVideo -framework Carbon -framework ForceFeedback -framework GameController -framework CoreHaptics -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers -framework AVFoundation -framework CoreMedia -framework CoreFoundation -framework ImageIO -framework CoreServices -liconv")
+		@(extra_linker_flags = "-L\"" + SDL_STATIC_DIR + "\" -framework Cocoa -framework IOKit -framework CoreAudio -framework AudioToolbox -framework CoreVideo -framework Carbon -framework ForceFeedback -framework GameController -framework CoreHaptics -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers -framework AVFoundation -framework CoreMedia -framework CoreFoundation -framework ImageIO -framework CoreServices -liconv")
 		foreign import sdl_static {
 			SDL_STATIC_LIBS + "/libSDL3_image.a",
 			SDL_STATIC_LIBS + "/libSDL3_ttf.a",
@@ -71,7 +72,7 @@ when SDL_LINKED_STATICALLY {
 			}
 		}
 	} else {
-		@(extra_linker_flags = "-L" + SDL_STATIC_DIR + " -pthread -lm")
+		@(extra_linker_flags = "-L\"" + SDL_STATIC_DIR + "\" -pthread -lm")
 		foreign import sdl_static {
 			SDL_STATIC_LIBS + "/libSDL3_image.a",
 			SDL_STATIC_LIBS + "/libSDL3_ttf.a",
