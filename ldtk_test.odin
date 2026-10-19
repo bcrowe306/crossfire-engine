@@ -87,10 +87,11 @@ registerCoin :: proc() {
 	sync.once_do(&once, proc() { Script_Register(Coin, {}) })
 }
 
+// Each test its own folder: tests run in parallel, and each deletes its folder when done
 @(private="file")
-writeFixture :: proc() -> string {
+writeFixture :: proc(name: string) -> string {
 	base, _ := os.temp_directory(context.temp_allocator)
-	dir, _ := filepath.join({base, "engine_test_ldtk"}, context.temp_allocator)
+	dir, _ := filepath.join({base, name}, context.temp_allocator)
 	_ = os.remove_all(dir)
 	_ = os.make_directory_all(filepath.join({dir, "game"}, context.temp_allocator) or_else dir)
 	_ = os.write_entire_file(filepath.join({dir, "game.ldtk"}, context.temp_allocator) or_else "", PROJECT)
@@ -100,7 +101,7 @@ writeFixture :: proc() -> string {
 
 @(test)
 ldtk_project_is_read :: proc(t: ^testing.T) {
-	dir := writeFixture()
+	dir := writeFixture("engine_test_ldtk_read")
 	defer os.remove_all(dir)
 	project, problem := LDtk_Load(JoinPath(dir, "game.ldtk"))
 	defer LDtk_Destroy(project)
@@ -164,7 +165,7 @@ ldtk_project_is_read :: proc(t: ^testing.T) {
 	// Paths outlive the frame (they're the project's, not temp memory)
 	free_all(context.temp_allocator)
 	art := LDtk_FindTileset(project, 21)
-	testing.expect(t, strings.has_suffix(art.path, "engine_test_ldtk/art/tiles.png"), art.path)
+	testing.expect(t, strings.has_suffix(art.path, "engine_test_ldtk_read/art/tiles.png"), art.path)
 
 	deps := LDtk_Dependencies(PROJECT)
 	testing.expect_value(t, len(deps), 2)
@@ -179,7 +180,7 @@ ldtk_project_is_read :: proc(t: ^testing.T) {
 @(test)
 ldtk_level_is_built :: proc(t: ^testing.T) {
 	registerCoin()
-	dir := writeFixture()
+	dir := writeFixture("engine_test_ldtk_build")
 	defer os.remove_all(dir)
 	game: Game
 	game.projectDir = dir
