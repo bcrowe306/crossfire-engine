@@ -347,6 +347,12 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
 - **Tile vertices are on whole pixels**: SDL's software renderer (the editor's viewport) draws
   axis-aligned quads as rectangles rounded one by one, which left 1 px cracks between tiles at
   some camera positions.
+- **In SDL's software renderer every tile triangle has its own vertices** (`isSoftwareRenderer`):
+  SDL turns two triangles sharing an edge into a scaled rectangle copy of the RLE-encoded
+  tileset, and after zooming at a corner of the editor's viewport those copies stopped drawing
+  for good (the ground vanished; keeping them away from the edges crashed the editor once).
+  Triangles are correct but slower (a whole 200 x 30 level at 1000 x 600: ~38 ms against 23).
+  GPU renderers keep shared vertices.
 - **Hot reload** (`LDtk_WatchFiles`, dev runs only, from Game_Update): reloaded projects replace
   the game's; the old ones are kept to the end (`Game.ldtkRetired`: entity nodes point into
   them). Built nodes are updated in place, not rebuilt: tile layers, colors, backgrounds and the

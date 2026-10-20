@@ -794,7 +794,14 @@ ldtkTileLayerDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 
 	cell := tiles.tileSize
 	if tiles.texture != nil && len(l.tiles) > 0 {
-		vertices := make([dynamic]sdl.Vertex, 0, len(l.tiles) * 4, context.temp_allocator)
+		// SDL's software renderer (the editor's viewport) turns two triangles sharing an edge into
+		// a scaled rectangle copy of the (RLE-encoded) tileset. After zooming at a corner of the
+		// viewport those copies stopped drawing for good (the ground vanished; keeping them for
+		// tiles away from the edges crashed the editor once). So there each triangle gets its own
+		// vertices and SDL rasterizes triangles: correct, if slower (a whole 200 x 30 level at
+		// 1000 x 600: about 38 ms against 23)
+		software := isSoftwareRenderer(renderer)
+		vertices := make([dynamic]sdl.Vertex, 0, len(l.tiles) * 6, context.temp_allocator)
 		indices := make([dynamic]c.int, 0, len(l.tiles) * 6, context.temp_allocator)
 		tw, th := f32(tiles.texture.w), f32(tiles.texture.h)
 		for tile in l.tiles {
@@ -807,12 +814,19 @@ ldtkTileLayerDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 			color := base
 			color.a *= tile.alpha
 			at := c.int(len(vertices))
-			append(&vertices,
-				sdl.Vertex{position = place(p, shift, scale), color = color, tex_coord = {u0, v0}},
-				sdl.Vertex{position = place({p.x + cell, p.y}, shift, scale), color = color, tex_coord = {u1, v0}},
-				sdl.Vertex{position = place({p.x + cell, p.y + cell}, shift, scale), color = color, tex_coord = {u1, v1}},
-				sdl.Vertex{position = place({p.x, p.y + cell}, shift, scale), color = color, tex_coord = {u0, v1}})
-			append(&indices, at, at + 1, at + 2, at, at + 2, at + 3)
+			corners := [4]sdl.Vertex{
+				{position = place(p, shift, scale), color = color, tex_coord = {u0, v0}},
+				{position = place({p.x + cell, p.y}, shift, scale), color = color, tex_coord = {u1, v0}},
+				{position = place({p.x + cell, p.y + cell}, shift, scale), color = color, tex_coord = {u1, v1}},
+				{position = place({p.x, p.y + cell}, shift, scale), color = color, tex_coord = {u0, v1}},
+			}
+			if software {
+				append(&vertices, corners[0], corners[1], corners[2], corners[0], corners[2], corners[3])
+				append(&indices, at, at + 1, at + 2, at + 3, at + 4, at + 5)
+			} else {
+				append(&vertices, ..corners[:])
+				append(&indices, at, at + 1, at + 2, at, at + 2, at + 3)
+			}
 		}
 		if len(vertices) > 0 {
 			sdl.RenderGeometry(renderer, tiles.texture, raw_data(vertices), c.int(len(vertices)), raw_data(indices), c.int(len(indices)))
@@ -849,6 +863,13 @@ The part of a layer the screen shows, in the layer's space (before parallax): th
 corners through the inverse of the draw transform and the parallax. Everything when the output
 size isn't known.
 */
+// Whether a renderer is SDL's software renderer
+@(private="file")
+isSoftwareRenderer :: proc(renderer: ^sdl.Renderer) -> bool {
+	name := sdl.GetRendererName(renderer)
+	return name != nil && string(name) == "software"
+}
+
 @(private="file")
 visibleBox :: proc(renderer: ^sdl.Renderer, shift: [2]f32, scale: f32) -> (lo, hi: [2]f32) {
 	w, h: c.int
