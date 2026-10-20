@@ -560,6 +560,24 @@ comment. What was needed, and why:
   format change.
 - `RenderLayer` has 8 fixed layers. The editor will probably want named layers.
 
+## Performance (measured: `odin run bench -o:speed`)
+
+`bench/main.odin` times the per-frame costs (each scenario's median; `-- <names>` for some).
+Measure before and after any performance change and record it here. Baseline (2026-10-20, this
+machine: Intel UHD 620 laptop, -o:speed):
+
+| Scenario | Baseline |
+|---|---|
+| make + remove a node | 13 µs per node |
+| remove 500 of 5500 nodes in one frame | 17.1 ms |
+| Scene_GetNode / Scene_FindNode (5500 nodes) | 18.6 µs / 285 µs per lookup |
+| update / draw overhead, 20000 nodes | 0.75 ms / 6.7 ms |
+| 1000 world transforms at depth 64 | 0.69 ms |
+| 1000 subscribes / 100 notifies of 1000 listeners | 0.84 ms / 0.26 ms |
+| particles, 4 emitters x 1000: update / draw (SDL) | 0.09 ms / 2.0 ms; colliding x 500: 2.1 ms |
+| physics, 500 static + 500 dynamic bodies, a frame | 0.37 ms |
+| LDtk forest, software renderer: a screenful / the whole level | 101 ms / 19 ms (SDL's pixel work) |
+
 ## Verifying work
 
 - `odin check . -no-entry-point -vet-unused` must pass.
