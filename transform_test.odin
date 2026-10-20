@@ -339,3 +339,14 @@ hitstop_and_camera_shake :: proc(t: ^testing.T) {
 	testing.expect_value(t, camera.shake.offset, [2]f32{})
 	free_all(context.temp_allocator)
 }
+
+@(test)
+paths_join :: proc(t: ^testing.T) {
+	testing.expect_value(t, JoinPath("a", "b"), "a/b")
+	testing.expect_value(t, JoinPath("a/", "/b"), "a/b")
+	testing.expect_value(t, JoinPath("", "assets/x.png"), "assets/x.png")
+	// An absolute path after an empty project folder stays absolute
+	testing.expect_value(t, JoinPath("", "/home/me/level.ldtk"), "/home/me/level.ldtk")
+	testing.expect_value(t, JoinPath("/proj", "", "a"), "/proj/a")
+	free_all(context.temp_allocator)
+}
