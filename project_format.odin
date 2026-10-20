@@ -123,8 +123,9 @@ Current limits:
 Version history:
 - 13: every node's `processMode`, `blendMode`, `zIndex`, `ySort` and `groups`; CollisionShape
   `oneWay`; the project's window: `fullscreen`, `vsync` (default true), `highDPI`; assets of
-  kind "Translation" (CSV tables: localization.odin), the project's `locale` and `icon`. Version 12
-  files are valid version 13 files.
+  kind "Translation" (CSV tables: localization.odin), the project's `locale` and `icon`, and the
+  editor's `<grid width height majorEvery opacity majorOpacity/>` (`GridSettings`; games ignore
+  it). Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
 - 11: the project's `renderer`. Version 10 files are valid version 11 files.
@@ -569,7 +570,32 @@ ProjectData :: struct {
 	// The language to start in (`locale="fr"`, format 13); "" for the player's system language.
 	// The translation tables are the assets of kind "Translation" (localization.odin)
 	locale: string,
+	// The editor's grid for this project (`<grid width="16" height="16"/>`, format 13); games
+	// don't use it
+	grid: GridSettings,
 }
+
+/*
+A project's grid, as tools show it and snap to it (the editor's viewport). Games don't use it.
+*/
+GridSettings :: struct {
+	// A cell's width and height, world units (GRID_SIZE_RANGE)
+	size: [2]int,
+	// A major (more opaque) line every this many cells; 0 = none (GRID_MAJOR_RANGE)
+	majorEvery: int,
+	// The lines' opacity, percent
+	opacity: int,
+	// The major lines' opacity, percent
+	majorOpacity: int,
+}
+
+// A project's grid without a `<grid>` element: 32 px cells, a major line every 4
+DEFAULT_GRID_SETTINGS :: GridSettings{size = {32, 32}, majorEvery = 4, opacity = 8, majorOpacity = 20}
+
+// The values a grid's cell size may take (parsing clamps to it)
+GRID_SIZE_RANGE :: [2]int{2, 1024}
+// The values a grid's major line spacing may take, in cells
+GRID_MAJOR_RANGE :: [2]int{0, 64}
 
 /*
 How a game's window starts. Games change fullscreen and vsync while running with
@@ -637,6 +663,7 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		startScene = cloneAttr(doc, 0, "startScene", ""),
 		locale = cloneAttr(doc, 0, "locale", ""),
 		icon = cloneAttr(doc, 0, "icon", ""),
+		grid = DEFAULT_GRID_SETTINGS,
 		scenes = make([dynamic]SceneRef),
 		assets = make([dynamic]AssetRef),
 		globals = make([dynamic]GlobalData),
@@ -662,6 +689,17 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 				append(&global.props, ScriptPropData{cloneAttr(doc, prop, "name", ""), cloneAttr(doc, prop, "value", "")})
 			}
 			append(&project.globals, global)
+		case "grid":
+			d := DEFAULT_GRID_SETTINGS
+			project.grid = {
+				size = {
+					clamp(attrInt(doc, child, "width", d.size.x), GRID_SIZE_RANGE[0], GRID_SIZE_RANGE[1]),
+					clamp(attrInt(doc, child, "height", d.size.y), GRID_SIZE_RANGE[0], GRID_SIZE_RANGE[1]),
+				},
+				majorEvery = clamp(attrInt(doc, child, "majorEvery", d.majorEvery), GRID_MAJOR_RANGE[0], GRID_MAJOR_RANGE[1]),
+				opacity = clamp(attrInt(doc, child, "opacity", d.opacity), 0, 100),
+				majorOpacity = clamp(attrInt(doc, child, "majorOpacity", d.majorOpacity), 0, 100),
+			}
 		case "bus":
 			append(&project.buses, AudioBusData{
 				name = cloneAttr(doc, child, "name", MASTER_BUS),

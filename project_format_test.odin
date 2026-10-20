@@ -150,3 +150,16 @@ project_renderer_setting :: proc(t: ^testing.T) {
 	options, valid := Player_ParseArgs({"player", "game", "--renderer", "vulkan"})
 	testing.expect(t, valid && options.renderer == "vulkan" && options.projectDir == "game", "--renderer")
 }
+
+@(test)
+parse_project_grid :: proc(t: ^testing.T) {
+	project, err := ParseProject(`<project formatVersion="13" name="G"><grid width="16" height="24" majorEvery="0" opacity="150"/></project>`)
+	defer ProjectData_Destroy(&project)
+	testing.expect_value(t, err, ProjectError.None)
+	// Missing attributes keep the defaults; values are kept in range
+	testing.expect_value(t, project.grid, GridSettings{size = {16, 24}, majorEvery = 0, opacity = 100, majorOpacity = DEFAULT_GRID_SETTINGS.majorOpacity})
+	// No <grid>: the defaults
+	plain, _ := ParseProject(`<project formatVersion="13" name="P"/>`)
+	defer ProjectData_Destroy(&plain)
+	testing.expect_value(t, plain.grid, DEFAULT_GRID_SETTINGS)
+}

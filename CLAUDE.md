@@ -606,6 +606,8 @@ comment. What was needed, and why:
   sets the Crossfire logo, `logo/crossfire.png` built in by the platform layer). Checked with a
   window: SDL takes it on X11; Hyprland's Wayland has no xdg-toplevel-icon, so there it's
   `false` and the desktop shows the `.desktop` entry's icon.
+  The editor's `<grid>` in project.xml (`ProjectData.grid`, `GridSettings`: tools' grid; games
+  ignore it).
   And the project's window (`WindowSettings`: `fullscreen`, `vsync` default true, `highDPI`),
   applied by `Application_Setup`; `Game_SetFullscreen` / `Game_IsFullscreen` / `Game_SetVSync`
   change it while running.
