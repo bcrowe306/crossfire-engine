@@ -18,7 +18,7 @@ import e "odin_sdl_engine"   // or "../odin_sdl_engine" from a sibling package
 tools/build_box2d.sh [<emsdk>]              # once: build Box2D into box2d/lib/ (with an emsdk: the web library too)
 tools/build_sdl_static.sh                   # once: SDL3 + _image/_ttf/_mixer as static libraries (Linux, macOS; needs CMake)
 odin check . -no-entry-point -vet-unused    # type-check the library (it has no main)
-odin test . -vet-unused                     # unit tests (format parser, transforms, scripts)
+odin test . -vet-unused -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true   # unit tests; a leak or bad free fails the test
 odin check player -vet-unused               # type-check the player program
 odin check . -no-entry-point -vet-unused -target:js_wasm32   # the browser build (web export)
 odin build player -out:player_bin           # build the player: player_bin <project folder>
@@ -108,6 +108,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `box2d/` | Box2D 3.1.1 bindings: a copy of Odin's `vendor:box2d` linking our own `box2d/lib/` (why: its doc comment). `lib/` is built, not committed |
 | `third_party/box2d`, `tools/build_box2d.sh` | Box2D's sources (submodule) and the script that compiles them (no CMake) |
 | `physics_test.odin`, `physics2_test.odin` | Tests: falling and landing, events, layers, Areas, ray casts, the mover (landing, walls, pushing), shapes with baked transforms, removal, scene files, debug drawing; smoothing at 144 fps, areas seen from bodies, one event per body pair, exits on removal, every joint kind |
+| `lifecycle_test.odin` | Tests: nodes made, added (twice, late, during onEnter), found, removed (queued, parent and child together, twice, unknown, by exit handlers); scene destroy order and ownership; the camera's removal; cross-scene parenting refused; Scene_Clear; listeners changing during notify; Timer, Ticker; game switch and teardown |
 | `component_test.odin` | Tests: component files, instances in scene files (names, transforms, under parents, nested), `Scene_Instantiate` |
 | `input.odin` | **Input**: keyboard, mouse and gamepad state (`Input_IsKeyPressed`, `Input_IsMouseButtonJustPressed`, `Input_GetMousePosition`, `Input_GetGamepadAxis`...) through the engine's own `Key`, `MouseButton`, `GamepadButton`, `GamepadAxis`; **actions** like Godot's input map (`Input_IsActionPressed` / `JustPressed` / `JustReleased`, `Input_GetActionStrength`, `Input_GetAxis`, `Input_GetVector`); bindings' text format; `Game.input`, updated first in `Game_Update` |
 | `input_test.odin` | Tests: key, mouse and wheel edges, focus loss, actions from keys, buttons and sticks (deadzones, strength, vectors), project file actions |
@@ -166,6 +167,28 @@ draw shapes and SDL_ttf text alike (pixels read back), and the demo runs with ea
 - Contextless code (`@(init)`) gets its context from `Platform_DefaultContext`, never
   `runtime.default_context()`: in the browser Odin's default allocator would grow the wasm memory
   behind Emscripten's heap.
+
+**Lifecycles (lifecycle_test.odin tests each):**
+- A scene owns every node it made: in it, queued to be added, or made with
+  `CreateNode(..., addToScene = false)` and not added yet (`Scene.detached`). Removing or
+  destroying frees each one exactly once.
+- `Scene_ProcessQueues`: removals first (by index: an exit handler may queue more), then
+  additions in order (by index: an `onEnter` handler may make nodes, which join in the same pass).
+  Adding a node twice, or to a scene it doesn't belong to, does nothing.
+- Removal and `Scene_Destroy` send `onExit` parents first, then destroy children before parents
+  (a `destroy` hook can still read its parent). Removing the scene's camera node (or its parent)
+  sets `scene.camera` to nil.
+- Nodes of different scenes can't be parent and child (`Node_SetParent` refuses): removing one
+  would free the other's nodes behind its scene's back.
+- `Scene_Clear` keeps the scene's settings and any procedures a game replaced.
+- `Game_Destroy`: the playing scene gets `onExit`, every scene's nodes go (their scripts can still
+  reach the globals), then the globals; `currentScene`, `nextScenePtr` and `scenes` are cleared.
+  Strings the game owns live in its arena (`game.name` from the project).
+- `EventSubject`: listeners may subscribe or unsubscribe during a notification (unsubscribing
+  then marks the listener; the list is compacted after the outermost notification), and order
+  is always subscription order.
+- The test runner fails a test that logs at error level: wrap expected refusals with
+  `context.logger = log.nil_logger()`.
 
 **Transforms and hierarchy:**
 - Every node has `position`, `rotation` (degrees, clockwise) and `scale` **relative to its parent**.

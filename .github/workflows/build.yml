@@ -65,7 +65,7 @@ jobs:
       - name: Test
         # The tests take seconds: a hang (a crashed test thread on Windows) shouldn't hold the runner
         timeout-minutes: 10
-        run: odin test . -vet-unused $ODIN_LINK_FLAGS
+        run: odin test . -vet-unused -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true $ODIN_LINK_FLAGS
 
       - name: Package the player
         run: tools/ci/package_player.sh ${{ matrix.platform }} ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}

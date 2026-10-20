@@ -27,7 +27,7 @@ cd odin_sdl_engine
 tools/build_box2d.sh                         # once: Box2D (third_party/box2d) into box2d/lib
 tools/build_sdl_static.sh                    # once (Linux, macOS; needs CMake): SDL linked statically
 odin check . -no-entry-point -vet-unused     # the library
-odin test . -vet-unused                      # the tests
+odin test . -vet-unused -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true   # the tests (a leak fails)
 odin build player -out:player_bin            # the player: player_bin <project folder>
 ```
 

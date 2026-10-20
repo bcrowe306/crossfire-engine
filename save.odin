@@ -140,7 +140,7 @@ Save_FromJSON :: proc(game: ^Game, text: string) -> bool {
 		saved, found := globals[g.info.name].(json.Object)
 		if !found do continue
 		// Only what the save may hold: the header and save:"-" fields stay as they are
-		allowed := json.Object{}
+		allowed := make(json.Object, allocator = context.temp_allocator)
 		for field in savedFields(g.info.type) {
 			if value, has := saved[field.name]; has do allowed[field.name] = value
 		}

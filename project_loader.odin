@@ -83,7 +83,8 @@ Example:
 Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string) -> bool {
 	game.backgroundColor = project.background
 	game.physics = project.physics
-	if game.name == "" do game.name = strings.clone(project.name)
+	// In the game's arena: freed with the game (a name set by code is the code's)
+	if game.name == "" do game.name = strings.clone(project.name, Game_GetAllocator(game))
 	// Data, Global and Save_Game use the game that's playing
 	currentGame = game
 	// The project's input actions (input.odin) and mix buses (audio_nodes.odin)

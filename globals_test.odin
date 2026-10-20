@@ -63,12 +63,13 @@ register :: proc() {
 	})
 }
 
-@(private="file")
+// A game without a window or renderer, for tests (shared by the test files)
+@(private)
 testGame :: proc(dir: string) -> ^Game {
 	game := new(Game)
 	game.physics = DEFAULT_PHYSICS
 	game.scenes = make(map[string]^Scene)
-	game.name = strings.clone("Engine Test")
+	game.name = strings.clone("Engine Test", Game_GetAllocator(game))
 	game.projectDir = strings.clone(dir)
 	game.update = Game_Update
 	game.createScene = Game_CreateScene
@@ -81,7 +82,8 @@ testGame :: proc(dir: string) -> ^Game {
 	return game
 }
 
-@(private="file")
+// A fresh empty folder in the temp directory (temp allocated path)
+@(private)
 tempFolder :: proc(name: string) -> string {
 	base, _ := os.temp_directory(context.temp_allocator)
 	dir := JoinPath(base, name)

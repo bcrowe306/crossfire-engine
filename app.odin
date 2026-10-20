@@ -89,7 +89,8 @@ Application_Frame :: proc(app: ^Application) {
 
 		if app.queuedGame != nil {
 			log.info("Switching to new game")
-			if app.game != nil {
+			// Setting the game that's already playing again only re-applies its scaling
+			if app.game != nil && app.game != app.queuedGame {
 				Game_Destroy(app.game)
 			}
 			app.game = app.queuedGame
@@ -156,7 +157,9 @@ Application_Frame :: proc(app: ^Application) {
 Application_Cleanup :: proc(app: ^Application) {
 	if app.game != nil {
 		Game_Destroy(app.game)
+		app.game = nil
 	}
+	app.queuedGame = nil
 	Audio_Quit(app.mixer)
 	ttf.Quit()
 	if app.renderer != nil {

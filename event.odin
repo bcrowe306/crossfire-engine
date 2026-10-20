@@ -26,6 +26,11 @@ EventListener :: struct {
 
 EventSubject :: struct {
 	listeners : [dynamic]EventListener,
+	// Notifications running (nested ones count): while one runs, unsubscribing only marks the
+	// listener, and the list is compacted when the last one ends
+	notifying: int,
+	// A listener was marked for removal while notifying
+	compact: bool,
 	subscribe: proc(subject: ^EventSubject, callback: proc(event: ^EventSubject, source: rawptr, data: EventData, userData: rawptr), userData: rawptr) -> ListenerHandle ,
 	unsubscribe: proc(subject: ^EventSubject, handle: ListenerHandle),
 	notify: proc(subject: ^EventSubject, source: rawptr, data: EventData),
@@ -59,24 +64,44 @@ Event_Subscribe :: proc(subject: ^EventSubject, callback: proc(event: ^EventSubj
 }
 
 Event_Unsubscribe :: proc(subject: ^EventSubject, handle: ListenerHandle) {
-	index := -1
-	for listener, i in subject.listeners {
-		if listener.id == handle {
-			index = i
-			break
+	for &listener, i in subject.listeners {
+		if listener.id != handle || listener.callback == nil do continue
+		if subject.notifying > 0 {
+			// The notification walking the list must not see it shift: mark it, compact later
+			listener.callback = nil
+			subject.compact = true
+		} else {
+			// Ordered: the others keep being called in the order they subscribed
+			ordered_remove(&subject.listeners, i)
 		}
+		return
 	}
-	if index != -1 {
-		unordered_remove(&subject.listeners, index)
-	}
-	else {
-		log.warn("Listener handle not found for unsubscribe")
-	}
+	log.warn("Listener handle not found for unsubscribe")
 }
 
+/*
+Calls every listener, in the order they subscribed. A listener may subscribe or unsubscribe
+(itself or others) while being called: ones that subscribe then are first called by the next
+notification; ones unsubscribed then aren't called again, this time included.
+*/
 Event_Notify :: proc(subject: ^EventSubject, source: rawptr, data: EventData) {
-	for listener in subject.listeners {
-		listener.callback(subject, source, data, listener.userData)
+	subject.notifying += 1
+	count := len(subject.listeners)
+	// By index, re-reading the list each time: a subscribe can move it
+	for i := 0; i < count && i < len(subject.listeners); i += 1 {
+		listener := subject.listeners[i]
+		if listener.callback != nil do listener.callback(subject, source, data, listener.userData)
+	}
+	subject.notifying -= 1
+	if subject.notifying == 0 && subject.compact {
+		subject.compact = false
+		kept := 0
+		for listener in subject.listeners {
+			if listener.callback == nil do continue
+			subject.listeners[kept] = listener
+			kept += 1
+		}
+		resize(&subject.listeners, kept)
 	}
 }
 

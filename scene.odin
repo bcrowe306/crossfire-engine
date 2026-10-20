@@ -16,6 +16,9 @@ Scene :: struct {
 	nodes: [dynamic]^Node,
 	addQueue: [dynamic]^Node,
 	removeQueue: [dynamic]EntityId,
+	// Nodes made with `CreateNode(..., addToScene = false)` and not added yet: the scene still
+	// owns them, so destroying the scene frees them
+	detached: [dynamic]^Node,
 	arena: MemoryArena,
 	// Optional camera, nil by default. When set, every layer not in `screenLayers` is drawn
 	// through it, and its pans and bounds are applied after each update. Create with `Scene_CreateCamera`
@@ -76,21 +79,53 @@ the scene itself stays (its name, game, screen layers, physicsPaused), ready to 
 Listeners on its onEnter / onExit are dropped with it.
 */
 Scene_Clear :: proc(scene: ^Scene) {
-	name, game, screenLayers, paused, played := scene.name, scene.game, scene.screenLayers, scene.physicsPaused, scene.played
+	kept := scene^
 	Scene_Destroy(scene)
 	scene^ = {}
 	Scene_Init(scene)
-	scene.name, scene.game, scene.screenLayers, scene.physicsPaused, scene.played = name, game, screenLayers, paused, played
+	scene.name, scene.game, scene.screenLayers, scene.physicsPaused, scene.played = kept.name, kept.game, kept.screenLayers, kept.physicsPaused, kept.played
+	// Procedures a game replaced stay replaced
+	scene.addNode, scene.removeNode, scene.getNode = kept.addNode, kept.removeNode, kept.getNode
+	scene.processQueues, scene.update, scene.draw = kept.processQueues, kept.update, kept.draw
 }
 
+/*
+Destroys every node of a scene and frees what the scene owns (its lists, physics world and arena);
+the Scene struct itself is the caller's. Nodes in the scene get `onExit` first, as removed nodes
+do; then every node it made (in it, waiting to be added, or never added) is destroyed, children
+before their parents, so a `destroy` hook can still reach its parent.
+
+Inputs:
+- scene: The scene
+*/
 Scene_Destroy :: proc(scene: ^Scene) {
-	// Nodes live in their own arenas, so each one is freed individually
-	for node in scene.nodes do Node_Destroy(node)
-	for node in scene.addQueue do Node_Destroy(node)
+	// onExit for nodes in the scene, parents before children (a snapshot: handlers may make or
+	// queue nodes, which go below with the rest)
+	for node in slice_clone_temp(scene.nodes[:]) {
+		if node.parent == nil do notifyExit(node)
+	}
+	// Every node, once, children first (each lives in its own arena)
+	visited := make(map[^Node]bool, context.temp_allocator)
+	destroyTree :: proc(node: ^Node, visited: ^map[^Node]bool) {
+		if node in visited do return
+		visited[node] = true
+		for child in node.children do destroyTree(child, visited)
+		Node_Destroy(node)
+	}
+	topOf :: proc(node: ^Node) -> ^Node {
+		top := node
+		for top.parent != nil do top = top.parent
+		return top
+	}
+	for list in ([][dynamic]^Node{scene.nodes, scene.addQueue, scene.detached}) {
+		for node in list do if node not_in visited do destroyTree(topOf(node), &visited)
+	}
 	// After the nodes: destroying a body node destroys its Box2D body
 	Physics_Destroy(scene)
+	scene.camera = nil
 	delete(scene.addQueue)
 	delete(scene.removeQueue)
+	delete(scene.detached)
 	delete(scene.nodes)
 	// Destroy, not free_all: free_all keeps the first block, which leaked once the scene was freed
 	MemoryArena_Destroy(&scene.arena)
@@ -127,32 +162,59 @@ CreateNode :: proc(scene: ^Scene, $T: typeid, addToScene: bool = true) -> ^T {
 	Node_Init(node, Node_GetAllocator(node))
 	if addToScene {
 		Scene_AddNode(scene, node)
+	} else {
+		append(&scene.detached, node)
 	}
 	return newObject
-
 }
 
+/*
+Adds a node to its scene at the start of the next update (it gets `onEnter` then). For nodes made
+with `CreateNode(..., addToScene = false)`; adding a node twice, or one of another scene, does
+nothing.
 
+Inputs:
+- scene: The node's scene
+- node: The node
+*/
 Scene_AddNode :: proc(scene: ^Scene, node: ^Node) {
-	log.debug("Adding Node on next frame")
+	if node.scene != scene {
+		log.errorf("Scene_AddNode: the node belongs to another scene")
+		return
+	}
+	if node.inScene || listHas(scene.addQueue[:], node) do return
+	removeFromList(&scene.detached, node)
 	append(&scene.addQueue, node)
 }
 
+/*
+Removes a node, with its children, at the start of the next update: they get `onExit`, then their
+`destroy` hooks, then their memory is freed. Pointers to them are invalid after that. Removing
+a node twice, or one already gone, does nothing.
 
+Inputs:
+- scene: The node's scene
+- nodeId: The node's `id`
+*/
 Scene_RemoveNode :: proc(scene: ^Scene, nodeId: EntityId) {
 	append(&scene.removeQueue, nodeId)
 }
 
+/*
+A node of the scene by its id: in the scene, waiting to be added, or made without being added.
 
+Returns:
+- The node, or nil (never made here, or already removed)
+*/
 Scene_GetNode :: proc(scene: ^Scene, nodeId: EntityId) -> ^Node {
-	for node in scene.nodes {
-		if node.id == nodeId {
-			return node
-		}
-	}
-	return nil
+	return findQueuedOrLive(scene, nodeId)
 }
 
+/*
+Applies queued removals, then queued additions (`onEnter` for each, in the order they were
+added). `Scene_Update` does it first; editors and tests call it to apply changes without
+updating.
+*/
 Scene_ProcessQueues :: proc(scene: ^Scene) {
 	// By index: removing a node can queue more removals (a collision exit's handler)
 	for i := 0; i < len(scene.removeQueue); i += 1 {
@@ -162,10 +224,12 @@ Scene_ProcessQueues :: proc(scene: ^Scene) {
 	}
 	clear(&scene.removeQueue)
 
-	for &node in scene.addQueue {
+	// By index too: an onEnter handler can make more nodes, which join in the same pass
+	for i := 0; i < len(scene.addQueue); i += 1 {
+		node := scene.addQueue[i]
 		node.inScene = true
-		node.onEnter->notify(node, nil)
 		append(&scene.nodes, node)
+		node.onEnter->notify(node, nil)
 	}
 	clear(&scene.addQueue)
 }
@@ -283,7 +347,30 @@ drawOrder :: proc(scene: ^Scene) -> []DrawItem {
 findQueuedOrLive :: proc(scene: ^Scene, id: EntityId) -> ^Node {
 	for node in scene.nodes do if node.id == id do return node
 	for node in scene.addQueue do if node.id == id do return node
+	for node in scene.detached do if node.id == id do return node
 	return nil
+}
+
+@(private="file")
+listHas :: proc(list: []^Node, node: ^Node) -> bool {
+	for n in list do if n == node do return true
+	return false
+}
+
+// A temp copy of a node list, to walk while handlers change the original
+@(private="file")
+slice_clone_temp :: proc(nodes: []^Node) -> []^Node {
+	copied := make([]^Node, len(nodes), context.temp_allocator)
+	copy(copied, nodes)
+	return copied
+}
+
+// onExit for a node in the scene and its descendants, parents first
+@(private="file")
+notifyExit :: proc(node: ^Node) {
+	if node.inScene do node.onExit->notify(node, nil)
+	node.inScene = false
+	for child in slice_clone_temp(node.children[:]) do notifyExit(child)
 }
 
 // Removes a node and its descendants from the scene and frees them
@@ -302,11 +389,13 @@ removeSubtree :: proc(scene: ^Scene, root: ^Node) {
 	collect(&subtree, root)
 
 	for node in subtree {
-		log.debug("Removing Node with ID: ", node.id)
 		if node.inScene do node.onExit->notify(node, nil)
 		node.inScene = false
 		removeFromList(&scene.nodes, node)
 		removeFromList(&scene.addQueue, node)
+		removeFromList(&scene.detached, node)
+		// The scene's camera went with it: draw without one rather than through freed memory
+		if scene.camera != nil && node == cast(^Node)scene.camera do scene.camera = nil
 	}
 	// Children first: a parent's arena holds its children list
 	#reverse for node in subtree do Node_Destroy(node)

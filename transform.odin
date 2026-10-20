@@ -1,5 +1,6 @@
 package engine
 
+import "core:log"
 import "core:math"
 import sdl "vendor:sdl3"
 
@@ -176,10 +177,17 @@ Inputs:
   Skew from a non-uniformly scaled parent can't be kept
 
 Returns:
-- false if `parent` is `child` or one of its descendants (that would make a loop)
+- false if `parent` is `child` or one of its descendants (that would make a loop), or is in
+  another scene (logged)
 */
 Node_SetParent :: proc(child: ^Node, parent: ^Node, keepWorld := false) -> bool {
 	if child.parent == parent do return true
+	// Nodes of different scenes can't be related: removing one would free the other's nodes
+	// behind its scene's back
+	if parent != nil && parent.scene != child.scene {
+		log.errorf("Node_SetParent: the parent is in another scene")
+		return false
+	}
 	for p := parent; p != nil; p = p.parent {
 		if p == child do return false
 	}

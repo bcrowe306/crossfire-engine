@@ -1,7 +1,6 @@
 package engine
 
 import "base:runtime"
-import "core:fmt"
 import "core:strings"
 
 import sdl "vendor:sdl3"
@@ -124,17 +123,27 @@ Game_GetAllocator :: proc(game: ^Game) -> runtime.Allocator {
 }
 
 Game_Destroy :: proc(game: ^Game) {
-	Globals_Destroy(game)
-	Input_Destroy(&game.input)
-	// Their memory is the game's arena, freed below
-	game.components = nil
-	Game_ForgetLDtk(game)
+	// The scene that's playing exits first, then every scene's nodes go (their scripts' destroy
+	// hooks can still reach the globals), then the globals
+	if game.currentScene != nil {
+		game.currentScene.onExit->notify(game.currentScene, nil)
+		Audio_SceneExited(game, game.currentScene)
+	}
 	for name, scene in game.scenes {
 		Scene_Destroy(scene)
 		free(scene)
 		delete(name)
 	}
 	delete(game.scenes)
+	game.scenes = nil
+	game.currentScene = nil
+	game.nextScenePtr = nil
+	Globals_Destroy(game)
+	Input_Destroy(&game.input)
+	// Their memory is the game's arena, freed below
+	game.components = nil
+	game.sceneFiles = nil
+	Game_ForgetLDtk(game)
 	Audio_DestroyBuses(game)
 	delete(game.projectDir)
 	game.resourceManager->destroy()
@@ -167,7 +176,6 @@ Game_SwitchScene :: proc(game: ^Game, name: string) -> bool {
 		log.warn("Scene with name does not exist: ", name)
 		return false
 	}
-	fmt.println(name)
 	log.infof("Switching to scene: %s on next frame", name)
 	game.nextScenePtr = scene
 	return true
@@ -229,16 +237,9 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 	// Globals first: the scene's nodes see what they changed this frame
 	Globals_Update(game, events, deltaTime)
 
-	if game.currentScene != nil {
-		if game.currentScene.update != nil {
-			game.currentScene->update(events, deltaTime)
-		}
-		else {
-			log.warn("Current scene update function is not set")
-		}
-	}
-	else {
-		log.warn("No current scene to update")
+	// No scene yet (before the first switch) is fine: nothing to update
+	if game.currentScene != nil && game.currentScene.update != nil {
+		game.currentScene->update(events, deltaTime)
 	}
 }
 
@@ -281,16 +282,8 @@ Game_HitStop :: proc(game: ^Game, seconds: f64) {
 }
 
 Game_Draw :: proc(game: ^Game) {
-	if game.currentScene != nil {
-		if game.currentScene.draw != nil {
-			game.currentScene->draw(game.renderer)
-		}
-		else {
-			log.warn("Current scene draw function is not set")
-		}
-	}
-	else {
-		log.warn("No current scene to draw")
+	if game.currentScene != nil && game.currentScene.draw != nil {
+		game.currentScene->draw(game.renderer)
 	}
 	// Globals that draw (a HUD) go over the scene, in screen space
 	Globals_Draw(game)
