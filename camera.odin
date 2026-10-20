@@ -93,7 +93,7 @@ CameraFollowMode :: enum {
 
 /*
 Settings for `Camera2D_Follow`. Each mode only reads its own strength setting;
-`maxSpeed` and `deadzone` apply to every mode.
+`deadzone` applies to every mode, `maxSpeed` to every mode but `.Snap` (which always jumps).
 */
 CameraFollow :: struct {
 	mode: CameraFollowMode,
@@ -103,7 +103,7 @@ CameraFollow :: struct {
 	smoothTime: f32,
 	// .Linear: world units per second
 	speed: f32,
-	// Caps how fast the camera can move, in world units per second. 0 = no limit
+	// Caps how fast the camera can move, in world units per second (not in .Snap). 0 = no limit
 	maxSpeed: f32,
 	// Size of a box, in world units and centered on the camera, that the followed position can
 	// move inside without moving the camera. {0, 0} disables it
