@@ -112,6 +112,11 @@ Pack_OpenFile :: proc(p: ^Pack, path: string) -> bool {
 	}
 	indexOffset, _ := endian.get_u64(footer[0:8], .Little)
 	indexSize, _ := endian.get_u64(footer[8:16], .Little)
+	// A damaged footer mustn't ask for more than the file holds
+	if indexOffset > u64(size) || indexSize > u64(size) - indexOffset {
+		os.close(file)
+		return false
+	}
 	index := make([]byte, int(indexSize), context.temp_allocator)
 	if !readAt(file, index, i64(indexOffset)) {
 		os.close(file)

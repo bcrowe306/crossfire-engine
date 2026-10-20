@@ -228,3 +228,21 @@ scenes_draw_into_render_targets :: proc(t: ^testing.T) {
 	testing.expect(t, w == 100 && h == 50 && mode == .LETTERBOX, "logical presentation restored")
 	free_all(context.temp_allocator)
 }
+
+// A rotated rectangle is tinted once, like an unrotated one
+@(test)
+rotated_rectangles_are_tinted_once :: proc(t: ^testing.T) {
+	surface := sdl.CreateSurface(100, 100, .RGBA32)
+	defer sdl.DestroySurface(surface)
+	renderer := sdl.CreateSoftwareRenderer(surface)
+	defer sdl.DestroyRenderer(renderer)
+	defer SetDrawState(TRANSFORM2D_IDENTITY)
+	sdl.SetRenderDrawColor(renderer, 0, 0, 0, 255)
+	sdl.RenderClear(renderer)
+	SetDrawState(Transform2D_Make({50, 50}, 30, {1, 1}), {128, 128, 128, 255})
+	rect := sdl.FRect{-20, -20, 40, 40}
+	DrawRectangle(renderer, &rect, {255, 255, 255, 255})
+	sdl.FlushRenderer(renderer)
+	middle := ([^]u8)(surface.pixels)[50 * int(surface.pitch) + 50 * 4]
+	testing.expectf(t, middle >= 126 && middle <= 130, "tinted to half: %v", middle)
+}

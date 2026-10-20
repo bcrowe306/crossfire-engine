@@ -241,6 +241,7 @@ Game_Destroy :: proc(game: ^Game) {
 	delete(game.data)
 	if game.arenaReady do MemoryArena_Destroy(&game.arena)
 	game.arenaReady = false
+	game.initialized = false
 	// Its memory was the arena's
 	game.localization = {}
 	if currentGame == game do currentGame = nil

@@ -38,3 +38,22 @@ pack_round_trip :: proc(t: ^testing.T) {
 	// The test program itself has no pack: the platform layer reads from disk
 	testing.expect(t, !Pack_Has("<pack>/project.xml"), "the game's pack is the test program's")
 }
+
+// A footer whose index runs past the end of the file is refused (no huge allocation)
+@(test)
+damaged_packs_are_refused :: proc(t: ^testing.T) {
+	dir := tempFolder("engine_test_bad_pack")
+	defer os.remove_all(dir)
+	path := strings.concatenate({dir, "/game"}, context.temp_allocator)
+	// 64 bytes, then the 32-byte footer
+	data := make([]byte, 64 + 32, context.temp_allocator)
+	footer := data[64:]
+	footer[0] = 10                       // index offset 10
+	for i in 8 ..< 16 do footer[i] = 0xff // index size: 2^64 - 1
+	copy(footer[24:], PACK_MAGIC)
+	_ = os.write_entire_file(path, data)
+	p: Pack
+	defer Pack_CloseFile(&p)
+	testing.expect(t, !Pack_OpenFile(&p, path), "refused")
+	free_all(context.temp_allocator)
+}

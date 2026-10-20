@@ -129,7 +129,8 @@ Inputs:
 - ticker: The ticker
 */
 Ticker_TogglePause :: proc(ticker: ^Ticker) {
-	ticker.running = !ticker.running
+	if ticker.running do Ticker_Pause(ticker)
+	else do Ticker_Resume(ticker)
 }
 
 /*
@@ -142,13 +143,14 @@ Ticker_Pause :: proc(ticker: ^Ticker) {
 	ticker.running = false
 }
 /*
-Resumes the ticker. The time it was paused still counts toward the next tick. Also
-`ticker->resume()`.
+Resumes the ticker where it was paused: the time it was paused doesn't count toward the next
+tick. Also `ticker->resume()`.
 
 Inputs:
 - ticker: The ticker
 */
 Ticker_Resume :: proc(ticker: ^Ticker) {
+	if !ticker.running do ticker.lastTick = time.tick_now()
 	ticker.running = true
 }
 

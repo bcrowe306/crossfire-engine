@@ -409,7 +409,8 @@ Example:
 Audio_AddBus :: proc(name: string, volume: f32 = 1, game: ^Game = nil) -> ^AudioBus {
 	game := game != nil ? game : currentGame
 	if game == nil do return nil
-	if b := Audio_GetBus(name, game); b != nil && (b.name == name) do return b
+	// "" is Master, like Audio_GetBus says
+	if b := Audio_GetBus(name, game); b != nil && (b.name == name || name == "") do return b
 	if len(game.buses) == 0 do Audio_SetBuses(game, nil)
 	bus := AudioBus{name = strings.clone(name, Game_GetAllocator(game)), volume = volume}
 	bus.meter = new(AudioMeter, Game_GetAllocator(game))

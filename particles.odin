@@ -791,17 +791,19 @@ collideParticles :: proc(emitter: ^ParticleEmitter) {
 	s := &emitter.settings
 	live := make([dynamic]int, 0, 64, context.temp_allocator)
 	for p, i in emitter.particles do if p.alive do append(&live, i)
-	radius :: proc(p: ^Particle) -> f32 {
-		r := p.size.x * (p.scale.x > 0 ? p.scale.x : 1) * 0.5
+	// As drawn: circles and ellipses have `size` as their radius, the other shapes as their width
+	shapeRadius: f32 = s.shape == .Circle || s.shape == .Ellipse ? 1 : 0.5
+	radius :: proc(p: ^Particle, shapeRadius: f32) -> f32 {
+		r := p.size.x * (p.scale.x > 0 ? p.scale.x : 1) * shapeRadius
 		return r <= 0.01 ? 1 : r
 	}
 
 	for a, n in live {
 		pa := &emitter.particles[a]
-		ra := radius(pa)
+		ra := radius(pa, shapeRadius)
 		for b in live[n + 1:] {
 			pb := &emitter.particles[b]
-			minDistance := ra + radius(pb)
+			minDistance := ra + radius(pb, shapeRadius)
 			delta := pb.position - pa.position
 			distanceSquared := delta.x * delta.x + delta.y * delta.y
 			if distanceSquared >= minDistance * minDistance || distanceSquared <= 0.0001 do continue
@@ -834,7 +836,7 @@ collideParticles :: proc(emitter: ^ParticleEmitter) {
 	}
 	for i in live {
 		p := &emitter.particles[i]
-		r := radius(p)
+		r := radius(p, shapeRadius)
 		for axis in 0 ..< 2 {
 			if p.position[axis] - r < lo[axis] {
 				p.position[axis] = lo[axis] + r

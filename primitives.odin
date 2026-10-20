@@ -34,14 +34,14 @@ Example:
 	e.DrawRectangle(renderer, &rect, {40, 40, 60, 255})
 */
 DrawRectangle :: proc(renderer: ^ sdl.Renderer, rect: ^sdl.FRect, color: sdl.Color) {
-	color := tinted(color)
 	if Transform2D_IsAxisAligned(drawState().transform) {
+		color := tinted(color)
 		screen := screenRect(rect)
 		sdl.SetRenderDrawColor(renderer, color[0], color[1], color[2], color[3])
 		sdl.RenderFillRect(renderer, &screen)
 		return
 	}
-	// Rotation can turn the rectangle into any quad
+	// Rotation can turn the rectangle into any quad (fillScreenPolygon applies the tint)
 	corners := rectCorners(rect)
 	toScreenPoints(corners[:])
 	fillScreenPolygon(renderer, corners[:], color)
