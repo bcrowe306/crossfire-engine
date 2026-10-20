@@ -173,7 +173,7 @@ savedFields :: proc(T: typeid) -> []reflect.Struct_Field {
 }
 
 // The storage name of a slot: <game>/<slot>, with the dev suffix for runs from the editor
-@(private="file")
+@(private)
 saveName :: proc(game: ^Game, slot: string) -> string {
 	name := game.name != "" ? game.name : "game"
 	if game.devKeys do name = fmt.tprintf("%s (dev)", name)

@@ -175,6 +175,8 @@ GamepadState :: struct {
 @(private)
 ActionState :: struct {
 	data: InputActionData,
+	// The bindings it started with (project.xml, Input_AddAction): Input_ResetBindings
+	defaults: [dynamic]InputBinding,
 	strength: f32,
 	down, pressed, released: bool,
 }
@@ -192,6 +194,8 @@ InputState :: struct {
 	actions: [dynamic]ActionState,
 	// Unknown action names already reported, so a typo warns once (owned keys)
 	warned: map[string]bool,
+	// Waiting for the next input to bind (input_rebind.odin)
+	capture: InputCapture,
 }
 
 /*
@@ -205,7 +209,9 @@ Input_SetActions :: proc(game: ^Game, actions: []InputActionData) {
 	for a in actions {
 		data := InputActionData{name = strings.clone(a.name, allocator), deadzone = a.deadzone, bindings = make([dynamic]InputBinding, 0, len(a.bindings), allocator)}
 		append(&data.bindings, ..a.bindings[:])
-		append(&input.actions, ActionState{data = data})
+		defaults := make([dynamic]InputBinding, 0, len(a.bindings), allocator)
+		append(&defaults, ..a.bindings[:])
+		append(&input.actions, ActionState{data = data, defaults = defaults})
 	}
 }
 
@@ -223,12 +229,15 @@ Input_AddAction :: proc(name: string, bindings: ..InputBinding, deadzone: f32 = 
 	for &a in game.input.actions {
 		if a.data.name == name {
 			append(&a.data.bindings, ..bindings)
+			append(&a.defaults, ..bindings)
 			return
 		}
 	}
 	data := InputActionData{name = strings.clone(name, allocator), deadzone = deadzone, bindings = make([dynamic]InputBinding, allocator)}
 	append(&data.bindings, ..bindings)
-	append(&game.input.actions, ActionState{data = data})
+	defaults := make([dynamic]InputBinding, allocator)
+	append(&defaults, ..bindings)
+	append(&game.input.actions, ActionState{data = data, defaults = defaults})
 }
 
 // Whether the game has an action by that name
@@ -454,12 +463,16 @@ Input_Update :: proc(input: ^InputState, events: []sdl.Event) {
 		}
 	}
 
+	// While waiting for an input to bind, and on the frame it comes, actions follow what's held
+	// but don't press or release: the press being bound doesn't also act (a menu's ui_accept)
+	capturing := input.capture.state == .Waiting
+	if capturing do captureInput(input)
 	for &a in input.actions {
 		strength: f32
 		for binding in a.data.bindings do strength = max(strength, bindingStrength(input, binding, a.data.deadzone))
 		down := strength > 0
-		a.pressed = down && !a.down
-		a.released = !down && a.down
+		a.pressed = down && !a.down && !capturing
+		a.released = !down && a.down && !capturing
 		a.down = down
 		a.strength = strength
 	}
@@ -558,7 +571,7 @@ InputBinding_Describe :: proc(binding: InputBinding) -> string {
 
 // INTERNAL
 
-@(private="file")
+@(private)
 inputOf :: proc(game: ^Game) -> ^InputState {
 	game := game != nil ? game : currentGame
 	return game != nil ? &game.input : nil
@@ -574,7 +587,7 @@ gamepadsOf :: proc(game: ^Game, device: int) -> []GamepadState {
 	return input.gamepads[device:device + 1]
 }
 
-@(private="file")
+@(private)
 findAction :: proc(game: ^Game, name: string, warn := true) -> ^ActionState {
 	input := inputOf(game)
 	if input == nil do return nil
