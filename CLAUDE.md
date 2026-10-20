@@ -111,6 +111,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `lifecycle_test.odin` | Tests: nodes made, added (twice, late, during onEnter), found, removed (queued, parent and child together, twice, unknown, by exit handlers); scene destroy order and ownership; the camera's removal; cross-scene parenting refused; Scene_Clear; listeners changing during notify; Timer, Ticker; game switch and teardown |
 | `core_test.odin` | Tests: visibility in the tree, screen positions (camera, screen layers), drawing through a view (layer order, screen layers, position-only nodes, draw state reset), game scaling and window-to-game coordinates on a software renderer, the application's game swap |
 | `animation_test.odin` | Tests: AnimationPlayer frames in each play mode, looping and ending, speed, pause / resume / stop / seek, events, restart, names; Camera2D follow modes, dead zone, speed cap, bounds, timed pans, screen / world round trips |
+| `nodes_test.odin` | Tests: process modes and pausing (physics too), the time scale (hitstops in real time), groups, z-index / y-sort / blend order, format 13 attributes parsed and built |
 | `component_test.odin` | Tests: component files, instances in scene files (names, transforms, under parents, nested), `Scene_Instantiate` |
 | `input.odin` | **Input**: keyboard, mouse and gamepad state (`Input_IsKeyPressed`, `Input_IsMouseButtonJustPressed`, `Input_GetMousePosition`, `Input_GetGamepadAxis`...) through the engine's own `Key`, `MouseButton`, `GamepadButton`, `GamepadAxis`; **actions** like Godot's input map (`Input_IsActionPressed` / `JustPressed` / `JustReleased`, `Input_GetActionStrength`, `Input_GetAxis`, `Input_GetVector`); bindings' text format; `Game.input`, updated first in `Game_Update` |
 | `input_test.odin` | Tests: key, mouse and wheel edges, focus loss, actions from keys, buttons and sticks (deadzones, strength, vectors), project file actions |
@@ -191,6 +192,22 @@ draw shapes and SDL_ttf text alike (pixels read back), and the demo runs with ea
   is always subscription order.
 - The test runner fails a test that logs at error level: wrap expected refusals with
   `context.logger = log.nil_logger()`.
+
+**Pausing, time and draw order (nodes_test.odin):**
+- `Scene.paused` (`Scene_SetPaused`): physics doesn't step and nodes update only if
+  `Node_CanProcess` (their `processMode`, Inherit resolving up to Pausable at the top: Pausable,
+  WhenPaused, Always, Disabled). Drawing goes on. Globals always update.
+- `Game.timeScale` (`Game_SetTimeScale`) scales the delta time scenes and globals get; 0 counts
+  as 1 (zero-initialized games). Hitstops count real time; camera shakes run in real time.
+- Draw order: layer, then `zIndex` (a stable sort, only when some node sets one), then tree
+  order; a `ySort` node's children are visited by their world y. Nodes that draw nothing
+  aren't listed.
+- `blendMode` (not inherited) reaches drawing through the draw state: `DrawTexture` sets it on
+  the texture, geometry with a texture (tiles, particles) too, and the scene sets it on the
+  renderer for shapes before each node, then normal blending again (SDL's default for shapes was
+  no blending: translucent shapes didn't blend before). `GetDrawBlend` for custom drawing.
+- Groups are names in the node's arena (`Node_AddToGroup`, `Scene_GetGroup`: a scan of the
+  scene's nodes).
 
 **Transforms and hierarchy:**
 - Every node has `position`, `rotation` (degrees, clockwise) and `scale` **relative to its parent**.
@@ -540,6 +557,8 @@ comment. What was needed, and why:
     `screenLayers` yet.
   - Sound nodes load their sound when the scene is built (`Scene_Build` with scripts attached; the
     editor's viewport doesn't); `Game_PlaySound` still plays any sound from code, loaded on first use.
+- **Format version 13** adds every node's `processMode`, `blendMode`, `zIndex`, `ySort` and
+  `groups` (comma-separated). A component instance keeps its root's values unless it sets them.
 - **Format version 12** adds `LDtkLevel` nodes (`ldtk`, `level`, `allLevels`, `intGridCollision`,
   `collisionValues`, `spawnEntities`, `background`, `smoothTiles`, `<entity name component/>`)
   and assets of kind "LDtk".

@@ -74,6 +74,10 @@ Game :: struct {
 	projectDir: string,
 	// Seconds left of a hitstop (Game_HitStop): scenes and globals get a delta time of 0
 	hitStop: f64,
+	// Multiplies the time scenes and globals see: 0.5 is slow motion, 2 double speed
+	// (`Game_SetTimeScale`). 0 counts as 1, so a game that never sets it runs normally; to stop
+	// time, pause the scene (`Scene_SetPaused`)
+	timeScale: f32,
 	// Each scene's file, by scene name (Game_LoadProject; in the game's arena): a scene entered
 	// again is rebuilt from it
 	sceneFiles: map[string]string,
@@ -224,9 +228,9 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 	// A hitstop freezes the game (scripts still run, with 0 seconds: they see input); the camera
 	// shake moves on in real time
 	realDeltaTime := deltaTime
-	deltaTime := deltaTime
+	deltaTime := deltaTime * f64(game.timeScale > 0 ? game.timeScale : 1)
 	if game.hitStop > 0 {
-		game.hitStop -= deltaTime
+		game.hitStop -= realDeltaTime
 		deltaTime = 0
 	}
 	if scene := game.currentScene; scene != nil && scene.camera != nil do Camera2D_UpdateShake(scene.camera, realDeltaTime)
@@ -277,6 +281,19 @@ Example:
 	e.Game_HitStop(self.game, 0.08)
 	e.Camera2D_Shake(self.scene.camera, 3, 0.15)
 */
+/*
+Sets how fast time runs for scenes and globals (physics, animations, particles, timers, tweens,
+scripts' delta time): 1 is normal, 0.5 slow motion, 2 double speed. Hitstops and camera shakes
+run in real time.
+
+Inputs:
+- game: The game
+- scale: The speed (above 0; to stop time, pause the scene)
+*/
+Game_SetTimeScale :: proc(game: ^Game, scale: f32) {
+	game.timeScale = max(scale, 0.0001)
+}
+
 Game_HitStop :: proc(game: ^Game, seconds: f64) {
 	game.hitStop = max(game.hitStop, seconds)
 }

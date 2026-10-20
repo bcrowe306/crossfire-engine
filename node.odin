@@ -3,6 +3,7 @@ package engine
 import "base:runtime"
 import "core:log"
 import "core:mem"
+import "core:strings"
 import sdl "vendor:sdl3"
 
 /*
@@ -14,6 +15,39 @@ TransformMode :: enum {
 	// Only the position: drawn upright and unscaled at the node's screen position. Used by UI
 	// nodes (Label, Menu), whose input handling works in unrotated screen space
 	Position_Only,
+}
+
+/*
+Whether a node updates (its `update` procedure, its script's update), depending on whether its
+scene is paused (`Scene_SetPaused`). Drawing isn't affected.
+*/
+ProcessMode :: enum u8 {
+	// Its parent's mode (a top-level node's: Pausable)
+	Inherit,
+	// Updates while the scene runs, stops while it's paused (gameplay)
+	Pausable,
+	// Updates only while the scene is paused (a pause menu)
+	WhenPaused,
+	// Updates whether the scene is paused or not
+	Always,
+	// Never updates (it still draws)
+	Disabled,
+}
+
+/*
+How a node's drawing combines with what's under it. Not inherited by children.
+*/
+BlendMode :: enum u8 {
+	// Normal alpha blending
+	Blend,
+	// Adds its colors (glows, fire, light)
+	Add,
+	// Multiplies the colors under it (shadows, tinting)
+	Multiply,
+	// Multiplies the colors under it by its own; its alpha is ignored
+	Modulate,
+	// Replaces what's under it, alpha included
+	None,
 }
 
 // Initial (and minimum) size of each block of a node's arena. Small, because most nodes only
@@ -72,6 +106,17 @@ Node :: struct {
 	scale: [2]f32,
 	// UI nodes use .Position_Only: they follow their world position but aren't rotated or scaled
 	transformMode: TransformMode,
+	// Whether it updates while its scene is paused or running (`Node_CanProcess`)
+	processMode: ProcessMode,
+	// How its drawing combines with what's under it
+	blendMode: BlendMode,
+	// Draw order within its layer: higher draws later (on top). Equal values keep tree order
+	zIndex: i32,
+	// Its children draw sorted by their world y (lower first: things further down the screen
+	// draw on top), for top-down games
+	ySort: bool,
+	// Groups it belongs to (`Node_AddToGroup`, `Scene_GetGroup`); names in the node's arena
+	groups: [dynamic]string,
 	// A hidden node and its children aren't drawn. They still update; check
 	// `Node_IsVisibleInTree` in update code that should pause while hidden
 	visible: bool,
@@ -107,6 +152,60 @@ Node_Init :: proc(node: ^Node, allocator := context.allocator) {
 	node.visible = true
 	node.tint = {255, 255, 255, 255}
 	node.children = make([dynamic]^Node, allocator)
+	node.groups = make([dynamic]string, allocator)
+}
+
+/*
+Whether a node updates now: its process mode (resolving Inherit through its parents; Pausable at
+the top) against whether its scene is paused.
+
+Example:
+	pauseMenu.processMode = .WhenPaused
+	e.Scene_SetPaused(scene, true) // gameplay stops, the menu runs
+*/
+Node_CanProcess :: proc(node: ^Node) -> bool {
+	mode := ProcessMode.Pausable
+	for n := node; n != nil; n = n.parent {
+		if n.processMode != .Inherit {
+			mode = n.processMode
+			break
+		}
+	}
+	paused := node.scene != nil && node.scene.paused
+	switch mode {
+	case .Inherit, .Pausable: return !paused
+	case .WhenPaused:         return paused
+	case .Always:             return true
+	case .Disabled:           return false
+	}
+	return true
+}
+
+/*
+Puts a node in a group (once): groups name sets of nodes to find or act on together, like
+"enemies" or "pickups".
+
+Inputs:
+- node: The node
+- group: The group's name (copied into the node's arena)
+*/
+Node_AddToGroup :: proc(node: ^Node, group: string) {
+	if Node_IsInGroup(node, group) do return
+	append(&node.groups, strings.clone(group, Node_GetAllocator(node)))
+}
+
+// Takes a node out of a group (nothing if it isn't in it)
+Node_RemoveFromGroup :: proc(node: ^Node, group: string) {
+	for name, i in node.groups do if name == group {
+		ordered_remove(&node.groups, i)
+		return
+	}
+}
+
+// Whether a node is in a group
+Node_IsInGroup :: proc(node: ^Node, group: string) -> bool {
+	for name in node.groups do if name == group do return true
+	return false
 }
 
 /*

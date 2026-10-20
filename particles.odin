@@ -806,6 +806,7 @@ particleEmitterDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	}
 	SetDrawState(base, tint)
 	if len(indices) == 0 do return
+	if useTexture do sdl.SetTextureBlendMode(emitter.texture, GetDrawBlend())
 	sdl.RenderGeometry(renderer, useTexture ? emitter.texture : nil, raw_data(vertices), c.int(len(vertices)), raw_data(indices), c.int(len(indices)))
 }
 

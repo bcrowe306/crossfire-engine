@@ -356,6 +356,13 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 		n.scale = node.scale
 		n.layer = RenderLayer(clamp(node.layer, 0, len(RenderLayer) - 1))
 		n.visible = node.visible
+		// A component instance keeps its root's settings unless the instance sets them
+		instance := node.kind == .Component
+		if !instance || node.processMode != .Inherit do n.processMode = node.processMode
+		if !instance || node.blendMode != .Blend do n.blendMode = node.blendMode
+		if !instance || node.zIndex != 0 do n.zIndex = node.zIndex
+		if !instance || node.ySort do n.ySort = node.ySort
+		for g in node.groups do Node_AddToGroup(n, g)
 		if node.parent >= 0 && created[node.parent] != nil {
 			Node_AddChild(created[node.parent], n)
 		}

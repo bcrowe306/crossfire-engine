@@ -1,6 +1,7 @@
 package engine
 
 import "core:log"
+import "core:slice"
 import "core:strings"
 import "core:mem"
 import sdl "vendor:sdl3"
@@ -30,6 +31,9 @@ Scene :: struct {
 	// Don't step the physics (bodies still exist and can be queried). Editors set it: their
 	// previews update scenes for animations, and bodies mustn't fall there
 	physicsPaused: bool,
+	// Paused (`Scene_SetPaused`): physics doesn't step, and only nodes whose process mode allows it
+	// update (`Node_CanProcess`); everything still draws
+	paused: bool,
 	// It has been the current scene before: entering it again rebuilds it from its file
 	// (Game.sceneFiles), so every visit starts fresh
 	played: bool,
@@ -295,9 +299,10 @@ Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 	// Scripts get `ready` once, before their first update, when every node is in the scene
 	Scene_ReadyScripts(scene)
 	// Physics steps before nodes update: they see this frame's positions and collisions
-	Physics_Update(scene, deltaTime)
+	if !scene.paused do Physics_Update(scene, deltaTime)
 
 	for node in scene.nodes {
+		if !Node_CanProcess(node) do continue
 		if node.update != nil {
 			node.update(node, events, deltaTime)
 		}
@@ -311,6 +316,31 @@ Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 	if scene.camera != nil && scene.game != nil {
 		Camera2D_Update(scene.camera, scene.game.size, deltaTime)
 	}
+}
+
+/*
+Pauses or resumes a scene: while paused, physics doesn't step and only nodes that may process then
+update (process mode WhenPaused or Always, or inheriting one); drawing goes on.
+
+Example:
+	e.Scene_SetPaused(scene, !scene.paused) // the pause key
+*/
+Scene_SetPaused :: proc(scene: ^Scene, paused: bool) {
+	scene.paused = paused
+}
+
+/*
+The scene's nodes in a group, in tree order (nodes waiting to be added included; temp allocated).
+
+Example:
+	for enemy in e.Scene_GetGroup(scene, "enemies") do enemy.visible = false
+*/
+Scene_GetGroup :: proc(scene: ^Scene, group: string) -> []^Node {
+	found := make([dynamic]^Node, context.temp_allocator)
+	for list in ([2][]^Node{scene.nodes[:], scene.addQueue[:]}) {
+		for node in list do if Node_IsInGroup(node, group) do append(&found, node)
+	}
+	return found[:]
 }
 
 /*
@@ -340,6 +370,8 @@ Inputs:
 */
 Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D, screenLayersUseView := false, positionOnlyScale: f32 = 1) {
 	defer SetDrawState(TRANSFORM2D_IDENTITY)
+	// Shapes blend with the node's blend mode; afterwards normal alpha blending again
+	defer if renderer != nil do sdl.SetRenderDrawBlendMode(renderer, sdl.BLENDMODE_BLEND)
 
 	layers := drawOrder(scene)
 	for &items, layer in layers {
@@ -350,7 +382,8 @@ Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transfo
 			if node.transformMode == .Position_Only {
 				transform = {x = {positionOnlyScale, 0}, y = {0, positionOnlyScale}, origin = transform.origin}
 			}
-			SetDrawState(transform, item.tint)
+			SetDrawState(transform, item.tint, node.blendMode)
+			if renderer != nil do sdl.SetRenderDrawBlendMode(renderer, SDLBlendMode(node.blendMode))
 			if node.draw != nil do node.draw(node, renderer)
 			// A script draws after its node, in the same local space
 			if item.scriptDraw != nil do item.scriptDraw(node.script.data, renderer)
@@ -381,13 +414,15 @@ DrawItem :: struct {
 /*
 The nodes to draw, by layer, each layer in tree order, with world transforms and tints computed
 top-down (temp allocated). One walk of the tree; nodes that draw nothing (no draw procedure, no
-script draw) aren't listed, though their children are.
+script draw) aren't listed, though their children are. A ySort node's children are visited by
+their world y; then each layer is sorted by zIndex, keeping that order among equal ones.
 */
 @(private="file")
 drawOrder :: proc(scene: ^Scene) -> [RenderLayer][dynamic]DrawItem {
 	layers: [RenderLayer][dynamic]DrawItem
 	for &items in layers do items = make([dynamic]DrawItem, 0, 64, context.temp_allocator)
-	visit :: proc(layers: ^[RenderLayer][dynamic]DrawItem, node: ^Node, parentWorld: Transform2D, parentTint: sdl.Color) {
+	zIndexed := false
+	visit :: proc(layers: ^[RenderLayer][dynamic]DrawItem, zIndexed: ^bool, node: ^Node, parentWorld: Transform2D, parentTint: sdl.Color) {
 		if !node.inScene || !node.visible do return
 		// Smoothed for dynamic bodies (physics_debug.odin)
 		world := Transform2D_Multiply(parentWorld, Node_GetRenderLocalTransform(node))
@@ -395,11 +430,24 @@ drawOrder :: proc(scene: ^Scene) -> [RenderLayer][dynamic]DrawItem {
 		scriptDraw := node.script.info != nil ? node.script.info.draw : nil
 		if node.draw != nil || scriptDraw != nil {
 			append(&layers[node.layer], DrawItem{node, world, tint, scriptDraw})
+			if node.zIndex != 0 do zIndexed^ = true
 		}
-		for child in node.children do visit(layers, child, world, tint)
+		if !node.ySort || len(node.children) < 2 {
+			for child in node.children do visit(layers, zIndexed, child, world, tint)
+			return
+		}
+		// By their world y: further down the screen draws later
+		Sorted :: struct { node: ^Node, y: f32 }
+		sorted := make([]Sorted, len(node.children), context.temp_allocator)
+		for child, i in node.children do sorted[i] = {child, Transform2D_Apply(world, child.position).y}
+		slice.stable_sort_by(sorted, proc(a, b: Sorted) -> bool { return a.y < b.y })
+		for s in sorted do visit(layers, zIndexed, s.node, world, tint)
 	}
 	for node in scene.nodes {
-		if node.parent == nil do visit(&layers, node, TRANSFORM2D_IDENTITY, {255, 255, 255, 255})
+		if node.parent == nil do visit(&layers, &zIndexed, node, TRANSFORM2D_IDENTITY, {255, 255, 255, 255})
+	}
+	if zIndexed {
+		for &items in layers do slice.stable_sort_by(items[:], proc(a, b: DrawItem) -> bool { return a.node.zIndex < b.node.zIndex })
 	}
 	return layers
 }

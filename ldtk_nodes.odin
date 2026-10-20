@@ -829,6 +829,7 @@ ldtkTileLayerDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 			}
 		}
 		if len(vertices) > 0 {
+			sdl.SetTextureBlendMode(tiles.texture, GetDrawBlend())
 			sdl.RenderGeometry(renderer, tiles.texture, raw_data(vertices), c.int(len(vertices)), raw_data(indices), c.int(len(indices)))
 		}
 		return

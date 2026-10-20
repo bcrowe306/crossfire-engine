@@ -99,6 +99,7 @@ Globals_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 // After the scene draws: globals with a `draw`, in screen space
 Globals_Draw :: proc(game: ^Game) {
 	SetDrawState(TRANSFORM2D_IDENTITY)
+	if game.renderer != nil do sdl.SetRenderDrawBlendMode(game.renderer, sdl.BLENDMODE_BLEND)
 	for g in game.globals {
 		if g.info.draw == nil || (cast(^Script)g.data).hidden do continue
 		g.info.draw(g.data, game.renderer)

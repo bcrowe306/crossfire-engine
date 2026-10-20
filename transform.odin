@@ -243,6 +243,8 @@ removeChild :: proc(parent, child: ^Node) {
 drawTransform := TRANSFORM2D_IDENTITY
 @(private)
 drawTint := sdl.Color{255, 255, 255, 255}
+@(private)
+drawBlend := BlendMode.Blend
 
 /*
 The transform the Draw* helpers currently apply: from the drawing node's local space to the
@@ -262,9 +264,27 @@ GetDrawTransform :: proc() -> Transform2D {
 Sets the transform and tint the Draw* helpers apply. Scenes do this for each node; call it only
 when drawing outside a scene, and restore it afterwards.
 */
-SetDrawState :: proc(transform: Transform2D, tint := sdl.Color{255, 255, 255, 255}) {
+SetDrawState :: proc(transform: Transform2D, tint := sdl.Color{255, 255, 255, 255}, blend := BlendMode.Blend) {
 	drawTransform = transform
 	drawTint = tint
+	drawBlend = blend
+}
+
+// The SDL blend mode of a BlendMode
+SDLBlendMode :: proc(blend: BlendMode) -> sdl.BlendMode {
+	switch blend {
+	case .Blend:    return sdl.BLENDMODE_BLEND
+	case .Add:      return sdl.BLENDMODE_ADD
+	case .Multiply: return sdl.BLENDMODE_MUL
+	case .Modulate: return sdl.BLENDMODE_MOD
+	case .None:     return sdl.BLENDMODE_NONE
+	}
+	return sdl.BLENDMODE_BLEND
+}
+
+// The blend mode of the node drawing now, for drawing code that sets its own (geometry)
+GetDrawBlend :: proc() -> sdl.BlendMode {
+	return SDLBlendMode(drawBlend)
 }
 
 // Local point to screen through the current draw transform

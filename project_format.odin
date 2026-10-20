@@ -96,7 +96,10 @@ Area) get their shape from the CollisionShape nodes under them. Collision layers
 layer numbers 1-64 (`collisionLayer="1 3"`), `all`, or empty for none.
 
 Attributes every node may have: `kind`, `name`, `x`, `y`, `rotation` (degrees), `scaleX`,
-`scaleY`, `layer` (0-7), `visible`. Kind-specific attributes are listed on `SceneNodeData`.
+`scaleY`, `layer` (0-7), `visible`, `processMode` (a `ProcessMode`: Inherit, Pausable,
+WhenPaused, Always, Disabled), `blendMode` (a `BlendMode`: Blend, Add, Multiply, Modulate,
+None), `zIndex` (draw order in the layer), `ySort` (children drawn by their y), `groups` (names,
+separated by commas: `groups="enemies,flying"`). Kind-specific attributes are listed on `SceneNodeData`.
 Missing attributes use the defaults in `DEFAULT_SCENE_NODE`. Paths are relative to the project
 folder and use `/`. Colors are `#rrggbb` or `#rrggbbaa`.
 
@@ -108,6 +111,8 @@ Current limits:
   sound nodes (and from code on first use); Font assets are listed but not used.
 
 Version history:
+- 13: every node's `processMode`, `blendMode`, `zIndex`, `ySort` and `groups`. Version 12 files
+  are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
 - 11: the project's `renderer`. Version 10 files are valid version 11 files.
@@ -149,7 +154,7 @@ import "core:strings"
 import sdl "vendor:sdl3"
 
 // Version written by the editor. This loader also reads older versions
-PROJECT_FORMAT_VERSION :: 12
+PROJECT_FORMAT_VERSION :: 13
 
 /*
 Node kinds a scene file can contain.
@@ -253,6 +258,16 @@ SceneNodeData :: struct {
 	layer: int,
 	// Hidden nodes, and everything under them, aren't drawn
 	visible: bool,
+	// Whether it updates while its scene is paused (Node.processMode)
+	processMode: ProcessMode,
+	// How its drawing combines with what's under it (Node.blendMode)
+	blendMode: BlendMode,
+	// Draw order within its layer (Node.zIndex)
+	zIndex: i32,
+	// Its children draw sorted by their y (Node.ySort)
+	ySort: bool,
+	// Groups it belongs to (Node.groups)
+	groups: [dynamic]string,
 
 	// Sprite, AnimatedSprite, ParticleEmitter (its Texture shape): image path relative to the project folder
 	texture: string,
@@ -623,6 +638,8 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 	context.allocator = allocator
 	for &node in scene.nodes {
 		delete(node.name)
+		for g in node.groups do delete(g)
+		delete(node.groups)
 		delete(node.texture)
 		delete(node.text)
 		for item in node.items { delete(item.label); delete(item.action) }
@@ -788,6 +805,15 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.scale = {attrF32(doc, element, "scaleX", 1), attrF32(doc, element, "scaleY", 1)}
 	node.layer = clamp(attrInt(doc, element, "layer", 0), 0, len(RenderLayer) - 1)
 	node.visible = attrBool(doc, element, "visible", true)
+	node.processMode = attrEnum(doc, element, "processMode", ProcessMode.Inherit)
+	node.blendMode = attrEnum(doc, element, "blendMode", BlendMode.Blend)
+	node.zIndex = i32(attrInt(doc, element, "zIndex", 0))
+	node.ySort = attrBool(doc, element, "ySort", false)
+	if groups, found := xml.find_attribute_val_by_key(doc, element, "groups"); found && groups != "" {
+		for name in strings.split(groups, ",", context.temp_allocator) {
+			if trimmed := strings.trim_space(name); trimmed != "" do append(&node.groups, strings.clone(trimmed))
+		}
+	}
 	node.texture = cloneAttr(doc, element, "texture", "")
 	node.text = cloneAttr(doc, element, "text", "")
 	node.fontSize = attrF32(doc, element, "fontSize", DEFAULT_SCENE_NODE.fontSize)

@@ -172,6 +172,7 @@ DrawTexture :: proc(
 
 	sdl.SetTextureColorMod(texture, tint[0], tint[1], tint[2])
 	sdl.SetTextureAlphaMod(texture, tint[3])
+	sdl.SetTextureBlendMode(texture, SDLBlendMode(drawBlend))
 	sdl.RenderTextureRotated(renderer, texture, hasSrc ? &srcRect : nil, &dst, f64(angle), nil, flip)
 }
 
