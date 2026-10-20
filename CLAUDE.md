@@ -57,8 +57,12 @@ shared libraries are linked: `libSDL3`, `libSDL3_image`, `libSDL3_ttf`, `libSDL3
   license asks games to credit it.
 - **glibc:** a Linux build runs on the glibc it was built against or newer. Built on this Arch
   machine (2.44) a game needs GLIBC_2.43 (C23 `__isoc23_*`, versioned math), so it won't start on
-  Ubuntu 24.04 (2.39) or Steam's runtime (2.31): release builds belong on an old glibc (CI's
-  Ubuntu, a Steam Runtime container, or `zig cc` with a glibc target: the planned experiment).
+  Ubuntu 24.04 (2.39) or Steam's runtime (2.31). **CI's Linux builds use zig against glibc
+  2.31** (`tools/ci/zig_toolchain.sh`: zig as Odin's `clang` and as CC/CXX for Box2D and SDL,
+  all `-target x86_64-linux-gnu.2.31`; its wrapper turns Odin's `-l:/abs/path` into a plain path,
+  which zig refuses). SDL and Box2D must be built with it too: a system-built static SDL needs
+  the build machine's glibc. `package_player.sh` (and the editor's packaging) fail when a
+  program needs a newer GLIBC than `GLIBC_MAX` (`objdump -T`).
 
 Runtime libraries without the static build: `libSDL3`, `libSDL3_image`, `libSDL3_ttf`, `libSDL3_mixer`. Box2D is linked
 statically from `box2d/lib/` (built from the `third_party/box2d` submodule, v3.1.1, by
@@ -495,6 +499,8 @@ failed, fixes it and builds again with the next tag.
   which lags behind) and SDL3 (built from source on Linux, cached; Homebrew on macOS; Odin's
   own files on Windows), and builds Odin's STB libraries. The editor's workflow runs it too.
 - `tools/build_box2d.sh` builds Box2D for each (Windows: clang targeting MSVC, `llvm-lib`).
+- Linux: `tools/ci/zig_toolchain.sh` (after setup) links everything with zig for glibc 2.31 (see
+  "glibc" above).
 - `tools/ci/package_player.sh` packs the player, with its SDL3 libraries unless SDL is static; a
   static player is checked with `ldd` (no SDL library may show up).
 - **Odin's Windows `process_wait` always sets `Process_State.success`**: check `exit_code`.
