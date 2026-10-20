@@ -79,6 +79,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `primitives.odin` | Shapes and `DrawTexture`, in the drawing node's local space |
 | `text_primitives.odin` | `DrawText`, `DrawTextCentered`, `DrawTextWrapped`, `MeasureText`; positioned and scaled by the draw transform, never rotated |
 | `camera.odin` | `Camera2D` node (looks at its world position; offset, zoom, bounds), follow modes, timed pans |
+| `localization.odin` | **Localization**: CSV translation tables (assets of kind "Translation", Godot's layout: `key,en,fr`), `Tr(key)`, `Tr_Text` ("@key" Labels and Menu items translate as they draw), `Locale_Set` / `Get` / `List` / `System`, the project's `locale` |
+| `localization_test.odin` | Tests: tables (quotes, comments, line breaks), merging, fallbacks, region matching, "@" text, a project's tables and locale |
 | `debug.odin` | **Debug drawing**: `Debug_Line` / `Rect` / `Circle` / `Text` (world space, over the scene, for a frame or `seconds`), `Debug_Clear`; the **debug overlay** (`Game.debugOverlay`, F10 with dev keys: fps, frame times, the scene's counts), `Game_GetFrameStats` |
 | `debug_test.odin` | Tests: debug shapes' lifetimes and freeing, drawing through the view, frame stats and the overlay |
 | `easing.odin` | `Ease(EaseType, t)`, 18 curves |
@@ -582,6 +584,7 @@ comment. What was needed, and why:
     editor's viewport doesn't); `Game_PlaySound` still plays any sound from code, loaded on first use.
 - **Format version 13** adds every node's `processMode`, `blendMode`, `zIndex`, `ySort` and
   `groups` (comma-separated); a component instance keeps its root's values unless it sets them.
+  CollisionShape `oneWay`; assets of kind "Translation" and the project's `locale`.
   And the project's window (`WindowSettings`: `fullscreen`, `vsync` default true, `highDPI`),
   applied by `Application_Setup`; `Game_SetFullscreen` / `Game_IsFullscreen` / `Game_SetVSync`
   change it while running.

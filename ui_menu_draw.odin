@@ -27,7 +27,7 @@ drawItem :: proc(menu: ^Menu, rm: ^ResourceManager, renderer: ^sdl.Renderer, ind
 	centerY := row.y + row.h * 0.5
 
 	if item.kind == .Label {
-		drawTextLeft(rm, style, {row.x + style.padding, centerY}, item.label, style.labelColor)
+		drawTextLeft(rm, style, {row.x + style.padding, centerY}, Tr_Text(item.label, menu.scene.game), style.labelColor)
 		return
 	}
 
@@ -45,11 +45,11 @@ drawItem :: proc(menu: ^Menu, rm: ^ResourceManager, renderer: ^sdl.Renderer, ind
 		focused ? style.borderFocusedColor : style.borderColor)
 
 	if item.kind == .Button {
-		DrawTextCentered(rm, {row.x + row.w * 0.5, centerY}, item.label, style.font, style.textSize, textColor)
+		DrawTextCentered(rm, {row.x + row.w * 0.5, centerY}, Tr_Text(item.label, menu.scene.game), style.font, style.textSize, textColor)
 		return
 	}
 
-	drawTextLeft(rm, style, {row.x + style.padding, centerY}, item.label, textColor)
+	drawTextLeft(rm, style, {row.x + style.padding, centerY}, Tr_Text(item.label, menu.scene.game), textColor)
 
 	#partial switch item.kind {
 	case .Checkbox:
@@ -97,7 +97,7 @@ drawItem :: proc(menu: ^Menu, rm: ^ResourceManager, renderer: ^sdl.Renderer, ind
 
 		optionColor := focused ? style.textFocusedColor : style.textColor
 		if !item.enabled do optionColor = style.textDisabledColor
-		drawTextLeft(rm, style, {box.x + style.padding * 0.6, centerY}, Menu_SelectedOption(item), optionColor, 0.85)
+		drawTextLeft(rm, style, {box.x + style.padding * 0.6, centerY}, Tr_Text(Menu_SelectedOption(item), menu.scene.game), optionColor, 0.85)
 
 		// Arrow, pointing up while the dropdown is open
 		s := box.h * 0.22
@@ -130,7 +130,7 @@ drawPopup :: proc(menu: ^Menu, rm: ^ResourceManager, renderer: ^sdl.Renderer, in
 			DrawRoundedRectangle(renderer, &highlight, style.cornerRadius * 0.4, style.popupHighlightColor)
 		}
 		color := hovered ? style.textFocusedColor : style.textColor
-		drawTextLeft(rm, style, {rect.x + style.padding * 0.6, rect.y + rect.h * 0.5}, item.options[option], color, 0.85)
+		drawTextLeft(rm, style, {rect.x + style.padding * 0.6, rect.y + rect.h * 0.5}, Tr_Text(item.options[option], menu.scene.game), color, 0.85)
 	}
 }
 

@@ -32,17 +32,19 @@ CreateLabel :: proc(scene: ^Scene, text: string, pos: [2]f32, size: f32, color: 
 Label_draw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	label := cast(^Label)node
 	rm := &label.scene.game.resourceManager
+	// "@key" is translated (localization.odin)
+	text := Tr_Text(label.text, label.scene.game)
 	if label.centered {
-		DrawTextCentered(rm, {0, 0}, label.text, label.font, label.size, label.color)
+		DrawTextCentered(rm, {0, 0}, text, label.font, label.size, label.color)
 	} else {
-		DrawText(rm, {0, 0}, label.text, label.font, label.size, label.color)
+		DrawText(rm, {0, 0}, text, label.font, label.size, label.color)
 	}
 }
 
 Label_getBounds :: proc(node: ^Node) -> (sdl.FRect, bool) {
 	label := cast(^Label)node
 	if label.scene == nil || label.scene.game == nil do return {}, false
-	size := MeasureText(&label.scene.game.resourceManager, label.text, label.font, label.size)
+	size := MeasureText(&label.scene.game.resourceManager, Tr_Text(label.text, label.scene.game), label.font, label.size)
 	if label.centered do return {-size.x * 0.5, -size.y * 0.5, size.x, size.y}, true
 	return {0, 0, size.x, size.y}, true
 }

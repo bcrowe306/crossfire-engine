@@ -90,6 +90,8 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 	// The project's input actions (input.odin) and mix buses (audio_nodes.odin)
 	Input_SetActions(game, project.actions[:])
 	Audio_SetBuses(game, project.buses[:])
+	// Translations before anything that shows text
+	loadProjectTranslations(game, project, projectDir)
 	// Globals exist before the scenes (their nodes' scripts may look them up in `ready`)
 	Globals_Start(game, project.globals[:])
 	delete(game.projectDir)

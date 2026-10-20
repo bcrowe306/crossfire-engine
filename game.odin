@@ -39,6 +39,8 @@ Game :: struct {
 	debugOverlay: bool,
 	// Recent frame times, for the overlay (`Game_GetFrameStats`)
 	frameStats: FrameStats,
+	// Translation tables and the language in use (localization.odin; in the game's arena)
+	localization: Localization,
 	initialized: bool,
 	backgroundColor: sdl.Color,
 	// Resolution the game is designed for. All drawing and event positions are in this
@@ -162,6 +164,8 @@ Game_Destroy :: proc(game: ^Game) {
 	delete(game.data)
 	if game.arenaReady do MemoryArena_Destroy(&game.arena)
 	game.arenaReady = false
+	// Its memory was the arena's
+	game.localization = {}
 	if currentGame == game do currentGame = nil
 }
 

@@ -112,7 +112,8 @@ Current limits:
 
 Version history:
 - 13: every node's `processMode`, `blendMode`, `zIndex`, `ySort` and `groups`; CollisionShape
-  `oneWay`; the project's window: `fullscreen`, `vsync` (default true), `highDPI`. Version 12
+  `oneWay`; the project's window: `fullscreen`, `vsync` (default true), `highDPI`; assets of
+  kind "Translation" (CSV tables: localization.odin) and the project's `locale`. Version 12
   files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
@@ -425,7 +426,7 @@ SceneRef :: struct {
 
 AssetRef :: struct {
 	path: string,
-	// "Image", "Audio", "Music", "Font", "Data", "Component" or "LDtk"
+	// "Image", "Audio", "Music", "Font", "Data", "Component", "LDtk" or "Translation"
 	kind: string,
 }
 
@@ -449,6 +450,9 @@ ProjectData :: struct {
 	renderer: RenderBackend,
 	// The game's window (`fullscreen`, `vsync`, `highDPI`, format 13)
 	window: WindowSettings,
+	// The language to start in (`locale="fr"`, format 13); "" for the player's system language.
+	// The translation tables are the assets of kind "Translation" (localization.odin)
+	locale: string,
 }
 
 /*
@@ -510,6 +514,7 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		},
 		background = attrColor(doc, 0, "background", {0, 0, 0, 255}),
 		startScene = cloneAttr(doc, 0, "startScene", ""),
+		locale = cloneAttr(doc, 0, "locale", ""),
 		scenes = make([dynamic]SceneRef),
 		assets = make([dynamic]AssetRef),
 		globals = make([dynamic]GlobalData),
@@ -652,6 +657,7 @@ ProjectData_Destroy :: proc(project: ^ProjectData, allocator := context.allocato
 	delete(project.actions)
 	for b in project.buses do delete(b.name)
 	delete(project.buses)
+	delete(project.locale)
 	delete(project.name)
 	delete(project.startScene)
 	project^ = {}
