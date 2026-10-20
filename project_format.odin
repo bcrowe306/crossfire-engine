@@ -198,11 +198,38 @@ SceneNodeKind :: enum {
 }
 
 /*
+The groups tools list node kinds in (the editor's Add Node dialog), in their display order.
+*/
+SceneNodeCategory :: enum {
+	// Structure: grouping, the camera, component instances, levels
+	Scene,
+	// What draws: images, animations, particles
+	Graphics,
+	// Text and menus
+	UI,
+	// Bodies, shapes, rays and joints
+	Physics,
+	// Sounds and music
+	Audio,
+}
+
+// Each category's name as tools show it
+SCENE_NODE_CATEGORY_NAMES := [SceneNodeCategory]string{
+	.Scene    = "Scene",
+	.Graphics = "Graphics",
+	.UI       = "User interface",
+	.Physics  = "Physics",
+	.Audio    = "Sound",
+}
+
+/*
 What a node kind is, for tools that let users pick one (the editor's Add Node dialog).
 */
 SceneNodeKindInfo :: struct {
 	// One line describing what the node does
 	description: string,
+	// The group it's listed in
+	category: SceneNodeCategory,
 }
 
 /*
@@ -211,29 +238,30 @@ table, so a kind added to `SceneNodeKind` must be described here (the compiler e
 
 Example:
 	for kind in e.SceneNodeKind {
-		fmt.printfln("%v: %s", kind, e.SCENE_NODE_KINDS[kind].description)
+		info := e.SCENE_NODE_KINDS[kind]
+		fmt.printfln("%s / %v: %s", e.SCENE_NODE_CATEGORY_NAMES[info.category], kind, info.description)
 	}
 */
 SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
-	.Node2D         = {"Groups nodes; moving, rotating or scaling it moves its children"},
-	.Sprite         = {"Draws an image"},
-	.AnimatedSprite = {"Plays a sprite sheet animation"},
-	.Camera         = {"Chooses the part of the scene the game shows; can follow a parent node"},
-	.Label          = {"Draws a line of text"},
-	.Menu           = {"A list of buttons that switch scenes or quit the game"},
-	.StaticBody     = {"A physics body that doesn't move by itself: walls, floors, platforms"},
-	.DynamicBody    = {"A physics body moved by gravity, collisions and forces"},
-	.CharacterMover = {"A body moved by code that slides along walls and floors: players, enemies"},
-	.Area           = {"A region that reports bodies entering and leaving it: pickups, triggers"},
-	.CollisionShape = {"The shape of the physics body above it: rectangle, circle, capsule, polygon, segment"},
-	.RayCast        = {"A ray that reports the first physics body in its way: line of sight, ground checks"},
-	.Joint          = {"Connects two physics bodies: a hinge, rope, spring, slider, weld or wheel"},
-	.ParticleEmitter = {"Emits particles that move, spin, grow and change color: sparks, smoke, fire, rain"},
-	.Component      = {"An instance of a component: a node tree saved in the assets, reused in any scene"},
-	.AudioPlayer    = {"Plays a sound: volume, pitch, pan, looping, through a mix bus"},
-	.AudioPlayer2D  = {"Plays a sound in the world: panned and quieter with distance from the camera"},
-	.MusicPlayer    = {"Streams music: fades, looping, seeking, through a mix bus"},
-	.LDtkLevel      = {"A level made in the LDtk level editor: its tile layers, entities and IntGrid collision"},
+	.Node2D         = {"Groups nodes; moving, rotating or scaling it moves its children", .Scene},
+	.Sprite         = {"Draws an image", .Graphics},
+	.AnimatedSprite = {"Plays a sprite sheet animation", .Graphics},
+	.Camera         = {"Chooses the part of the scene the game shows; can follow a parent node", .Scene},
+	.Label          = {"Draws a line of text", .UI},
+	.Menu           = {"A list of buttons that switch scenes or quit the game", .UI},
+	.StaticBody     = {"A physics body that doesn't move by itself: walls, floors, platforms", .Physics},
+	.DynamicBody    = {"A physics body moved by gravity, collisions and forces", .Physics},
+	.CharacterMover = {"A body moved by code that slides along walls and floors: players, enemies", .Physics},
+	.Area           = {"A region that reports bodies entering and leaving it: pickups, triggers", .Physics},
+	.CollisionShape = {"The shape of the physics body above it: rectangle, circle, capsule, polygon, segment", .Physics},
+	.RayCast        = {"A ray that reports the first physics body in its way: line of sight, ground checks", .Physics},
+	.Joint          = {"Connects two physics bodies: a hinge, rope, spring, slider, weld or wheel", .Physics},
+	.ParticleEmitter = {"Emits particles that move, spin, grow and change color: sparks, smoke, fire, rain", .Graphics},
+	.Component      = {"An instance of a component: a node tree saved in the assets, reused in any scene", .Scene},
+	.AudioPlayer    = {"Plays a sound: volume, pitch, pan, looping, through a mix bus", .Audio},
+	.AudioPlayer2D  = {"Plays a sound in the world: panned and quieter with distance from the camera", .Audio},
+	.MusicPlayer    = {"Streams music: fades, looping, seeking, through a mix bus", .Audio},
+	.LDtkLevel      = {"A level made in the LDtk level editor: its tile layers, entities and IntGrid collision", .Scene},
 }
 
 /*

@@ -100,7 +100,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `ui_menu*.odin`, `ui_style.odin`, `ui_label.odin` | In-game `Menu` (button, checkbox, radio, slider, select) and `Label` nodes; menus navigate by the game's `ui_*` input actions when it has them (keyboard and gamepad, held directions repeat), else by fixed keys; `Menu_Command` |
 | `ui_menu_test.odin` | Tests: menus by keys (every item kind, the dropdown, wrapping, onBack), by actions from a gamepad (repeats), by the mouse (hover, click, slider drags) |
 | `layers.odin` | `RenderLayer` (draw order, `Layer1` first) |
-| `project_format.odin` | **Project/scene XML format spec** (doc comment) and parser: `ParseProject`, `ParseScene` → plain data (`ProjectData`, `SceneData`), no SDL |
+| `project_format.odin` | **Project/scene XML format spec** (doc comment) and parser: `ParseProject`, `ParseScene` → plain data (`ProjectData`, `SceneData`), no SDL; `SCENE_NODE_KINDS` (each kind's description and `SceneNodeCategory`, for tools' pickers) |
 | `project_loader.odin` | Builds scenes from parsed data: `LoadProjectFile`, `Game_LoadProject`, `Scene_Build`; data-driven `Sprite` and `AnimatedSprite` nodes; menu actions `scene:<Name>` / `quit` |
 | `script.odin` | **Scripts**: Odin game code attached to nodes. `Script_Register`, the registry, exported fields (`export:""` tags) set from scene files by reflection, `Node_AttachScript`, `Script_DescribeJSON` |
 | `render_backend.odin` | **Renderer choice**: `RenderBackend` (Auto, OpenGL, OpenGLES2, Vulkan, GPU, Direct3D11/12, Metal, Software), `RENDER_BACKENDS` (SDL driver names, labels, platforms), `RenderBackend_Available` / `Parse`, `Application_CreateRenderer` (falls back to SDL's choice, logs the one in use) |
