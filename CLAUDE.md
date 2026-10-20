@@ -577,10 +577,12 @@ machine: Intel UHD 620 laptop, -o:speed):
 | particles, 4 emitters x 1000: update / draw (SDL) | 0.09 ms / 2.0 ms; colliding x 500: 2.1 ms | same |
 | physics, 500 static + 500 dynamic bodies, a frame | 0.37 ms | 0.29 ms |
 | LDtk forest, software renderer: a screenful / the whole level | 101 ms / 19 ms (SDL's pixel work) | same |
+| text: 30 centered labels a frame (software) | 0.36 ms | (no cache needed) |
 
 Measured and left alone (not worth it at these numbers): particles' `#soa` layout and update
 (0.1 ms for 4000 particles), physics multithreading (0.3 ms for 1000 bodies), EventSubject's
-proc fields (notify is cheap), Node struct reordering (update over 20000 nodes is 0.46 ms).
+proc fields (notify is cheap), Node struct reordering (update over 20000 nodes is 0.46 ms), a
+text-layout cache (30 labels a frame: 0.36 ms).
 Worth doing later if games need it: particle collisions on a grid (O(n²) now: 2 ms for 4 x 500),
 LDtk culling by grid for very large levels (it tests every tile; fine for the forest), a faster
 correct software path for tiles (the triangles' fill is SDL's).

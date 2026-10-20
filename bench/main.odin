@@ -14,7 +14,7 @@ Scenarios: churn (making and removing nodes), update (Scene_Update over many nod
 (Scene_DrawWithView overhead), deep (world transforms down a deep tree), remove (removing many
 nodes in one frame), lookup (Scene_GetNode, Scene_FindNode), events (subscribe and notify),
 particles (emitters update and draw), physics (bodies stepping), ldtk (a level's tile layers
-drawing), sizes (struct sizes).
+drawing), text (labels drawn each frame), sizes (struct sizes).
 */
 package bench
 
@@ -26,6 +26,7 @@ import "core:strings"
 import "core:time"
 import e ".."
 import sdl "vendor:sdl3"
+import ttf "vendor:sdl3/ttf"
 
 // Median milliseconds of `reps` runs of `body`
 measure :: proc(reps: int, body: proc(data: rawptr), data: rawptr) -> f64 {
@@ -303,6 +304,21 @@ benchLDtk :: proc(game: ^e.Game, renderer: ^sdl.Renderer, file: string) {
 	}
 }
 
+Text :: struct { rm: ^e.ResourceManager, renderer: ^sdl.Renderer }
+
+benchText :: proc(game: ^e.Game, renderer: ^sdl.Renderer) {
+	state := Text{&game.resourceManager, renderer}
+	ms := measure(30, proc(data: rawptr) {
+		s := cast(^Text)data
+		for i in 0 ..< 30 {
+			e.DrawTextCentered(s.rm, {640, f32(20 + i * 22)}, fmt.tprintf("Label %d: score 12345", i % 10), e.DEFAULT_FONT, 18, {255, 255, 255, 255})
+		}
+		sdl.FlushRenderer(s.renderer)
+		free_all(context.temp_allocator)
+	}, &state)
+	report("text: 30 centered labels (with SDL, software)", ms)
+}
+
 benchSizes :: proc() {
 	report("size_of(Node)", f64(size_of(e.Node)), "bytes (shown in the ms column)")
 	report("size_of(PhysicsBody)", f64(size_of(e.PhysicsBody)), "bytes")
@@ -331,11 +347,8 @@ main :: proc() {
 	game.size = {1280, 720}
 	game.renderer = renderer
 	game.scenes = make(map[string]^e.Scene)
-	// No fonts needed: the engine's text isn't measured (SDL_ttf isn't started)
-	{
-		context.logger = log.nil_logger()
-		e.ResourceManager_Init(&game.resourceManager, renderer, nil)
-	}
+	ttf.Init()
+	e.ResourceManager_Init(&game.resourceManager, renderer, nil)
 
 	fmt.println("Crossfire Engine benchmarks (median of the repetitions)")
 	if want(args, "sizes") do benchSizes()
@@ -348,5 +361,6 @@ main :: proc() {
 	if want(args, "particles") do benchParticles(game, renderer)
 	if want(args, "physics") do benchPhysics(game)
 	if want(args, "ldtk") do benchLDtk(game, renderer, ldtkFile)
+	if want(args, "text") do benchText(game, renderer)
 	fmt.printfln("(checksum %v)", sink)
 }
