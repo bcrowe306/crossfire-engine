@@ -743,7 +743,7 @@ another); custom ones are drawn one by one by `customDraw`.
 particleEmitterDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	emitter := cast(^ParticleEmitter)node
 	s := &emitter.settings
-	base, tint := drawTransform, drawTint
+	base, tint := drawState().transform, drawState().tint
 	// Particle space to the screen: the node's (local space), or the world's
 	view := base
 	if !s.localSpace {

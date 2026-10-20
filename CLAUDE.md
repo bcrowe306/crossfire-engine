@@ -79,6 +79,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `primitives.odin` | Shapes and `DrawTexture`, in the drawing node's local space |
 | `text_primitives.odin` | `DrawText`, `DrawTextCentered`, `DrawTextWrapped`, `MeasureText`; positioned and scaled by the draw transform, never rotated |
 | `camera.odin` | `Camera2D` node (looks at its world position; offset, zoom, bounds), follow modes, timed pans |
+| `debug.odin` | **Debug drawing**: `Debug_Line` / `Rect` / `Circle` / `Text` (world space, over the scene, for a frame or `seconds`), `Debug_Clear`; the **debug overlay** (`Game.debugOverlay`, F10 with dev keys: fps, frame times, the scene's counts), `Game_GetFrameStats` |
+| `debug_test.odin` | Tests: debug shapes' lifetimes and freeing, drawing through the view, frame stats and the overlay |
 | `easing.odin` | `Ease(EaseType, t)`, 18 curves |
 | `render_target.odin` | **Render targets**: `RenderTarget_Create` / `Destroy`, `RenderTarget_Begin` / `End` (draw into its texture; the game's logical presentation is off meanwhile and restored after), `Scene_DrawToTarget` (a scene through its camera fitted to the target, or a given view) |
 | `tween.odin` | **Tweens**: `Tween_Create(owner)` / `Scene_CreateTween`, steps `Tween_To` / `Tween_FromTo` (f32, [2]f32, sdl.Color), `Tween_Delay`, `Tween_Call`, `Tween_Parallel`, `Tween_SetLoops`, pause, kill; updated by `Scene_Update` after the nodes |
@@ -257,6 +259,11 @@ after they finish. Time past a group's end carries into the next group and loop.
   The editor uses it for picking and selection boxes. Sprite, AnimatedSprite, Label and Menu set
   it; **give new drawable node types (including game-code nodes) a `getBounds`**.
 - `Scene_Build` returns the nodes it created, in scene-data order, so tools can keep them in sync.
+- **The draw state (transform, tint, blend) is per thread** (`drawState()`, thread-local, set
+  up on first use): the tests draw on several threads at once, and an editor may render previews
+  on another; a shared one made a test draw through another test's transform.
+- Debug shapes are heap-allocated on their scene (`Scene.debugShapes`), drawn last by
+  `Scene_DrawWithView`, and dropped at the start of the `Scene_Update` after their time is up.
 - Raw `sdl.Render*` calls bypass all of this. Use the engine helpers, or transform points yourself
   with `GetDrawTransform()`.
 - **Camera:** `scene.camera` is a `Camera2D` node. It looks at its world position, and its world
@@ -322,7 +329,8 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
   torque / ppm², force / ppm.
 - Debug shapes: the project's `physicsDebug` is a development setting (the editor's exports write
   it off); the player's `--physics-debug` forces it on, and `--dev` (the editor's Play, never
-  exports) sets `Game.devKeys`: F9 (`DEV_KEY_PHYSICS_DEBUG`) toggles the shapes while it runs.
+  exports) sets `Game.devKeys`: F9 (`DEV_KEY_PHYSICS_DEBUG`) toggles the shapes while it runs,
+  F10 (`DEV_KEY_DEBUG_OVERLAY`) the debug overlay.
 - `scene.physicsPaused` stops stepping (bodies stay queryable); the editor preview sets it.
   CollisionShape has a `getBounds` (its extent), so editors can pick and outline it.
 - The web build links `box2d/lib/box2d_web.o`: one relocatable object, because Odin keeps plain C

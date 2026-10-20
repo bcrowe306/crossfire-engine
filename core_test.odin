@@ -124,7 +124,7 @@ game_scaling_maps_window_to_game :: proc(t: ^testing.T) {
 }
 
 // SDL_ttf isn't thread-safe; tests that make text engines take turns
-@(private="file")
+@(private)
 ttfLock: sync.Mutex
 
 @(test)

@@ -236,15 +236,29 @@ removeChild :: proc(parent, child: ^Node) {
 
 
 // DRAW STATE
-// While a scene draws a node, the Draw* helpers transform through `drawTransform` (camera view
-// combined with the node's world transform) and multiply colors by `drawTint`.
+// While a scene draws a node, the Draw* helpers transform through the draw state's transform
+// (camera view combined with the node's world transform) and multiply colors by its tint.
+// Per thread: renderers on other threads (an editor's previews, tests running in parallel) each
+// have their own (a shared one once made a test draw through another test's transform).
 
 @(private)
-drawTransform := TRANSFORM2D_IDENTITY
+DrawState :: struct {
+	transform: Transform2D,
+	tint: sdl.Color,
+	blend: BlendMode,
+	// Set up (thread-local storage starts zeroed: a zero transform would draw nothing)
+	ready: bool,
+}
+
+@(private, thread_local)
+drawStateStorage: DrawState
+
+// The calling thread's draw state
 @(private)
-drawTint := sdl.Color{255, 255, 255, 255}
-@(private)
-drawBlend := BlendMode.Blend
+drawState :: #force_inline proc "contextless" () -> ^DrawState {
+	if !drawStateStorage.ready do drawStateStorage = {transform = TRANSFORM2D_IDENTITY, tint = {255, 255, 255, 255}, blend = .Blend, ready = true}
+	return &drawStateStorage
+}
 
 /*
 The transform the Draw* helpers currently apply: from the drawing node's local space to the
@@ -257,7 +271,7 @@ Example:
 	}
 */
 GetDrawTransform :: proc() -> Transform2D {
-	return drawTransform
+	return drawState().transform
 }
 
 /*
@@ -265,9 +279,7 @@ Sets the transform and tint the Draw* helpers apply. Scenes do this for each nod
 when drawing outside a scene, and restore it afterwards.
 */
 SetDrawState :: proc(transform: Transform2D, tint := sdl.Color{255, 255, 255, 255}, blend := BlendMode.Blend) {
-	drawTransform = transform
-	drawTint = tint
-	drawBlend = blend
+	drawState()^ = {transform = transform, tint = tint, blend = blend, ready = true}
 }
 
 // The SDL blend mode of a BlendMode
@@ -284,26 +296,26 @@ SDLBlendMode :: proc(blend: BlendMode) -> sdl.BlendMode {
 
 // The blend mode of the node drawing now, for drawing code that sets its own (geometry)
 GetDrawBlend :: proc() -> sdl.BlendMode {
-	return SDLBlendMode(drawBlend)
+	return SDLBlendMode(drawState().blend)
 }
 
 // Local point to screen through the current draw transform
 @(private)
 toScreen :: proc(p: [2]f32) -> [2]f32 {
-	return Transform2D_Apply(drawTransform, p)
+	return Transform2D_Apply(drawState().transform, p)
 }
 
 // Local length to screen length through the current draw transform
 @(private)
 toScreenLength :: proc(length: f32) -> f32 {
-	return length * Transform2D_UniformScale(drawTransform)
+	return length * Transform2D_UniformScale(drawState().transform)
 }
 
 // A color multiplied by the current draw tint
 @(private)
 tinted :: proc(color: sdl.Color) -> sdl.Color {
-	if drawTint == {255, 255, 255, 255} do return color
-	return multiplyColor(color, drawTint)
+	if drawState().tint == {255, 255, 255, 255} do return color
+	return multiplyColor(color, drawState().tint)
 }
 
 @(private)

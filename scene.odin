@@ -22,6 +22,8 @@ Scene :: struct {
 	index: map[EntityId]^Node,
 	// Its running tweens (tween.odin), updated after the nodes
 	tweens: [dynamic]^Tween,
+	// Debug shapes queued to draw over it (debug.odin)
+	debugShapes: [dynamic]DebugShape,
 	arena: MemoryArena,
 	// Optional camera, nil by default. When set, every layer not in `screenLayers` is drawn
 	// through it, and its pans and bounds are applied after each update. Create with `Scene_CreateCamera`
@@ -136,6 +138,7 @@ Scene_Destroy :: proc(scene: ^Scene) {
 	delete(scene.nodes)
 	delete(scene.index)
 	destroyTweens(scene)
+	debugDestroy(scene)
 	// Destroy, not free_all: free_all keeps the first block, which leaked once the scene was freed
 	MemoryArena_Destroy(&scene.arena)
 }
@@ -298,6 +301,8 @@ processRemovals :: proc(scene: ^Scene) {
 }
 
 Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
+	// Last frame's debug shapes go (unless they last longer)
+	if len(scene.debugShapes) > 0 do debugExpire(scene, deltaTime)
 	Scene_ProcessQueues(scene)
 	// New physics nodes get their bodies, so scripts can use them in `ready`
 	Physics_Sync(scene)
@@ -397,6 +402,7 @@ Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transfo
 		}
 	}
 	if scene.physics != nil && scene.physics.settings.debugDraw do Physics_DrawDebug(scene, renderer, view)
+	if len(scene.debugShapes) > 0 do debugDrawShapes(scene, renderer, view)
 }
 
 /*

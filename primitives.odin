@@ -20,7 +20,7 @@ ROUNDED_RECT_POINT_COUNT :: 4 * (ROUNDED_CORNER_SEGMENTS + 1)
 
 DrawRectangle :: proc(renderer: ^ sdl.Renderer, rect: ^sdl.FRect, color: sdl.Color) {
 	color := tinted(color)
-	if Transform2D_IsAxisAligned(drawTransform) {
+	if Transform2D_IsAxisAligned(drawState().transform) {
 		screen := screenRect(rect)
 		sdl.SetRenderDrawColor(renderer, color[0], color[1], color[2], color[3])
 		sdl.RenderFillRect(renderer, &screen)
@@ -33,7 +33,7 @@ DrawRectangle :: proc(renderer: ^ sdl.Renderer, rect: ^sdl.FRect, color: sdl.Col
 }
 
 DrawRectangleOutline :: proc(renderer: ^sdl.Renderer, rect: ^sdl.FRect, color: sdl.Color) {
-	if Transform2D_IsAxisAligned(drawTransform) {
+	if Transform2D_IsAxisAligned(drawState().transform) {
 		color := tinted(color)
 		screen := screenRect(rect)
 		sdl.SetRenderDrawColor(renderer, color[0], color[1], color[2], color[3])
@@ -157,13 +157,13 @@ DrawTexture :: proc(
 	if texture == nil do return
 
 	center := tp({dest.x + dest.w * 0.5, dest.y + dest.h * 0.5})
-	scale := Transform2D_Scale(drawTransform)
+	scale := Transform2D_Scale(drawState().transform)
 	w, h := dest.w * scale.x, dest.h * scale.y
-	angle := rotation + Transform2D_Rotation(drawTransform)
+	angle := rotation + Transform2D_Rotation(drawState().transform)
 	tint := tinted(tint)
 	// A mirroring transform (a negative scale: a sprite turned to face left): its x axis gives the
 	// angle, so flipping vertically before SDL rotates draws the mirror image
-	t := drawTransform
+	t := drawState().transform
 	flip := flip
 	if t.x.x * t.y.y - t.x.y * t.y.x < 0 do flip = sdl.FlipMode(u32(flip) ~ u32(sdl.FlipMode.VERTICAL))
 
@@ -172,7 +172,7 @@ DrawTexture :: proc(
 
 	sdl.SetTextureColorMod(texture, tint[0], tint[1], tint[2])
 	sdl.SetTextureAlphaMod(texture, tint[3])
-	sdl.SetTextureBlendMode(texture, SDLBlendMode(drawBlend))
+	sdl.SetTextureBlendMode(texture, SDLBlendMode(drawState().blend))
 	sdl.RenderTextureRotated(renderer, texture, hasSrc ? &srcRect : nil, &dst, f64(angle), nil, flip)
 }
 
@@ -192,14 +192,14 @@ tp :: proc(p: sdl.FPoint) -> sdl.FPoint {
 
 @(private="file")
 toScreenPoints :: proc(points: []sdl.FPoint) {
-	if drawTransform == TRANSFORM2D_IDENTITY do return
+	if drawState().transform == TRANSFORM2D_IDENTITY do return
 	for &p in points do p = tp(p)
 }
 
 // Caller's points are left untouched; the copy lives until the end of the frame
 @(private="file")
 transformedCopy :: proc(points: []sdl.FPoint) -> []sdl.FPoint {
-	if drawTransform == TRANSFORM2D_IDENTITY do return points
+	if drawState().transform == TRANSFORM2D_IDENTITY do return points
 	out := make([]sdl.FPoint, len(points), context.temp_allocator)
 	for p, i in points do out[i] = tp(p)
 	return out

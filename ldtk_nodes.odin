@@ -771,7 +771,7 @@ tiles touching that box are drawn. A parallax layer moves and scales as it draws
 ldtkTileLayerDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	tiles := cast(^LDtkTileLayer)node
 	l := tiles.data
-	tint := drawTint
+	tint := drawState().tint
 	opacity := l.opacity * f32(tint.a) / 255
 	base := sdl.FColor{f32(tint.r) / 255, f32(tint.g) / 255, f32(tint.b) / 255, opacity}
 
@@ -878,7 +878,7 @@ visibleBox :: proc(renderer: ^sdl.Renderer, shift: [2]f32, scale: f32) -> (lo, h
 	if !sdl.GetRenderLogicalPresentation(renderer, &w, &h, &mode) || w <= 0 || h <= 0 {
 		if !sdl.GetCurrentRenderOutputSize(renderer, &w, &h) || w <= 0 || h <= 0 do return {-1e30, -1e30}, {1e30, 1e30}
 	}
-	inverse := Transform2D_Inverse(drawTransform)
+	inverse := Transform2D_Inverse(drawState().transform)
 	corners := [4][2]f32{{0, 0}, {f32(w), 0}, {f32(w), f32(h)}, {0, f32(h)}}
 	lo, hi = {1e30, 1e30}, {-1e30, -1e30}
 	for corner in corners {

@@ -157,7 +157,7 @@ drawing_uses_tree_order_transforms_tint_and_visibility :: proc(t: ^testing.T) {
 	clear(&drawLog)
 
 	record :: proc(node: ^Node, renderer: ^sdl.Renderer) {
-		append(&drawLog, DrawRecord{(cast(^TestNode)node).tag, GetDrawTransform().origin, drawTint})
+		append(&drawLog, DrawRecord{(cast(^TestNode)node).tag, GetDrawTransform().origin, drawState().tint})
 	}
 	make_node :: proc(scene: ^Scene, tag: int, layer: RenderLayer = .Layer1) -> ^TestNode {
 		n := CreateNode(scene, TestNode)

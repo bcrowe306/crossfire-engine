@@ -23,7 +23,7 @@ DrawTextWrapped :: proc(rm: ^ResourceManager, pos: sdl.FPoint, text: string, fon
 	pos, size, wrapWidth := pos, size, wrapWidth
 	// Text follows the draw transform's position and scale, but stays upright: SDL_ttf can't
 	// rotate. Scaled sizes are rounded to whole points so changing scales don't cache endless sizes
-	if drawTransform != TRANSFORM2D_IDENTITY {
+	if drawState().transform != TRANSFORM2D_IDENTITY {
 		pos = sdl.FPoint(toScreen(cast([2]f32)pos))
 		size = max(math.round(toScreenLength(size)), 1)
 		wrapWidth = toScreenLength(wrapWidth)

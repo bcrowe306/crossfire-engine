@@ -21,6 +21,8 @@ ScaleMode :: enum {
 
 // With `Game.devKeys`: shows and hides the physics shapes while the game runs
 DEV_KEY_PHYSICS_DEBUG :: sdl.Scancode.F9
+// With `Game.devKeys`: shows and hides the debug overlay (debug.odin)
+DEV_KEY_DEBUG_OVERLAY :: sdl.Scancode.F10
 
 Game :: struct {
 	mixer: ^mix.Mixer,
@@ -30,8 +32,13 @@ Game :: struct {
 	// Quit when Escape is pressed. Set to false in build if the game uses Escape itself
 	quitOnEscape: bool,
 	// Developer keys, for games run from the editor (the player's --dev; never in exports):
-	// F9 shows / hides the physics shapes (DEV_KEY_PHYSICS_DEBUG)
+	// F9 shows / hides the physics shapes (DEV_KEY_PHYSICS_DEBUG), F10 the debug overlay
+	// (DEV_KEY_DEBUG_OVERLAY)
 	devKeys: bool,
+	// Show the debug overlay (debug.odin): frame rate, frame times, the scene's counts
+	debugOverlay: bool,
+	// Recent frame times, for the overlay (`Game_GetFrameStats`)
+	frameStats: FrameStats,
 	initialized: bool,
 	backgroundColor: sdl.Color,
 	// Resolution the game is designed for. All drawing and event positions are in this
@@ -202,6 +209,9 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 			Physics_SetDebugDraw(game, !game.physics.debugDraw)
 			log.infof("Collision shapes %s (F9)", game.physics.debugDraw ? "shown" : "hidden")
 		}
+		if game.devKeys && event.type == .KEY_DOWN && !event.key.repeat && event.key.scancode == DEV_KEY_DEBUG_OVERLAY {
+			game.debugOverlay = !game.debugOverlay
+		}
 
 		if game.quitOnEscape && event.type == .KEY_DOWN && event.key.scancode == .ESCAPE {
 			game.shouldQuit = true
@@ -228,6 +238,7 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 	// A hitstop freezes the game (scripts still run, with 0 seconds: they see input); the camera
 	// shake moves on in real time
 	realDeltaTime := deltaTime
+	recordFrameTime(game, realDeltaTime)
 	deltaTime := deltaTime * f64(game.timeScale > 0 ? game.timeScale : 1)
 	if game.hitStop > 0 {
 		game.hitStop -= realDeltaTime
@@ -333,6 +344,7 @@ Game_Draw :: proc(game: ^Game) {
 	}
 	// Globals that draw (a HUD) go over the scene, in screen space
 	Globals_Draw(game)
+	if game.debugOverlay do drawDebugOverlay(game)
 }
 
 

@@ -12,7 +12,7 @@ The game player: runs a project saved by the editor.
 	player <project folder>                   play it, from its start scene
 	player <project folder> --scene <name>    play it from another scene (the editor's Play Scene)
 	player ... --physics-debug                draw every physics shape, whatever the project says
-	player ... --dev                          developer keys (the editor's Play): F9 shows / hides shapes
+	player ... --dev                          developer keys (the editor's Play): F9 shows / hides shapes, F10 the debug overlay
 	player ... --renderer <name>              draw with this renderer (vulkan, opengl, software, ...),
 	                                          whatever the project says
 	player --describe-scripts                 print the registered scripts as JSON, and exit
