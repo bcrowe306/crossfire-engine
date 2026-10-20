@@ -3,6 +3,7 @@ package engine
 
 import "base:runtime"
 import "core:fmt"
+import "core:log"
 import vmem "core:mem/virtual"
 import "core:os"
 import "core:strings"
@@ -230,4 +231,29 @@ Inputs:
 */
 Platform_SaveDelete :: proc(name: string) {
 	if path, ok := savePath(name); ok do _ = os.remove(path)
+}
+
+// The window icon games get unless their project names one: the Crossfire logo (256 px)
+@(private="file")
+DEFAULT_WINDOW_ICON :: #load("logo/crossfire.png", []byte)
+
+/*
+Gives a window an icon from an image file's bytes (PNG, JPEG...: what SDL_image reads).
+
+Inputs:
+- window: The window
+- data: The image file's contents; nil for the engine's default icon (the Crossfire logo)
+
+Returns:
+- false when the image can't be read (logged)
+*/
+Platform_SetWindowIcon :: proc(window: ^sdl.Window, data: []byte) -> bool {
+	data := data != nil ? data : DEFAULT_WINDOW_ICON
+	surface := img.Load_IO(sdl.IOFromConstMem(raw_data(data), uint(len(data))), true)
+	if surface == nil {
+		log.warnf("Couldn't read the window icon: %s", sdl.GetError())
+		return false
+	}
+	defer sdl.DestroySurface(surface)
+	return sdl.SetWindowIcon(window, surface)
 }

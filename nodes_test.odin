@@ -170,11 +170,13 @@ projects_carry_window_settings :: proc(t: ^testing.T) {
 	defer ProjectData_Destroy(&plain)
 	testing.expect_value(t, err, ProjectError.None)
 	testing.expect_value(t, plain.window, DEFAULT_WINDOW_SETTINGS) // windowed, vsync, not high-DPI
-	set, _ := ParseProject(`<project formatVersion="13" name="P" fullscreen="true" vsync="false" highDPI="true"/>`)
+	set, _ := ParseProject(`<project formatVersion="13" name="P" fullscreen="true" vsync="false" highDPI="true" icon="assets/icon.png"/>`)
 	defer ProjectData_Destroy(&set)
 	testing.expect_value(t, set.window, WindowSettings{fullscreen = true, vsync = false, highDPI = true})
+	testing.expect(t, set.icon == "assets/icon.png" && plain.icon == "", "the window icon")
 	// No window: the runtime switches say so instead of crashing
 	game: Game
 	testing.expect(t, !Game_SetFullscreen(&game, true) && !Game_IsFullscreen(&game), "no window")
 	Game_SetVSync(&game, false)
+	testing.expect(t, !Game_SetWindowIcon(&game, "assets/icon.png"), "no window, no icon")
 }

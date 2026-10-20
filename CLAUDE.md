@@ -588,7 +588,11 @@ comment. What was needed, and why:
     editor's viewport doesn't); `Game_PlaySound` still plays any sound from code, loaded on first use.
 - **Format version 13** adds every node's `processMode`, `blendMode`, `zIndex`, `ySort` and
   `groups` (comma-separated); a component instance keeps its root's values unless it sets them.
-  CollisionShape `oneWay`; assets of kind "Translation" and the project's `locale`.
+  CollisionShape `oneWay`; assets of kind "Translation" and the project's `locale`; the
+  project's `icon` (the game window's: `Game_SetWindowIcon`; without one `Application_Setup`
+  sets the Crossfire logo, `logo/crossfire.png` built in by the platform layer). Checked with a
+  window: SDL takes it on X11; Hyprland's Wayland has no xdg-toplevel-icon, so there it's
+  `false` and the desktop shows the `.desktop` entry's icon.
   And the project's window (`WindowSettings`: `fullscreen`, `vsync` default true, `highDPI`),
   applied by `Application_Setup`; `Game_SetFullscreen` / `Game_IsFullscreen` / `Game_SetVSync`
   change it while running.

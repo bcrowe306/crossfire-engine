@@ -406,6 +406,34 @@ Game_RebuildScene :: proc(game: ^Game, scene: ^Scene) {
 }
 
 /*
+Changes the game window's icon (the taskbar's, the window list's): an image in the project
+(PNG, JPEG...), read from the data pack when the game is packed. Projects set one with `icon`
+(Project Settings > General > Icon); games without one show the Crossfire logo. Browsers show the
+page's favicon instead: this does nothing there.
+
+Inputs:
+- game: The game (its window)
+- path: The image, relative to the project folder
+
+Returns:
+- false when there's no window, the image can't be read (logged), or the window system doesn't
+  take icons (Wayland compositors without the xdg-toplevel-icon protocol, which show the
+  `.desktop` entry's icon instead)
+
+Example:
+	e.Game_SetWindowIcon(game, "assets/icon.png")
+*/
+Game_SetWindowIcon :: proc(game: ^Game, path: string) -> bool {
+	if game.window == nil do return false
+	data, ok := Platform_ReadFile(JoinPath(game.projectDir, path))
+	if !ok {
+		log.warnf("Couldn't read the window icon %s", path)
+		return false
+	}
+	return Platform_SetWindowIcon(game.window, data)
+}
+
+/*
 Switches the game's window between fullscreen (the desktop's resolution, the game scaled into it)
 and windowed.
 

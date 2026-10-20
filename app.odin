@@ -68,6 +68,9 @@ Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2
 		return false
 	}
 
+	// The Crossfire logo until the game sets its own (the project's `icon`, `Game_SetWindowIcon`)
+	_ = Platform_SetWindowIcon(app.window, nil)
+
 	app.renderer = Application_CreateRenderer(app.window, backend)
 	if app.renderer == nil do return false
 

@@ -123,7 +123,7 @@ Current limits:
 Version history:
 - 13: every node's `processMode`, `blendMode`, `zIndex`, `ySort` and `groups`; CollisionShape
   `oneWay`; the project's window: `fullscreen`, `vsync` (default true), `highDPI`; assets of
-  kind "Translation" (CSV tables: localization.odin) and the project's `locale`. Version 12
+  kind "Translation" (CSV tables: localization.odin), the project's `locale` and `icon`. Version 12
   files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
@@ -535,6 +535,9 @@ ProjectData :: struct {
 	renderer: RenderBackend,
 	// The game's window (`fullscreen`, `vsync`, `highDPI`, format 13)
 	window: WindowSettings,
+	// The game window's icon: an image path relative to the project (`icon="assets/icon.png"`,
+	// format 13); "" for the engine's (the Crossfire logo)
+	icon: string,
 	// The language to start in (`locale="fr"`, format 13); "" for the player's system language.
 	// The translation tables are the assets of kind "Translation" (localization.odin)
 	locale: string,
@@ -605,6 +608,7 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		background = attrColor(doc, 0, "background", {0, 0, 0, 255}),
 		startScene = cloneAttr(doc, 0, "startScene", ""),
 		locale = cloneAttr(doc, 0, "locale", ""),
+		icon = cloneAttr(doc, 0, "icon", ""),
 		scenes = make([dynamic]SceneRef),
 		assets = make([dynamic]AssetRef),
 		globals = make([dynamic]GlobalData),
@@ -763,6 +767,7 @@ ProjectData_Destroy :: proc(project: ^ProjectData, allocator := context.allocato
 	for b in project.buses do delete(b.name)
 	delete(project.buses)
 	delete(project.locale)
+	delete(project.icon)
 	delete(project.name)
 	delete(project.startScene)
 	project^ = {}

@@ -245,3 +245,8 @@ Inputs:
 Platform_SaveDelete :: proc(name: string) {
 	odin_storage_remove(raw_data(name), i32(len(name)))
 }
+
+// Browsers show the page's favicon: games' window icons do nothing there
+Platform_SetWindowIcon :: proc(window: ^sdl.Window, data: []byte) -> bool {
+	return false
+}

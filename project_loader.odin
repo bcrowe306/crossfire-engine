@@ -102,6 +102,7 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 	Audio_SetBuses(game, project.buses[:])
 	// Translations before anything that shows text
 	loadProjectTranslations(game, project, projectDir)
+	if project.icon != "" && game.window != nil do Game_SetWindowIcon(game, project.icon)
 	// Globals exist before the scenes (their nodes' scripts may look them up in `ready`)
 	Globals_Start(game, project.globals[:])
 	delete(game.projectDir)
