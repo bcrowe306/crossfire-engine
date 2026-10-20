@@ -80,6 +80,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `text_primitives.odin` | `DrawText`, `DrawTextCentered`, `DrawTextWrapped`, `MeasureText`; positioned and scaled by the draw transform, never rotated |
 | `camera.odin` | `Camera2D` node (looks at its world position; offset, zoom, bounds), follow modes, timed pans |
 | `easing.odin` | `Ease(EaseType, t)`, 18 curves |
+| `tween.odin` | **Tweens**: `Tween_Create(owner)` / `Scene_CreateTween`, steps `Tween_To` / `Tween_FromTo` (f32, [2]f32, sdl.Color), `Tween_Delay`, `Tween_Call`, `Tween_Parallel`, `Tween_SetLoops`, pause, kill; updated by `Scene_Update` after the nodes |
 | `animation.odin` | `Animation` base, `SpriteSheetAnimation`, `FrameAnimation` |
 | `animation_player.odin` | Plays animations by name or index, with events |
 | `event.odin` | `EventSubject`: subscribe / unsubscribe / notify |
@@ -208,6 +209,11 @@ draw shapes and SDL_ttf text alike (pixels read back), and the demo runs with ea
   no blending: translucent shapes didn't blend before). `GetDrawBlend` for custom drawing.
 - Groups are names in the node's arena (`Node_AddToGroup`, `Scene_GetGroup`: a scan of the
   scene's nodes).
+
+**Tweens** (tween.odin, tween_test.odin): heap-allocated (they come and go; arenas don't give
+memory back), listed on their scene, run while their owner `Node_CanProcess` (a scene's own
+tween: while it isn't paused), killed in `processRemovals` before their owner's memory goes, freed
+after they finish. Time past a group's end carries into the next group and loop.
 
 **Transforms and hierarchy:**
 - Every node has `position`, `rotation` (degrees, clockwise) and `scale` **relative to its parent**.

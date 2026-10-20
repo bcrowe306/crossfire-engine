@@ -20,6 +20,8 @@ Scene :: struct {
 	detached: [dynamic]^Node,
 	// Every node the scene owns (in it, queued, detached) by id: Scene_GetNode and removals
 	index: map[EntityId]^Node,
+	// Its running tweens (tween.odin), updated after the nodes
+	tweens: [dynamic]^Tween,
 	arena: MemoryArena,
 	// Optional camera, nil by default. When set, every layer not in `screenLayers` is drawn
 	// through it, and its pans and bounds are applied after each update. Create with `Scene_CreateCamera`
@@ -133,6 +135,7 @@ Scene_Destroy :: proc(scene: ^Scene) {
 	delete(scene.detached)
 	delete(scene.nodes)
 	delete(scene.index)
+	destroyTweens(scene)
 	// Destroy, not free_all: free_all keeps the first block, which leaked once the scene was freed
 	MemoryArena_Destroy(&scene.arena)
 }
@@ -278,6 +281,8 @@ processRemovals :: proc(scene: ^Scene) {
 	keep(&scene.nodes, &pending)
 	keep(&scene.addQueue, &pending)
 	keep(&scene.detached, &pending)
+	// Their tweens stop before their memory goes
+	if len(scene.tweens) > 0 do killTweensOf(scene, &pending)
 	for node in pending {
 		delete_key(&scene.index, node.id)
 		// The scene's camera went with it: draw without one rather than through freed memory
@@ -310,6 +315,8 @@ Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 			script.info.update(script.data, events, deltaTime)
 		}
 	}
+
+	if len(scene.tweens) > 0 do Scene_UpdateTweens(scene, deltaTime)
 
 	// After nodes have moved the camera (e.g. following a player), advance any pan and keep
 	// it inside its bounds
