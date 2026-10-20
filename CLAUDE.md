@@ -540,8 +540,8 @@ github.com/commonmark/cmark and pass `-extra-linker-flags:-L<cmark>/build/src`):
 docs/all -all-packages -doc-format` (docs/all imports the engine), then the generator with
 `docs/config.json` (the `engine` collection; `url_prefix` /odin_sdl_engine for GitHub Pages).
 `.github/workflows/docs.yml` runs it on pushes to main and deploys to GitHub Pages (the
-repository's Pages source must be "GitHub Actions"; the generator is pinned by commit). Built and
-read locally; the workflow hasn't run yet. The engine has no LICENSE file: config.json's license
+repository's Pages source is "GitHub Actions"; the generator is pinned by commit). Published at
+https://bcrowe306.github.io/odin_sdl_engine/engine/ (Pages enabled 2026-10-20). The engine has no LICENSE file: config.json's license
 says "See the repository" until it has one.
 
 ## Web build (js_wasm32 + Emscripten)
