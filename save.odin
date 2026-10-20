@@ -201,6 +201,8 @@ savedFields :: proc(T: typeid) -> []reflect.Struct_Field {
 	fields := make([dynamic]reflect.Struct_Field, context.temp_allocator)
 	for field, i in reflect.struct_fields_zipped(T) {
 		if i == 0 && field.type.id == Script do continue
+		// Events are listeners, not state
+		if field.type.id == EventSubject do continue
 		save, tagged := reflect.struct_tag_lookup(field.tag, "save")
 		if tagged && save == "-" do continue
 		if tag, has := reflect.struct_tag_lookup(field.tag, "json"); has && tag == "-" do continue

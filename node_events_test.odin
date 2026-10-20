@@ -1,6 +1,7 @@
 #+build !js
 package crossfire
 
+import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:testing"
@@ -74,7 +75,7 @@ scene_file_listeners_are_bound_before_ready :: proc(t: ^testing.T) {
 	defer SceneData_Destroy(&data)
 	testing.expect_value(t, err, ProjectError.None)
 	testing.expect_value(t, len(data.nodes[1].listeners), 5)
-	testing.expect_value(t, data.nodes[1].listeners[0], NodeListenerData{"onFinished", "../Hero", "onHeard"})
+	testing.expect_value(t, data.nodes[1].listeners[0], NodeListenerData{"onFinished", "../Hero", "onHeard", ""})
 
 	game := testGame("")
 	defer { Game_Destroy(game); free(game) }
@@ -141,4 +142,108 @@ cameras_and_menus_notify :: proc(t: ^testing.T) {
 	Menu_Command(menu, .Accept)
 	testing.expect(t, changed == 1 && lastIndex == 1, "the checkbox, by index")
 	testing.expect(t, Menu_Command(menu, .Cancel) && back == 1, "back, handled by its listener")
+}
+
+// A script publishing its own event, and a global publishing one
+BellScript :: struct {
+	using script: Script,
+	onPing: EventSubject `event:"It was rung" data:"text := data.(string)"`,
+}
+
+ScoreGlobal :: struct {
+	using script: Script,
+	score: int,
+	onScored: EventSubject `event:"The score changed" data:"score := data.(int)"`,
+}
+
+@(private="file")
+scriptEventsOnce: sync.Once
+
+@(private="file")
+registerScriptEventTypes :: proc() {
+	registerListenScript()
+	sync.once_do(&scriptEventsOnce, proc() {
+		Script_Register(BellScript, {})
+		Script_Register(ScoreGlobal, {})
+	})
+}
+
+@(test)
+scripts_publish_events :: proc(t: ^testing.T) {
+	registerScriptEventTypes()
+	info := Script_Find("BellScript")
+	if !testing.expect(t, info != nil && len(info.events) == 1) do return
+	testing.expect_value(t, info.events[0].name, "script.onPing")
+	testing.expect_value(t, info.events[0].description, "It was rung")
+	testing.expect(t, strings.contains(Script_DescribeJSON(context.temp_allocator), `"events": [{"name": "script.onPing", "description": "It was rung", "data": "text := data.(string)"}]`), "described")
+
+	data, _ := ParseScene(`<scene formatVersion="13" name="S">
+		<node kind="Node2D" name="Hero"><script name="ListenScript"/></node>
+		<node kind="Node2D" name="Bell">
+			<script name="BellScript"/>
+			<listener event="script.onPing" target="../Hero" handler="onHeard"/>
+		</node>
+	</scene>`)
+	defer SceneData_Destroy(&data)
+	game := testGame("")
+	defer { Game_Destroy(game); free(game) }
+	scene := game->createScene("S")
+	created := Scene_Build(scene, &data, "")
+	Scene_ProcessQueues(scene)
+	Scene_ReadyScripts(scene)
+	hero, bell := Node_GetScript(created[0], ListenScript), Node_GetScript(created[1], BellScript)
+	testing.expect(t, bell.onPing.notify != nil && bell.onPing.listeners.allocator.procedure != nil, "its event set up with the node's memory")
+	testing.expect(t, Node_FindEvent(created[1], "script.onPing") == &bell.onPing, "found by name")
+	Event_Notify(&bell.onPing, bell.node, "ding")
+	testing.expect_value(t, hero.heard, 1)
+	text, isText := hero.lastData.(string)
+	testing.expect(t, isText && text == "ding" && hero.lastSource == created[1], "string data, the bell as the source")
+	free_all(context.temp_allocator)
+}
+
+@(test)
+nodes_listen_to_globals_while_their_scene_plays :: proc(t: ^testing.T) {
+	registerScriptEventTypes()
+	dir := tempFolder("engine_test_global_events")
+	defer os.remove_all(dir)
+	_ = os.write_entire_file(JoinPath(dir, "a.scene.xml"), transmute([]u8)string(`<scene formatVersion="13" name="A">
+		<node kind="Node2D" name="Hero"><script name="ListenScript"/><listener global="ScoreGlobal" event="script.onScored" handler="onHeard"/></node>
+	</scene>`))
+	_ = os.write_entire_file(JoinPath(dir, "b.scene.xml"), transmute([]u8)string(`<scene formatVersion="13" name="B"/>`))
+	project, _ := ParseProject(`<project formatVersion="13" name="G" startScene="A"><global script="ScoreGlobal"/><scene name="A" path="a.scene.xml"/><scene name="B" path="b.scene.xml"/></project>`)
+	defer ProjectData_Destroy(&project)
+	game := testGame(dir)
+	defer { Game_Destroy(game); free(game) }
+	testing.expect(t, Game_LoadProject(game, &project, dir), "loads")
+	Game_Update(game, nil, 1.0 / 60)
+	score := Global(ScoreGlobal, game)
+	if !testing.expect(t, score != nil) do return
+	hero := Node_GetScript(Scene_FindNode(game.scenes["A"], "Hero"), ListenScript)
+	Event_Notify(&score.onScored, nil, 10)
+	testing.expect(t, hero.heard == 1 && hero.lastData == EventData(10) && hero.lastSource == nil, "heard, no source node")
+
+	// Another scene plays: A's nodes stay until it's entered again, but don't hear it
+	game->switchScene("B")
+	Game_Update(game, nil, 1.0 / 60)
+	Event_Notify(&score.onScored, nil, 20)
+	testing.expect_value(t, hero.heard, 1)
+	// Back: A is built afresh; the old hero's subscription went with it, the new one listens
+	for _ in 0 ..< 3 {
+		game->switchScene("A")
+		Game_Update(game, nil, 1.0 / 60)
+		game->switchScene("B")
+		Game_Update(game, nil, 1.0 / 60)
+	}
+	game->switchScene("A")
+	Game_Update(game, nil, 1.0 / 60)
+	testing.expect_value(t, len(score.onScored.listeners), 1) // not one per visit
+	again := Node_GetScript(Scene_FindNode(game.scenes["A"], "Hero"), ListenScript)
+	Event_Notify(&score.onScored, nil, 30)
+	testing.expect(t, again.heard == 1 && again.lastData == EventData(30), "the new hero hears it")
+
+	// Saves leave events out
+	score.score = 7
+	saved, _ := Save_ToJSON(game, context.temp_allocator)
+	testing.expect(t, strings.contains(saved, `"score": 7`) && !strings.contains(saved, "onScored"), saved)
+	free_all(context.temp_allocator)
 }

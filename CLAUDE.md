@@ -468,6 +468,17 @@ Scene files' `<listener event target handler/>` (`NodeListenerData`) are bound b
 `Scene_ReadyScripts` before any ready: the handler (`Script_Listener(T, name, proc)`, a registry
 by type and name) is subscribed through a trampoline that finds the listening node by id on
 each call (a removed one is skipped). Component instances' listeners join their root's.
+**Scripts publish events** the same way: tagged EventSubject fields of the script struct
+(`ScriptInfo.events`, named "script.<field>", from Script_Register; in `--describe-scripts`),
+initialized by Node_AttachScript / Globals_Start with the owner's allocator, found by
+`Node_FindEvent` / `Script_FindEvent`, fired with `Event_Notify(&self.onX, self.node, data)` (a
+global: nil source). **A global's events** are listened to from the listening node
+(`<listener global="GameState" event="script.onX" handler=.../>`, `NodeListenerData.global`):
+the binding is called only while that node's scene is the game's current one (a scene left keeps
+its nodes until entered again), and is unsubscribed in the node's onExit, since the global
+outlives it (node_events_test checks one subscription after repeated visits). `EventData` has
+`string` (valid during the notification). **Saves skip EventSubject fields** (save.odin's
+savedFields).
 
 **Particles** (particles.odin; its doc comment has the details):
 - A `ParticleEmitter`'s `settings` is a plain value (no pointers): scene files store it as a

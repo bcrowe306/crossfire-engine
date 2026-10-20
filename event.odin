@@ -4,7 +4,8 @@ import "core:log"
 import "core:encoding/uuid"
 import "core:math/rand"
 
-// The value an event carries to its listeners (`Event_Notify`). nil when there's none
+// The value an event carries to its listeners (`Event_Notify`). nil when there's none. A string
+// is only valid during the notification: clone it to keep it
 EventData :: union {
 	int,
 	u32,
@@ -12,7 +13,8 @@ EventData :: union {
 	f32,
 	f64,
 	bool,
-	rawptr
+	rawptr,
+	string,
 }
 
 // A unique id (a version 4 UUID) for a node or an event listener. Made by `NewEntityId`

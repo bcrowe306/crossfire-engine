@@ -109,8 +109,51 @@ Example:
 */
 Node_FindEvent :: proc(node: ^Node, name: string) -> ^EventSubject {
 	if node == nil do return nil
+	// Its script's ("script.onCoinCollected")
+	if strings.has_prefix(name, SCRIPT_EVENT_PREFIX) do return Script_FindEvent(node.script.data, node.script.info, name)
 	for event in NodeType_Events(node.type) do if event.name == name do return cast(^EventSubject)(uintptr(node) + event.offset)
 	return nil
+}
+
+// Script events are named with this before their field ("script.onCoinCollected")
+SCRIPT_EVENT_PREFIX :: "script."
+
+/*
+A script's event by name: one of its struct's EventSubject fields tagged `event:"..."`.
+
+Inputs:
+- data: The script struct (a node's script, or a global)
+- info: Its script
+- name: The event, "script.<field>"
+
+Returns:
+- Its subject, or nil
+*/
+Script_FindEvent :: proc(data: rawptr, info: ^ScriptInfo, name: string) -> ^EventSubject {
+	if data == nil || info == nil do return nil
+	for event in info.events do if event.name == name do return cast(^EventSubject)(uintptr(data) + event.offset)
+	return nil
+}
+
+// A script struct's events (Script_Register): its tagged EventSubject fields, "script.<field>"
+@(private)
+scriptEvents :: proc(T: typeid) -> []NodeEventInfo {
+	events := make([dynamic]NodeEventInfo)
+	for event in NodeType_Events(T, context.temp_allocator) {
+		e := event
+		e.name = strings.concatenate({SCRIPT_EVENT_PREFIX, event.name})
+		e.description = strings.clone(event.description)
+		e.dataHint = strings.clone(event.dataHint)
+		append(&events, e)
+	}
+	return events[:]
+}
+
+// Prepares a script struct's events with its owner's allocator (a node's arena; the game's for
+// globals), so subscribing never allocates from elsewhere
+@(private)
+initScriptEvents :: proc(data: rawptr, info: ^ScriptInfo, allocator: runtime.Allocator) {
+	for event in info.events do EventSubject_Init(cast(^EventSubject)(uintptr(data) + event.offset), allocator)
 }
 
 /*
@@ -125,7 +168,7 @@ Inputs:
 Node_AddListener :: proc(node: ^Node, listener: NodeListenerData) {
 	allocator := Node_GetAllocator(node)
 	if node.listeners == nil do node.listeners = make([dynamic]NodeListenerData, allocator)
-	append(&node.listeners, NodeListenerData{strings.clone(listener.event, allocator), strings.clone(listener.target, allocator), strings.clone(listener.handler, allocator)})
+	append(&node.listeners, NodeListenerData{strings.clone(listener.event, allocator), strings.clone(listener.target, allocator), strings.clone(listener.handler, allocator), strings.clone(listener.global, allocator)})
 	node.listenersBound = false
 }
 
@@ -187,6 +230,11 @@ ListenerBinding :: struct {
 	scene: ^Scene,
 	target: EntityId,
 	handler: ScriptListenerProc,
+	// A global's event: called only while the scene plays, unsubscribed when the listening node
+	// leaves (the global outlives it)
+	global: bool,
+	subject: ^EventSubject,
+	handle: ListenerHandle,
 }
 
 // Subscribes a node's listeners (Scene_ReadyScripts, before ready); bad ones are logged and skipped
@@ -194,10 +242,20 @@ ListenerBinding :: struct {
 bindListeners :: proc(node: ^Node) {
 	node.listenersBound = true
 	for l in node.listeners {
-		subject := Node_FindEvent(node, l.event)
-		target := Node_FindPath(node, l.target)
+		subject: ^EventSubject
+		target := Node_FindPath(node, l.target == "" ? "." : l.target)
+		if l.global != "" {
+			// A global's event: the listener is on the listening node
+			game := node.scene != nil ? node.scene.game : nil
+			info := Script_Find(l.global)
+			if game != nil do for g in game.globals do if g.info == info do subject = Script_FindEvent(g.data, info, l.event)
+		} else {
+			subject = Node_FindEvent(node, l.event)
+		}
 		handler: ScriptListenerProc
 		switch {
+		case subject == nil && l.global != "":
+			log.warnf("%s: no global %s with an event '%s' (Project Settings > Globals)", node.name, l.global, l.event)
 		case subject == nil:
 			log.warnf("%s: no event '%s' (%v's events: NodeType_Events)", node.name, l.event, node.type)
 		case target == nil:
@@ -210,12 +268,22 @@ bindListeners :: proc(node: ^Node) {
 		}
 		if handler == nil do continue
 		binding := new(ListenerBinding, Node_GetAllocator(node))
-		binding^ = {node, node.scene, target.id, handler}
-		Event_Subscribe(subject, proc(_: ^EventSubject, _: rawptr, data: EventData, userData: rawptr) {
+		binding^ = {source = l.global != "" ? nil : node, scene = node.scene, target = target.id, handler = handler, global = l.global != "", subject = subject}
+		binding.handle = Event_Subscribe(subject, proc(_: ^EventSubject, _: rawptr, data: EventData, userData: rawptr) {
 			b := cast(^ListenerBinding)userData
+			// A global's event reaches only the scene that's playing (a scene left keeps its nodes
+			// until it's entered again)
+			if b.global && b.scene.game != nil && b.scene.game.currentScene != b.scene do return
 			target := Scene_GetNode(b.scene, b.target)
 			if target == nil || target.script.data == nil do return
 			b.handler(target.script.data, b.source, data)
 		}, binding)
+		if binding.global {
+			// The global outlives the node: its subscription goes when the node leaves
+			Event_Subscribe(&node.onExit, proc(_: ^EventSubject, _: rawptr, _: EventData, userData: rawptr) {
+				b := cast(^ListenerBinding)userData
+				Event_Unsubscribe(b.subject, b.handle)
+			}, binding)
+		}
 	}
 }

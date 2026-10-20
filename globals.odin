@@ -104,6 +104,7 @@ Globals_Start :: proc(game: ^Game, globals: []GlobalData) {
 		if err != nil do continue
 		self := raw_data(memory)
 		(cast(^Script)self).game = game
+		initScriptEvents(self, info, allocator)
 		setFields(self, info.name, info.fields, g.props[:], allocator)
 		append(&game.globals, GlobalInstance{info, self})
 	}

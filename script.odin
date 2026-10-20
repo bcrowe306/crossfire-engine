@@ -132,6 +132,9 @@ ScriptInfo :: struct {
 	line: int,
 	// Its exported fields, in declaration order
 	fields: []ScriptField,
+	// The events it publishes: its EventSubject fields tagged `event:"..."`, named "script.<field>"
+	// (`Script_FindEvent`; node_events.odin)
+	events: []NodeEventInfo,
 	// The hooks of `ScriptHooks`, taking the struct as a rawptr (nil: not given)
 	ready: proc(self: rawptr),
 	// ScriptHooks.update
@@ -285,6 +288,7 @@ Script_Register :: proc "contextless" ($T: typeid, hooks: ScriptHooks(T), loc :=
 		return
 	}
 	info.fields = exportedFields(T)
+	info.events = scriptEvents(T)
 	registry[name] = info
 }
 
@@ -332,6 +336,7 @@ Node_AttachScript :: proc(node: ^Node, info: ^ScriptInfo, values: []ScriptPropDa
 	script.scene = node.scene
 	script.game = node.scene != nil ? node.scene.game : nil
 	nodePaths: []string
+	initScriptEvents(self, info, allocator)
 	for field, i in info.fields {
 		value := field.defaultValue
 		for v in values do if v.name == field.name do value = v.value
@@ -462,7 +467,13 @@ Script_DescribeJSON :: proc(allocator := context.allocator) -> string {
 		if i > 0 do strings.write_string(&b, ", ")
 		fmt.sbprintf(&b, "{{\"name\": %q, \"file\": %q, \"line\": %d, \"fields\": ", info.name, info.file, info.line)
 		describeFields(&b, info.fields)
-		strings.write_string(&b, "}")
+		// The events it publishes
+		strings.write_string(&b, ", \"events\": [")
+		for event, j in info.events {
+			if j > 0 do strings.write_string(&b, ", ")
+			fmt.sbprintf(&b, "{{\"name\": %q, \"description\": %q, \"data\": %q}}", event.name, event.description, event.dataHint)
+		}
+		strings.write_string(&b, "]}")
 	}
 	// Data types (data.odin): the same, without hooks
 	strings.write_string(&b, "], \"data\": [")

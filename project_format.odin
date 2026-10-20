@@ -284,6 +284,9 @@ NodeListenerData :: struct {
 	target: string,
 	// The handler's name (`Script_Listener`)
 	handler: string,
+	// A global's event instead of this node's: the global script's name ("GameState"). The
+	// listener is then on the listening node (`target` is "." or empty)
+	global: string,
 }
 
 /*
@@ -959,7 +962,7 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.script)
 		for prop in node.props { delete(prop.name); delete(prop.value) }
 		delete(node.props)
-		for l in node.listeners { delete(l.event); delete(l.target); delete(l.handler) }
+		for l in node.listeners { delete(l.event); delete(l.target); delete(l.handler); delete(l.global) }
 		delete(node.listeners)
 		delete(node.points)
 		delete(node.bodyA)
@@ -1274,6 +1277,7 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 				cloneAttr(doc, child, "event", ""),
 				cloneAttr(doc, child, "target", ""),
 				cloneAttr(doc, child, "handler", ""),
+				cloneAttr(doc, child, "global", ""),
 			})
 		case "script":
 			// One per node; a second one is ignored
