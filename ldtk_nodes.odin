@@ -2,6 +2,7 @@ package engine
 
 import "core:c"
 import "core:log"
+import "core:mem"
 import "core:strings"
 import sdl "vendor:sdl3"
 
@@ -41,8 +42,20 @@ file, like a component's.
   drops it, for tools whose file changed).
 - Tilesets draw with nearest filtering (pixel art) unless `smoothTiles`.
 
-Later (not built): parallax layers, LDtk's tile render modes for entities (they're fitted inside),
-entity references resolved to nodes, culling large layers to the view.
+- **Parallax** (layers with a parallax factor), as LDtk does it: with the camera's middle at c in
+  the level, the layer's points p show at c * factor + scale * p (scale = 1 - factor.x with
+  parallax scaling; without it, minus half the layer's size times the factor). Tile layers do it
+  as they draw; entity layers move their group node in its update (a frame behind a camera that
+  moves later). Not in tools (built without scripts): the level shows as it was made.
+- **Entities draw as LDtk draws them:** a tile by its definition's tile render mode (Cover,
+  FitInside, Repeat, Stretch, FullSizeCropped, FullSizeUncropped, NineSlice) at its tile opacity;
+  in tools, without a tile, the definition's shape (Rectangle, Ellipse, Cross; hollow, fill and
+  line opacities). LDtk's internal icons only with a copy of them (LDTK_ICONS_FILE).
+- **Entity references:** `LDtk_EntityRefNode` / `LDtk_EntityRefNodes` (an EntityRef field's node),
+  `LDtk_FindEntityByIid`.
+- **Culling:** tile layers draw only the tiles touching the screen (its corners taken back into
+  the layer through the draw transform and the parallax).
+- **Development runs reload** saved LDtk files (LDtk_WatchFiles).
 
 Example:
 	// A coin in LDtk, with a "value" Int field, gets the Coin script with value set
@@ -54,6 +67,7 @@ Example:
 	level := cast(^e.LDtkLevelNode)e.Scene_FindNode(self.scene, "Level")
 	for mob in e.LDtk_FindEntityNodes(level, "Mob") do log.infof("a mob at %v", mob.position)
 	solid := e.LDtk_IntGridAtPosition(level, "Collisions", e.Node_GetWorldPosition(self.node)) != 0
+	door := e.LDtk_EntityRefNode(self.node, "door")    // this entity's "door" field's entity
 */
 
 // What a scene file's LDtkLevel node says (SceneNodeData.ldtk)
@@ -116,6 +130,18 @@ LDtkLevelNode :: struct {
 	views: [dynamic]^LDtkLevelView,
 	// Every entity's node, with its data
 	spawned: [dynamic]LDtkSpawned,
+	// Layers with a parallax factor move with the camera (not in tools that build without
+	// scripts, like the editor: the level shows as it was made)
+	parallax: bool,
+	// What it was built with (in its arena): for reloading when the file changes
+	settings: LDtkLevelSettings,
+	collision: LDtkCollisionBody,
+}
+
+// The StaticBody an IntGrid layer becomes: the scene file node's physics attributes
+LDtkCollisionBody :: struct {
+	layer, mask: u64,
+	friction, restitution: f32,
 }
 
 // A level, as built: draws its background
@@ -136,6 +162,14 @@ LDtkTileLayer :: struct {
 	tileSize: f32,
 	// IntGrid cells' colors, by value (layers without tiles)
 	colors: map[int]sdl.Color,
+	// Move with the camera by the layer's parallax factor
+	parallax: bool,
+}
+
+// An entity layer's group: moves with the camera when the layer has a parallax factor
+LDtkEntityLayer :: struct {
+	using node: Node,
+	data: ^LDtkLayer,
 }
 
 // An entity that no component or spawner took: its rectangle, and its tile if it has one
@@ -144,7 +178,7 @@ LDtkEntityNode :: struct {
 	entity: ^LDtkEntity,
 	texture: ^sdl.Texture,
 	src: sdl.FRect,
-	// Outline it (tools that build without scripts: the editor)
+	// Draw LDtk's shape when it has no tile (tools that build without scripts: the editor)
 	outline: bool,
 }
 
@@ -180,6 +214,51 @@ LDtk_RegisterEntity :: proc "contextless" (identifier: string, spawn: LDtkEntity
 }
 
 /*
+Development runs (`Game.devKeys`: the editor's Play) watch the LDtk files the game read: saved in
+LDtk, a file is read again and every LDtkLevel node of it updated in place (LDtk_WatchFiles,
+twice a second). What's updated: tile layers (their tiles, tileset, visibility, IntGrid colors),
+backgrounds and the collision body. Entity nodes are left running (scripts may hold them), so
+entity changes and layers added or removed show on the next Play. The project replaced is kept
+until the game ends: entity nodes point into it.
+*/
+LDtk_WatchFiles :: proc(game: ^Game, deltaTime: f64) {
+	game.ldtkWatchTimer -= deltaTime
+	if game.ldtkWatchTimer > 0 do return
+	game.ldtkWatchTimer = LDTK_WATCH_SECONDS
+	changed := make([dynamic]string, context.temp_allocator)
+	for path, _ in game.ldtk {
+		if fileModified(JoinPath(game.projectDir, path)) != game.ldtkTimes[path] do append(&changed, path)
+	}
+	for path in changed {
+		project, problem := LDtk_Load(JoinPath(game.projectDir, path))
+		game.ldtkTimes[path] = fileModified(JoinPath(game.projectDir, path))
+		if project == nil {
+			log.errorf("LDtk: reloading %s: %s", path, problem)
+			continue
+		}
+		old := game.ldtk[path]
+		if old != nil do append(&game.ldtkRetired, old)
+		game.ldtk[path] = project
+		count := 0
+		reload :: proc(scene: ^Scene, path: string, project: ^LDtkProject, count: ^int) {
+			if scene == nil do return
+			for node in scene.nodes {
+				if !Node_Is(node, LDtkLevelNode) do continue
+				root := cast(^LDtkLevelNode)node
+				if root.settings.file != path do continue
+				reloadLevelNode(root, project)
+				count^ += 1
+			}
+		}
+		for _, scene in game.scenes do reload(scene, path, project, &count)
+		log.infof("LDtk: reloaded %s (%d level node%s)", path, count, count == 1 ? "" : "s")
+	}
+}
+
+// How often development runs look at the LDtk files (seconds)
+LDTK_WATCH_SECONDS :: 0.5
+
+/*
 A project, read the first time it's asked for and kept for the game's life (nil, logged, when it
 can't be read; asked again, it stays nil until Game_ForgetLDtk).
 
@@ -191,9 +270,14 @@ Inputs:
 Game_LoadLDtk :: proc(game: ^Game, path: string, projectDir := "") -> ^LDtkProject {
 	if project, found := game.ldtk[path]; found do return project
 	if game.ldtk == nil do game.ldtk = make(map[string]^LDtkProject)
-	project, problem := LDtk_Load(JoinPath(projectDir == "" ? game.projectDir : projectDir, path))
+	full := JoinPath(projectDir == "" ? game.projectDir : projectDir, path)
+	project, problem := LDtk_Load(full)
 	if project == nil do log.errorf("LDtk: %s", problem)
-	game.ldtk[strings.clone(path)] = project
+	key := strings.clone(path)
+	game.ldtk[key] = project
+	// For LDtk_WatchFiles
+	if game.ldtkTimes == nil do game.ldtkTimes = make(map[string]i64)
+	game.ldtkTimes[key] = fileModified(full)
 	return project
 }
 
@@ -209,6 +293,13 @@ Game_ForgetLDtk :: proc(game: ^Game, path: string = "") {
 	if path == "" {
 		delete(game.ldtk)
 		game.ldtk = nil
+		for project in game.ldtkRetired do LDtk_Destroy(project)
+		delete(game.ldtkRetired)
+		game.ldtkRetired = nil
+		delete(game.ldtkTimes)
+		game.ldtkTimes = nil
+	} else {
+		delete_key(&game.ldtkTimes, path)
 	}
 }
 
@@ -262,6 +353,81 @@ LDtk_IntGridAtPosition :: proc(root: ^LDtkLevelNode, layer: string, position: [2
 
 // INTERNAL
 
+// A file's modification time (SDL's: on the desktop and in the browser), 0 when it's missing
+@(private="file")
+fileModified :: proc(path: string) -> i64 {
+	info: sdl.PathInfo
+	if !sdl.GetPathInfo(strings.clone_to_cstring(path, context.temp_allocator), &info) do return 0
+	return i64(info.modify_time)
+}
+
+// A copy of a node's settings in an allocator (an LDtkLevel node keeps its own)
+@(private="file")
+cloneSettings :: proc(settings: LDtkLevelSettings, allocator: mem.Allocator) -> LDtkLevelSettings {
+	context.allocator = allocator
+	result := settings
+	result.file = strings.clone(settings.file)
+	result.level = strings.clone(settings.level)
+	result.collisionLayer = strings.clone(settings.collisionLayer)
+	result.collisionValues = make([dynamic]int)
+	append(&result.collisionValues, ..settings.collisionValues[:])
+	result.entityComponents = make([dynamic]LDtkEntityComponent)
+	for m in settings.entityComponents do append(&result.entityComponents, LDtkEntityComponent{strings.clone(m.entity), strings.clone(m.component)})
+	return result
+}
+
+/*
+Points a built LDtkLevel node at a reloaded project (LDtk_WatchFiles): each level view at its
+level (by iid), each tile layer and entity group at its layer (by identifier), new tilesets and
+backgrounds loaded, the collision body made again. Layers and levels the new file doesn't have
+keep the old data (alive in the retired project).
+*/
+@(private="file")
+reloadLevelNode :: proc(root: ^LDtkLevelNode, project: ^LDtkProject) {
+	root.project = project
+	scene := root.scene
+	rm := &scene.game.resourceManager
+	for view in root.views {
+		level := LDtk_FindLevel(project, view.level.iid)
+		if level == nil do continue
+		view.level = level
+		view.background = nil
+		if root.settings.background && level.background.path != "" do view.background = rm->loadTexture(level.background.path)
+		for child in view.children {
+			if child.name == "Collision" && Node_Is(child, StaticBody) {
+				Scene_RemoveNode(scene, child.id)
+				continue
+			}
+			if Node_Is(child, LDtkEntityLayer) {
+				group := cast(^LDtkEntityLayer)child
+				if l := LDtk_FindLayer(level, group.data.identifier); l != nil do group.data = l
+				continue
+			}
+			if !Node_Is(child, LDtkTileLayer) do continue
+			tiles := cast(^LDtkTileLayer)child
+			l := LDtk_FindLayer(level, tiles.data.identifier)
+			if l == nil do continue
+			tiles.data = l
+			tiles.position = l.offset
+			tiles.visible = l.visible
+			if len(l.tiles) > 0 && l.tilesetPath != "" {
+				tiles.texture = rm->loadTexture(l.tilesetPath)
+				if tiles.texture != nil do sdl.SetTextureScaleMode(tiles.texture, root.settings.smoothTiles ? .LINEAR : .NEAREST)
+				if tileset := LDtk_FindTileset(project, l.tileset); tileset != nil && tileset.gridSize > 0 do tiles.tileSize = f32(tileset.gridSize)
+			}
+			if tiles.colors != nil {
+				clear(&tiles.colors)
+				if def := LDtk_FindLayerDef(project, l.identifier); def != nil do for v in def.intGridValues do tiles.colors[v.value] = v.color
+			}
+		}
+		if root.settings.collisionLayer != "" {
+			if l := LDtk_FindLayer(level, root.settings.collisionLayer); l != nil && len(l.intGrid) > 0 {
+				buildCollision(view, l, root.settings.collisionValues[:], root.collision)
+			}
+		}
+	}
+}
+
 // Entity spawners by identifier (LDtk_RegisterEntity)
 @(private="file")
 ldtkSpawners: map[string]LDtkEntitySpawner
@@ -277,6 +443,9 @@ ldtkBuildNode :: proc(scene: ^Scene, data: ^SceneNodeData, projectDir: string, a
 	root.views = make([dynamic]^LDtkLevelView, allocator)
 	root.spawned = make([dynamic]LDtkSpawned, allocator)
 	root.getBounds = ldtkLevelNodeBounds
+	root.parallax = attachScripts
+	root.settings = cloneSettings(data.ldtk, allocator)
+	root.collision = {data.collisionLayer, data.collisionMask, data.friction, data.restitution}
 	settings := &data.ldtk
 	if settings.file == "" do return root
 	project := Game_LoadLDtk(scene.game, settings.file, projectDir)
@@ -339,11 +508,13 @@ buildLevel :: proc(root: ^LDtkLevelNode, level: ^LDtkLevel, position: [2]f32, da
 	#reverse for &l in level.layers {
 		switch l.type {
 		case .Entities:
-			group := CreateNode(scene, Node)
+			group := CreateNode(scene, LDtkEntityLayer)
 			group.name = strings.clone(l.identifier, Node_GetAllocator(group))
 			group.position = l.offset
 			group.layer = layer
 			group.visible = l.visible
+			group.data = &l
+			if root.parallax && l.parallax != {} do group.update = ldtkEntityLayerUpdate
 			Node_AddChild(view, group)
 			if settings.spawnEntities {
 				for &entity in l.entities do spawnEntity(root, group, level, &l, &entity, settings, projectDir, attachScripts, depth)
@@ -359,6 +530,7 @@ buildLevel :: proc(root: ^LDtkLevelNode, level: ^LDtkLevel, position: [2]f32, da
 			tiles.draw = ldtkTileLayerDraw
 			tiles.getBounds = ldtkTileLayerBounds
 			tiles.tileSize = f32(l.gridSize)
+			tiles.parallax = root.parallax && l.parallax != {}
 			if len(l.tiles) > 0 && l.tilesetPath != "" {
 				tiles.texture = rm->loadTexture(l.tilesetPath)
 				if tiles.texture != nil do sdl.SetTextureScaleMode(tiles.texture, settings.smoothTiles ? .LINEAR : .NEAREST)
@@ -375,7 +547,7 @@ buildLevel :: proc(root: ^LDtkLevelNode, level: ^LDtkLevel, position: [2]f32, da
 
 	if settings.collisionLayer != "" {
 		if l := LDtk_FindLayer(level, settings.collisionLayer); l != nil && len(l.intGrid) > 0 {
-			buildCollision(view, l, data)
+			buildCollision(view, l, root.settings.collisionValues[:], root.collision)
 		} else if l == nil {
 			log.warnf("LDtk: level %s has no layer '%s' for collision", level.identifier, settings.collisionLayer)
 		}
@@ -408,7 +580,8 @@ spawnEntity :: proc(root: ^LDtkLevelNode, group: ^Node, level: ^LDtkLevel, layer
 		node.draw = ldtkEntityDraw
 		node.getBounds = ldtkEntityBounds
 		if tile, ok := entity.tile.?; ok {
-			if tileset := LDtk_FindTileset(root.project, tile.tileset); tileset != nil && !tileset.embedded && tileset.path != "" {
+			// LDtk's internal icons only when the project has a copy (LDTK_ICONS_FILE)
+			if tileset := LDtk_FindTileset(root.project, tile.tileset); tileset != nil && tileset.path != "" {
 				node.texture = scene.game.resourceManager->loadTexture(tileset.path)
 				node.src = {f32(tile.x), f32(tile.y), f32(tile.w), f32(tile.h)}
 			}
@@ -464,9 +637,8 @@ sameFieldName :: proc(a, b: string) -> bool {
 
 // The cells of an IntGrid layer as rectangles under a StaticBody (merged: runs along rows, then down)
 @(private="file")
-buildCollision :: proc(view: ^LDtkLevelView, layer: ^LDtkLayer, data: ^SceneNodeData) {
+buildCollision :: proc(view: ^LDtkLevelView, layer: ^LDtkLayer, values: []int, physics: LDtkCollisionBody) {
 	scene := view.scene
-	values := data.ldtk.collisionValues[:]
 	w, h := layer.cells.x, layer.cells.y
 	if w <= 0 || h <= 0 do return
 	solid :: proc(layer: ^LDtkLayer, values: []int, x, y: int) -> bool {
@@ -481,10 +653,10 @@ buildCollision :: proc(view: ^LDtkLevelView, layer: ^LDtkLayer, data: ^SceneNode
 	body.name = strings.clone("Collision", Node_GetAllocator(body))
 	body.position = layer.offset
 	body.layer = view.layer
-	body.collisionLayer = data.collisionLayer
-	body.collisionMask = data.collisionMask
-	body.friction = data.friction
-	body.restitution = data.restitution
+	body.collisionLayer = physics.layer
+	body.collisionMask = physics.mask
+	body.friction = physics.friction
+	body.restitution = physics.restitution
 	Node_AddChild(view, body)
 	grid := f32(layer.gridSize)
 	for y in 0 ..< h {
@@ -547,7 +719,45 @@ ldtkTileLayerBounds :: proc(node: ^Node) -> (sdl.FRect, bool) {
 	return {0, 0, f32(l.cells.x * l.gridSize), f32(l.cells.y * l.gridSize)}, true
 }
 
-// Every tile (or IntGrid cell) as two triangles through the draw transform, in one RenderGeometry
+/*
+LDtk's parallax for a layer (its Camera.hx): with the camera's middle at `camera` (in the level),
+a point `p` of the layer shows at `offset + scale * p`, where offset = camera * factor (minus
+half the layer's size times the factor when it doesn't scale) and scale = 1 - factor.x when it
+scales, else 1. Without a parallax factor: offset 0, scale 1.
+*/
+@(private="file")
+parallaxOf :: proc(layer: ^LDtkLayer, view: ^Node) -> (offset: [2]f32, scale: f32) {
+	scale = 1
+	if layer.parallax == {} || view == nil || view.scene == nil do return
+	scene := view.scene
+	// The camera looks at its world position; without one the view is the game area
+	center := scene.camera != nil ? Node_GetWorldPosition(scene.camera) : (scene.game != nil ? scene.game.size * 0.5 : {})
+	camera := Transform2D_Apply(Transform2D_Inverse(Node_GetWorldTransform(view)), center)
+	offset = camera * layer.parallax
+	if layer.parallaxScaling {
+		scale = max(0.01, 1 - layer.parallax.x)
+	} else {
+		size := [2]f32{f32(layer.cells.x * layer.gridSize), f32(layer.cells.y * layer.gridSize)}
+		offset -= size * 0.5 * layer.parallax
+	}
+	return
+}
+
+// An entity layer with a parallax factor follows the camera (from its update: a frame behind
+// a camera that moves later in the frame; tile layers do it as they draw)
+@(private="file")
+ldtkEntityLayerUpdate :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
+	group := cast(^LDtkEntityLayer)node
+	offset, scale := parallaxOf(group.data, group.parent)
+	group.position = offset + scale * group.data.offset
+	group.scale = {scale, scale}
+}
+
+/*
+Every tile (or IntGrid cell) as two triangles through the draw transform, in one RenderGeometry.
+Tiles off the screen are skipped: the screen's corners are taken back into the layer and only
+tiles touching that box are drawn. A parallax layer moves and scales as it draws (parallaxOf).
+*/
 @(private="file")
 ldtkTileLayerDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	tiles := cast(^LDtkTileLayer)node
@@ -556,57 +766,92 @@ ldtkTileLayerDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	opacity := l.opacity * f32(tint.a) / 255
 	base := sdl.FColor{f32(tint.r) / 255, f32(tint.g) / 255, f32(tint.b) / 255, opacity}
 
+	// In the layer's own space, a point p draws at shift + scale * p (parallax; in the level the
+	// layer's origin is its offset, which the node's position already holds)
+	shift: [2]f32
+	scale: f32 = 1
+	if tiles.parallax {
+		offset, s := parallaxOf(l, node.parent)
+		shift, scale = offset + (s - 1) * l.offset, s
+	}
+	place :: proc(p, shift: [2]f32, scale: f32) -> sdl.FPoint {
+		return sdl.FPoint(toScreen(shift + p * scale))
+	}
+	lo, hi := visibleBox(renderer, shift, scale)
+
+	cell := tiles.tileSize
 	if tiles.texture != nil && len(l.tiles) > 0 {
-		vertices := make([]sdl.Vertex, len(l.tiles) * 4, context.temp_allocator)
-		indices := make([]c.int, len(l.tiles) * 6, context.temp_allocator)
-		size := tiles.tileSize
+		vertices := make([dynamic]sdl.Vertex, 0, len(l.tiles) * 4, context.temp_allocator)
+		indices := make([dynamic]c.int, 0, len(l.tiles) * 6, context.temp_allocator)
 		tw, th := f32(tiles.texture.w), f32(tiles.texture.h)
-		for tile, i in l.tiles {
+		for tile in l.tiles {
+			p := tile.px
+			if p.x + cell < lo.x || p.y + cell < lo.y || p.x > hi.x || p.y > hi.y do continue
 			u0, v0 := tile.src.x / tw, tile.src.y / th
-			u1, v1 := (tile.src.x + size) / tw, (tile.src.y + size) / th
+			u1, v1 := (tile.src.x + cell) / tw, (tile.src.y + cell) / th
 			if tile.flipX do u0, u1 = u1, u0
 			if tile.flipY do v0, v1 = v1, v0
 			color := base
 			color.a *= tile.alpha
-			p := tile.px
-			corners := [4][2]f32{p, {p.x + size, p.y}, {p.x + size, p.y + size}, {p.x, p.y + size}}
-			uvs := [4]sdl.FPoint{{u0, v0}, {u1, v0}, {u1, v1}, {u0, v1}}
-			for k in 0 ..< 4 {
-				vertices[i * 4 + k] = {position = sdl.FPoint(toScreen(corners[k])), color = color, tex_coord = uvs[k]}
-			}
-			quad(indices, i)
+			at := c.int(len(vertices))
+			append(&vertices,
+				sdl.Vertex{position = place(p, shift, scale), color = color, tex_coord = {u0, v0}},
+				sdl.Vertex{position = place({p.x + cell, p.y}, shift, scale), color = color, tex_coord = {u1, v0}},
+				sdl.Vertex{position = place({p.x + cell, p.y + cell}, shift, scale), color = color, tex_coord = {u1, v1}},
+				sdl.Vertex{position = place({p.x, p.y + cell}, shift, scale), color = color, tex_coord = {u0, v1}})
+			append(&indices, at, at + 1, at + 2, at, at + 2, at + 3)
 		}
-		sdl.RenderGeometry(renderer, tiles.texture, raw_data(vertices), c.int(len(vertices)), raw_data(indices), c.int(len(indices)))
+		if len(vertices) > 0 {
+			sdl.RenderGeometry(renderer, tiles.texture, raw_data(vertices), c.int(len(vertices)), raw_data(indices), c.int(len(indices)))
+		}
 		return
 	}
 
 	// IntGrid cells in their value's color
 	if len(l.intGrid) == 0 do return
-	count := 0
-	for v in l.intGrid do if v != 0 do count += 1
-	vertices := make([]sdl.Vertex, count * 4, context.temp_allocator)
-	indices := make([]c.int, count * 6, context.temp_allocator)
 	grid := f32(l.gridSize)
-	i := 0
+	vertices := make([dynamic]sdl.Vertex, 0, 64, context.temp_allocator)
+	indices := make([dynamic]c.int, 0, 96, context.temp_allocator)
 	for v, index in l.intGrid {
 		if v == 0 do continue
-		cell := [2]f32{f32(index % l.cells.x), f32(index / l.cells.x)} * grid
+		p := [2]f32{f32(index % l.cells.x), f32(index / l.cells.x)} * grid
+		if p.x + grid < lo.x || p.y + grid < lo.y || p.x > hi.x || p.y > hi.y do continue
 		c8 := tiles.colors[int(v)] or_else sdl.Color{255, 255, 255, 255}
 		color := sdl.FColor{base.r * f32(c8.r) / 255, base.g * f32(c8.g) / 255, base.b * f32(c8.b) / 255, base.a * f32(c8.a) / 255}
-		corners := [4][2]f32{cell, {cell.x + grid, cell.y}, {cell.x + grid, cell.y + grid}, {cell.x, cell.y + grid}}
-		for k in 0 ..< 4 do vertices[i * 4 + k] = {position = sdl.FPoint(toScreen(corners[k])), color = color}
-		quad(indices, i)
-		i += 1
+		at := c.int(len(vertices))
+		append(&vertices,
+			sdl.Vertex{position = place(p, shift, scale), color = color},
+			sdl.Vertex{position = place({p.x + grid, p.y}, shift, scale), color = color},
+			sdl.Vertex{position = place({p.x + grid, p.y + grid}, shift, scale), color = color},
+			sdl.Vertex{position = place({p.x, p.y + grid}, shift, scale), color = color})
+		append(&indices, at, at + 1, at + 2, at, at + 2, at + 3)
 	}
-	sdl.RenderGeometry(renderer, nil, raw_data(vertices), c.int(len(vertices)), raw_data(indices), c.int(len(indices)))
+	if len(vertices) > 0 {
+		sdl.RenderGeometry(renderer, nil, raw_data(vertices), c.int(len(vertices)), raw_data(indices), c.int(len(indices)))
+	}
 }
 
-// The six indices of quad i (corners 0-1-2, 0-2-3)
+/*
+The part of a layer the screen shows, in the layer's space (before parallax): the screen's
+corners through the inverse of the draw transform and the parallax. Everything when the output
+size isn't known.
+*/
 @(private="file")
-quad :: proc(indices: []c.int, i: int) {
-	at := c.int(i * 4)
-	indices[i * 6 + 0], indices[i * 6 + 1], indices[i * 6 + 2] = at, at + 1, at + 2
-	indices[i * 6 + 3], indices[i * 6 + 4], indices[i * 6 + 5] = at, at + 2, at + 3
+visibleBox :: proc(renderer: ^sdl.Renderer, shift: [2]f32, scale: f32) -> (lo, hi: [2]f32) {
+	w, h: c.int
+	mode: sdl.RendererLogicalPresentation
+	if !sdl.GetRenderLogicalPresentation(renderer, &w, &h, &mode) || w <= 0 || h <= 0 {
+		if !sdl.GetCurrentRenderOutputSize(renderer, &w, &h) || w <= 0 || h <= 0 do return {-1e30, -1e30}, {1e30, 1e30}
+	}
+	inverse := Transform2D_Inverse(drawTransform)
+	corners := [4][2]f32{{0, 0}, {f32(w), 0}, {f32(w), f32(h)}, {0, f32(h)}}
+	lo, hi = {1e30, 1e30}, {-1e30, -1e30}
+	for corner in corners {
+		p := (Transform2D_Apply(inverse, corner) - shift) / max(scale, 0.01)
+		lo = {min(lo.x, p.x), min(lo.y, p.y)}
+		hi = {max(hi.x, p.x), max(hi.y, p.y)}
+	}
+	return
 }
 
 @(private="file")
@@ -615,20 +860,160 @@ ldtkEntityBounds :: proc(node: ^Node) -> (sdl.FRect, bool) {
 	return {-entity.pivot.x * entity.size.x, -entity.pivot.y * entity.size.y, entity.size.x, entity.size.y}, true
 }
 
+/*
+An entity as LDtk draws it: its tile by its definition's tile render mode (LDtkEntityRender.hx's
+rules), at its tile opacity; without a tile, in tools (outline), its definition's shape with its
+fill and line opacities.
+*/
 @(private="file")
 ldtkEntityDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	self := cast(^LDtkEntityNode)node
 	entity := self.entity
+	def := entity.def
 	rect, _ := ldtkEntityBounds(node)
-	if self.texture != nil && self.src.w > 0 && self.src.h > 0 {
-		// Fitted inside the rectangle, keeping its shape, at the middle
-		scale := min(rect.w / self.src.w, rect.h / self.src.h)
-		w, h := self.src.w * scale, self.src.h * scale
-		DrawTexture(renderer, self.texture, {rect.x + (rect.w - w) * 0.5, rect.y + (rect.h - h) * 0.5, w, h}, src = self.src)
-	} else if self.outline {
-		fill := entity.color
-		fill.a = 60
-		DrawRectangle(renderer, &rect, fill)
+	pivot := entity.pivot
+	if self.texture != nil && self.src.w > 0 && self.src.h > 0 && (def == nil || def.renderMode == .Tile || entity.tile != nil) {
+		mode := def != nil ? def.tileRenderMode : LDtkTileRenderMode.FitInside
+		alpha := u8(clamp(def != nil ? def.tileOpacity : 1, 0, 1) * 255)
+		drawEntityTile(renderer, self.texture, self.src, rect, pivot, mode, def != nil ? def.nineSlice : {}, alpha)
+		return
 	}
-	if self.outline do DrawRectangleOutline(renderer, &rect, entity.color)
+	if !self.outline do return
+	color := entity.color
+	line := sdl.Color{u8((u32(color.r) * 7 + 255 * 3) / 10), u8((u32(color.g) * 7 + 255 * 3) / 10), u8((u32(color.b) * 7 + 255 * 3) / 10), 255}
+	fillOpacity, lineOpacity := f32(0.25), f32(1)
+	hollow := false
+	shape := LDtkEntityRenderMode.Rectangle
+	if def != nil {
+		fillOpacity, lineOpacity, hollow = def.fillOpacity, def.lineOpacity, def.hollow
+		if def.renderMode != .Tile do shape = def.renderMode
+	}
+	fill := color
+	fill.a = u8(clamp(fillOpacity, 0, 1) * 255)
+	line.a = u8(clamp(lineOpacity, 0, 1) * 255)
+	switch shape {
+	case .Ellipse:
+		center := sdl.FPoint{rect.x + rect.w * 0.5, rect.y + rect.h * 0.5}
+		if !hollow do DrawEllipse(renderer, center, rect.w * 0.5, rect.h * 0.5, fill)
+		DrawEllipseOutline(renderer, center, rect.w * 0.5, rect.h * 0.5, line)
+	case .Cross:
+		DrawLine(renderer, {rect.x, rect.y}, {rect.x + rect.w, rect.y + rect.h}, line)
+		DrawLine(renderer, {rect.x + rect.w, rect.y}, {rect.x, rect.y + rect.h}, line)
+	case .Rectangle, .Tile:
+		if !hollow do DrawRectangle(renderer, &rect, fill)
+		DrawRectangleOutline(renderer, &rect, line)
+	}
+}
+
+/*
+A tile in an entity's rectangle, by mode (LDtk's EntityRender.hx): the tile's pivot point (the
+entity's pivot, in the tile) goes on the entity's position, the rectangle's origin here.
+*/
+@(private="file")
+drawEntityTile :: proc(renderer: ^sdl.Renderer, texture: ^sdl.Texture, src, rect: sdl.FRect, pivot: [2]f32, mode: LDtkTileRenderMode, nineSlice: [4]f32, alpha: u8) {
+	tint := sdl.Color{255, 255, 255, alpha}
+	// A tile part of size `size` (in tile pixels) shown at `scale`, pivot on the origin
+	atPivot :: proc(size: [2]f32, scale: f32, pivot: [2]f32) -> sdl.FRect {
+		return {-size.x * scale * pivot.x, -size.y * scale * pivot.y, size.x * scale, size.y * scale}
+	}
+	t := [2]f32{src.w, src.h}
+	w, h := rect.w, rect.h
+	switch mode {
+	case .Stretch:
+		DrawTexture(renderer, texture, rect, src = src, tint = tint)
+	case .FitInside:
+		s := min(w / t.x, h / t.y)
+		DrawTexture(renderer, texture, atPivot(t, s, pivot), src = src, tint = tint)
+	case .Cover:
+		s := max(w / t.x, h / t.y)
+		f := [2]f32{min(w, t.x * s) / s, min(h, t.y * s) / s}
+		part := sdl.FRect{src.x + t.x * pivot.x - f.x * pivot.x, src.y + t.y * pivot.y - f.y * pivot.y, f.x, f.y}
+		DrawTexture(renderer, texture, atPivot(f, s, pivot), src = part, tint = tint)
+	case .FullSizeCropped:
+		f := [2]f32{min(w, t.x), min(h, t.y)}
+		part := sdl.FRect{src.x + t.x * pivot.x - f.x * pivot.x, src.y + t.y * pivot.y - f.y * pivot.y, f.x, f.y}
+		DrawTexture(renderer, texture, atPivot(f, 1, pivot), src = part, tint = tint)
+	case .FullSizeUncropped:
+		DrawTexture(renderer, texture, atPivot(t, 1, pivot), src = src, tint = tint)
+	case .Repeat:
+		tiledRegion(renderer, texture, src, rect, tint)
+	case .NineSlice:
+		// Borders: top, right, bottom, left; corners at their size, edges and middle repeated
+		top, right, bottom, left := nineSlice[0], nineSlice[1], nineSlice[2], nineSlice[3]
+		cols := [3][2]f32{{0, left}, {left, t.x - right}, {t.x - right, t.x}}
+		rows := [3][2]f32{{0, top}, {top, t.y - bottom}, {t.y - bottom, t.y}}
+		dcols := [3][2]f32{{rect.x, rect.x + left}, {rect.x + left, rect.x + w - right}, {rect.x + w - right, rect.x + w}}
+		drows := [3][2]f32{{rect.y, rect.y + top}, {rect.y + top, rect.y + h - bottom}, {rect.y + h - bottom, rect.y + h}}
+		for r in 0 ..< 3 do for col in 0 ..< 3 {
+			part := sdl.FRect{src.x + cols[col][0], src.y + rows[r][0], cols[col][1] - cols[col][0], rows[r][1] - rows[r][0]}
+			dest := sdl.FRect{dcols[col][0], drows[r][0], dcols[col][1] - dcols[col][0], drows[r][1] - drows[r][0]}
+			if part.w <= 0 || part.h <= 0 || dest.w <= 0 || dest.h <= 0 do continue
+			tiledRegion(renderer, texture, part, dest, tint)
+		}
+	}
+}
+
+// A tile part repeated at its size across a rectangle from its top-left corner, the last row and
+// column cut to fit
+@(private="file")
+tiledRegion :: proc(renderer: ^sdl.Renderer, texture: ^sdl.Texture, src, dest: sdl.FRect, tint: sdl.Color) {
+	if src.w <= 0 || src.h <= 0 do return
+	for y := f32(0); y < dest.h; y += src.h {
+		for x := f32(0); x < dest.w; x += src.w {
+			cw, ch := min(src.w, dest.w - x), min(src.h, dest.h - y)
+			DrawTexture(renderer, texture, {dest.x + x, dest.y + y, cw, ch}, src = sdl.FRect{src.x, src.y, cw, ch}, tint = tint)
+		}
+	}
+}
+
+/*
+The node of the entity an EntityRef field points at (`field` on the entity whose node, or a node
+under it, is `node`), when that entity was built under the same LDtkLevel node; nil otherwise (no
+such field, null, or an entity in a level that wasn't built).
+
+Example:
+	// A lever whose "door" field points at a door
+	door := e.LDtk_EntityRefNode(self.node, "door")
+	if door != nil do door.visible = false
+*/
+LDtk_EntityRefNode :: proc(node: ^Node, field: string) -> ^Node {
+	entity := LDtk_EntityOf(node)
+	if entity == nil do return nil
+	f := LDtk_FindField(entity.fields, field)
+	if f == nil do return nil
+	ref, ok := f.value.(LDtkEntityRef)
+	if !ok do return nil
+	return LDtk_FindEntityByIid(ldtkRootOf(node), ref.entityIid)
+}
+
+// The nodes an `Array<EntityRef>` field points at (temp allocated; entities that weren't built
+// are left out)
+LDtk_EntityRefNodes :: proc(node: ^Node, field: string) -> []^Node {
+	nodes := make([dynamic]^Node, context.temp_allocator)
+	entity := LDtk_EntityOf(node)
+	if entity == nil do return nodes[:]
+	f := LDtk_FindField(entity.fields, field)
+	if f == nil do return nodes[:]
+	list, ok := f.value.([]LDtkValue)
+	if !ok do return nodes[:]
+	root := ldtkRootOf(node)
+	for v in list {
+		ref := v.(LDtkEntityRef) or_continue
+		if n := LDtk_FindEntityByIid(root, ref.entityIid); n != nil do append(&nodes, n)
+	}
+	return nodes[:]
+}
+
+// An entity's node by its iid (what EntityRef fields hold), or nil
+LDtk_FindEntityByIid :: proc(root: ^LDtkLevelNode, iid: string) -> ^Node {
+	if root == nil || iid == "" do return nil
+	for s in root.spawned do if s.entity.iid == iid do return s.node
+	return nil
+}
+
+// The LDtkLevel node a node is under (or is), or nil
+@(private="file")
+ldtkRootOf :: proc(node: ^Node) -> ^LDtkLevelNode {
+	for n := node; n != nil; n = n.parent do if Node_Is(n, LDtkLevelNode) do return cast(^LDtkLevelNode)n
+	return nil
 }

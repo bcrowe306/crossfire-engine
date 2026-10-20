@@ -6,6 +6,7 @@ import "core:path/filepath"
 import "core:strings"
 import "core:sync"
 import "core:testing"
+import "core:time"
 import sdl "vendor:sdl3"
 
 // LDtk tests: a small hand-written project (no tileset images, so nothing needs a renderer), one
@@ -17,11 +18,14 @@ PROJECT :: `{
 	"worldGridWidth": 256, "worldGridHeight": 256, "worlds": [],
 	"defs": {
 		"layers": [
-			{"__type": "Entities", "identifier": "Things", "uid": 1, "gridSize": 16, "parallaxFactorX": 0, "parallaxFactorY": 0, "parallaxScaling": true, "intGridValues": []},
+			{"__type": "Entities", "identifier": "Things", "uid": 1, "gridSize": 16, "parallaxFactorX": 0.5, "parallaxFactorY": 0, "parallaxScaling": false, "intGridValues": []},
 			{"__type": "IntGrid", "identifier": "Walls", "uid": 2, "gridSize": 16, "parallaxFactorX": 0.5, "parallaxFactorY": 0, "parallaxScaling": false,
 			 "intGridValues": [{"value": 1, "identifier": "stone", "color": "#808080"}, {"value": 2, "identifier": "ladder", "color": "#A06020"}]}
 		],
-		"entities": [{"identifier": "Coin", "uid": 10, "width": 8, "height": 8, "pivotX": 0.5, "pivotY": 0.5, "color": "#FFD700", "tags": ["pickup"]}],
+		"entities": [{"identifier": "Coin", "uid": 10, "width": 8, "height": 8, "pivotX": 0.5, "pivotY": 0.5, "color": "#FFD700", "tags": ["pickup"],
+			"renderMode": "Ellipse", "tileRenderMode": "NineSlice", "nineSliceBorders": [2, 3, 4, 5], "hollow": true, "fillOpacity": 0.3, "lineOpacity": 0.6, "tileOpacity": 0.9,
+			"tileRect": {"tilesetUid": 20, "x": 16, "y": 0, "w": 16, "h": 16}},
+			{"identifier": "Lever", "uid": 11, "width": 16, "height": 16, "pivotX": 0, "pivotY": 0, "color": "#808080"}],
 		"tilesets": [{"identifier": "Icons", "uid": 20, "relPath": null, "embedAtlas": "LdtkIcons", "tileGridSize": 16, "spacing": 0, "padding": 0,
 			"pxWid": 256, "pxHei": 256, "__cWid": 16, "__cHei": 16, "tags": [], "customData": [{"tileId": 3, "data": "spikes"}],
 			"enumTags": [{"enumValueId": "Hurts", "tileIds": [3, 4]}]},
@@ -49,6 +53,12 @@ PROJECT :: `{
 					{"__identifier": "path", "__type": "Array<Point>", "__value": [{"cx": 0, "cy": 0}, {"cx": 1, "cy": 2}]},
 					{"__identifier": "target", "__type": "EntityRef", "__value": null},
 					{"__identifier": "speed", "__type": "Float", "__value": 2}
+				 ]},
+				{"__identifier": "Lever", "iid": "lever1", "__grid": [0, 0], "__pivot": [0, 0], "__tags": [], "__smartColor": "#808080",
+				 "__tile": null, "px": [0, 0], "width": 16, "height": 16,
+				 "fieldInstances": [
+					{"__identifier": "door", "__type": "EntityRef", "__value": {"entityIid": "c1", "layerIid": "l1", "levelIid": "aaa", "worldIid": "w"}},
+					{"__identifier": "others", "__type": "Array<EntityRef>", "__value": [{"entityIid": "c1", "layerIid": "l1", "levelIid": "aaa", "worldIid": "w"}, {"entityIid": "elsewhere", "layerIid": "x", "levelIid": "bbb", "worldIid": "w"}]}
 				 ]}
 			 ]},
 			{"__identifier": "Walls", "__type": "IntGrid", "__cWid": 4, "__cHei": 3, "__gridSize": 16, "__opacity": 0.5,
@@ -162,6 +172,18 @@ ldtk_project_is_read :: proc(t: ^testing.T) {
 	testing.expect_value(t, icons.customData[0].data, "spikes")
 	testing.expect_value(t, icons.enumTags[0].tileIds[1], 4)
 	testing.expect_value(t, project.enums[0].values[1], "Silver")
+
+	// Entity definitions: how LDtk draws them, and each entity's definition
+	coinDef := coin.def
+	testing.expect(t, coinDef != nil && coinDef.identifier == "Coin", "the entity's definition")
+	if coinDef != nil {
+		testing.expect_value(t, coinDef.renderMode, LDtkEntityRenderMode.Ellipse)
+		testing.expect_value(t, coinDef.tileRenderMode, LDtkTileRenderMode.NineSlice)
+		testing.expect_value(t, coinDef.nineSlice, [4]f32{2, 3, 4, 5})
+		testing.expect(t, coinDef.hollow && coinDef.fillOpacity == 0.3 && coinDef.lineOpacity == 0.6 && coinDef.tileOpacity == 0.9, "opacities")
+		testing.expect_value(t, coinDef.tile.?, LDtkTilesetRect{20, 16, 0, 16, 16})
+	}
+	testing.expect_value(t, LDtk_FindLayerDef(project, "Things").parallax, [2]f32{0.5, 0})
 	// Paths outlive the frame (they're the project's, not temp memory)
 	free_all(context.temp_allocator)
 	art := LDtk_FindTileset(project, 21)
@@ -235,6 +257,17 @@ ldtk_level_is_built :: proc(t: ^testing.T) {
 	testing.expect_value(t, second.size, [2]f32{32, 16})
 	testing.expect_value(t, second.position, [2]f32{48, 40})
 
+	// Entity references, to the nodes built for them (one points at a level that isn't built)
+	lever := LDtk_FindEntityNodes(level, "Lever")
+	testing.expect_value(t, len(lever), 1)
+	if len(lever) == 1 {
+		door := LDtk_EntityRefNode(lever[0], "door")
+		testing.expect(t, door != nil && door.name == "Coin", "door -> the coin's node")
+		testing.expect_value(t, len(LDtk_EntityRefNodes(lever[0], "others")), 1)
+		testing.expect(t, LDtk_EntityRefNode(lever[0], "nothing") == nil, "no such field")
+		testing.expect(t, LDtk_FindEntityByIid(level, "lever1") == lever[0], "by iid")
+	}
+
 	// The entity got the script named like it, its fields from LDtk
 	coins := LDtk_FindEntityNodes(level, "Coin")
 	testing.expect_value(t, len(coins), 1)
@@ -251,6 +284,18 @@ ldtk_level_is_built :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, LDtk_EntityOf(coin) != nil && LDtk_EntityOf(coin).iid == "c1", "the entity's data from its node")
 	testing.expect(t, LDtk_EntityOf(level) == nil, "not an entity")
+
+	// Parallax: the Things layer (factor 0.5 across, no scaling) follows the camera once the
+	// scene updates; at rest it's at its offset
+	things := Scene_FindNode(scene, "Level/Level_0/Things")
+	testing.expect_value(t, things.position, [2]f32{0, 0})
+	camera := CreateNode(scene, Camera2D)
+	camera.zoom = 1
+	camera.position = {100 + 64, 200 + 24}
+	scene.camera = camera
+	Scene_Update(scene, nil, 1.0 / 60)
+	// Camera at (64, 24) in the level: 64 * 0.5 - 64 * 0.5 * 0.5 = 16 across
+	testing.expect_value(t, things.position, [2]f32{16, 0})
 
 	// IntGrid values under world positions (the node is at 100, 200)
 	testing.expect_value(t, LDtk_IntGridAtPosition(level, "Walls", {100 + 50, 200 + 20}), 2)
@@ -272,5 +317,61 @@ ldtk_level_is_built :: proc(t: ^testing.T) {
 	defer SceneData_Destroy(&missing)
 	empty := cast(^LDtkLevelNode)Scene_Build(scene, &missing, dir)[0]
 	testing.expect_value(t, len(empty.views), 0)
+	free_all(context.temp_allocator)
+}
+
+@(test)
+ldtk_reloads_while_playing :: proc(t: ^testing.T) {
+	registerCoin()
+	dir := writeFixture("engine_test_ldtk_reload")
+	defer os.remove_all(dir)
+	game: Game
+	game.projectDir = dir
+	game.devKeys = true
+	defer Game_ForgetLDtk(&game)
+	defer if game.arenaReady do MemoryArena_Destroy(&game.arena)
+	scene := new(Scene)
+	Scene_Init(scene)
+	scene.game = &game
+	scene.physicsPaused = true
+	defer { Scene_Destroy(scene); free(scene) }
+	game.scenes = make(map[string]^Scene)
+	defer delete(game.scenes)
+	game.scenes["S"] = scene
+
+	data, _ := ParseScene(`<scene formatVersion="12" name="S"><node kind="LDtkLevel" name="Level" ldtk="game.ldtk" intGridCollision="Walls" collisionValues="1"/></scene>`)
+	defer SceneData_Destroy(&data)
+	level := cast(^LDtkLevelNode)Scene_Build(scene, &data, dir)[0]
+	Scene_ProcessQueues(scene)
+	coins := LDtk_FindEntityNodes(level, "Coin")
+	coin := len(coins) > 0 ? coins[0] : nil
+	testing.expect_value(t, len(Scene_FindNode(scene, "Level/Level_0/Collision").children), 2)
+
+	// Nothing changed: nothing reloaded
+	before := level.project
+	LDtk_WatchFiles(&game, 1)
+	testing.expect(t, level.project == before, "same file, same project")
+
+	// Saved in LDtk: a cell of the wall block is empty now (the 2x3 block splits), and the
+	// background is another color. A later modification time, whatever the clock's resolution
+	time.sleep(20 * time.Millisecond)
+	changed, _ := strings.replace(PROJECT, `"intGridCsv": [1,1,0,0, 1,1,0,2, 1,1,1,1]`, `"intGridCsv": [1,1,0,0, 0,1,0,2, 1,1,1,1]`, 1, context.temp_allocator)
+	changed, _ = strings.replace(changed, `"__bgColor": "#102030"`, `"__bgColor": "#405060"`, 1, context.temp_allocator)
+	_ = os.write_entire_file(filepath.join({dir, "game.ldtk"}, context.temp_allocator) or_else "", changed)
+	LDtk_WatchFiles(&game, 1)
+	Scene_ProcessQueues(scene)
+	testing.expect(t, level.project != before, "read again")
+	testing.expect_value(t, level.views[0].level.bgColor, sdl.Color{0x40, 0x50, 0x60, 255})
+	walls := cast(^LDtkTileLayer)Scene_FindNode(scene, "Level/Level_0/Walls")
+	testing.expect_value(t, LDtk_IntGridAt(walls.data, 0, 1), 0)
+	collision := Scene_FindNode(scene, "Level/Level_0/Collision")
+	// 1 1 . .     the top pair, the column under its right cell, the bottom-left cell, the
+	// . 1 . 2     bottom-right pair (the ladder, 2, isn't collision)
+	// 1 1 1 1
+	testing.expect(t, collision != nil && len(collision.children) == 4, "the collision made again from the new cells")
+	// Entities keep running: the same node, its data still readable
+	after := LDtk_FindEntityNodes(level, "Coin")
+	testing.expect(t, len(after) == 1 && after[0] == coin, "the coin is the same node")
+	testing.expect(t, LDtk_EntityOf(coin) != nil && LDtk_EntityOf(coin).iid == "c1", "its data (the replaced project's) still there")
 	free_all(context.temp_allocator)
 }

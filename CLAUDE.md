@@ -321,6 +321,18 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
   nearest filtering unless `smoothTiles`. IntGrid layers without tiles draw their values' colors.
 - Script fields from LDtk fields: names match ignoring case and underscores; points become the
   pixel middle of their cell; arrays, tiles and references are left to code (`LDtk_EntityOf`).
+- **Parallax** is LDtk's (its Camera.hx): offset camera-in-level × factor (− half the layer ×
+  factor without scaling), scale 1 − factor.x; tile layers apply it while drawing (exact), entity
+  groups in their update. Off when built without scripts (the editor). **Culling** maps the
+  screen's corners back through the draw transform and the parallax.
+- **Entity tiles** follow LDtk's EntityRender.hx per tile render mode (the tile's pivot on the
+  entity's position); shapes only in tools. LDtk's internal icons (FinalBossBlues' paid pack)
+  can't ship: a copy beside the .ldtk (`finalbossblues-icons_full_16.png`) is used.
+- **Hot reload** (`LDtk_WatchFiles`, dev runs only, from Game_Update): reloaded projects replace
+  the game's; the old ones are kept to the end (`Game.ldtkRetired`: entity nodes point into
+  them). Built nodes are updated in place, not rebuilt: tile layers, colors, backgrounds and the
+  collision body; entities keep running, so scripts' pointers stay valid. A node keeps its
+  settings (`LDtkLevelNode.settings`, `collision`) to do it.
 - Checked against all 14 of LDtk's sample projects (parsed; the platformer rendered: the same
   picture as LDtk's), not committed: their art has its own licenses.
 

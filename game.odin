@@ -66,6 +66,11 @@ Game :: struct {
 	components: map[string]^SceneData,
 	// LDtk projects read so far, by path (nil: couldn't be read); each in its own arena (ldtk_nodes.odin)
 	ldtk: map[string]^LDtkProject,
+	// Development runs: the files' modification times when read, projects replaced by a reload
+	// (kept until the end: entity nodes point into them), when to look at the files next
+	ldtkTimes: map[string]i64,
+	ldtkRetired: [dynamic]^LDtkProject,
+	ldtkWatchTimer: f64,
 	// The folder asset paths are relative to (owned; set by Game_LoadProject, "" for the working directory)
 	projectDir: string,
 	update: proc(game: ^Game, events: []sdl.Event, deltaTime: f64),
@@ -198,6 +203,9 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 		Globals_SceneChanged(game, game.currentScene)
 	}
 
+
+	// Development runs: LDtk files saved since are read again (ldtk_nodes.odin)
+	if game.devKeys && len(game.ldtk) > 0 do LDtk_WatchFiles(game, deltaTime)
 
 	// Globals first: the scene's nodes see what they changed this frame
 	Globals_Update(game, events, deltaTime)

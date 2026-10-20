@@ -29,8 +29,12 @@ Paths in the data (`tileset.path`, `layer.tilesetPath`, `level.background.path`)
 `.ldtk` file's folder joined with LDtk's relative path: pass them to the resource manager as they
 are. Everything a project holds lives in its own arena: `LDtk_Destroy` frees it all.
 
-Ignored: auto-layer rules (LDtk resolves them into tiles when it saves), editor-only settings,
-LDtk's internal icon atlas (`embedAtlas`: entity icons with no image file).
+Entity definitions keep how LDtk draws them (render mode, tile render mode, nine-slice borders,
+opacities, their tile), and each entity points at its definition (`LDtkEntity.def`).
+
+Ignored: auto-layer rules (LDtk resolves them into tiles when it saves), editor-only settings.
+LDtk's internal icon atlas (`embedAtlas: LdtkIcons`) has no image file: entities using it draw
+their icons only when the project has its own copy beside the .ldtk (LDTK_ICONS_FILE).
 
 Example:
 	project, problem := e.LDtk_Load("assets/world.ldtk")
@@ -133,6 +137,8 @@ LDtkEntity :: struct {
 	tile: Maybe(LDtkTilesetRect),
 	color: sdl.Color,
 	fields: []LDtkField,
+	// Its definition (render mode, tile mode...); nil if the project has none by its name
+	def: ^LDtkEntityDef,
 }
 
 // A layer of a level
@@ -205,6 +211,13 @@ LDtkWorld :: struct {
 	levels: []LDtkLevel,
 }
 
+/*
+The image of LDtk's internal icons (tilesets with `embedAtlas: LdtkIcons`): FinalBossBlues' Icons
+pack (finalbossblues.itch.io/icons), which LDtk carries but which the engine can't ship. Put your
+own copy beside the .ldtk file under this name and entities using it draw their icons.
+*/
+LDTK_ICONS_FILE :: "finalbossblues-icons_full_16.png"
+
 // A tileset definition
 LDtkTileset :: struct {
 	uid: int,
@@ -257,6 +270,32 @@ LDtkLayerDef :: struct {
 	parallaxScaling: bool,
 }
 
+// How LDtk draws an entity: its definition's shape, or its tile
+LDtkEntityRenderMode :: enum {
+	Rectangle,
+	Ellipse,
+	Tile,
+	Cross,
+}
+
+// How an entity's tile fills its rectangle (LDtk's tileRenderMode)
+LDtkTileRenderMode :: enum {
+	// Scaled to cover it, keeping its shape, cropped around the pivot
+	Cover,
+	// Scaled to fit inside, keeping its shape, at the pivot
+	FitInside,
+	// Repeated at its size from the top-left corner
+	Repeat,
+	// Scaled to the rectangle
+	Stretch,
+	// At its size, cropped to the rectangle around the pivot
+	FullSizeCropped,
+	// At its size, at the pivot, not cropped
+	FullSizeUncropped,
+	// Corners at their size, edges and middle repeated (nineSlice borders)
+	NineSlice,
+}
+
 // An entity definition
 LDtkEntityDef :: struct {
 	uid: int,
@@ -265,6 +304,15 @@ LDtkEntityDef :: struct {
 	pivot: [2]f32,
 	color: sdl.Color,
 	tags: []string,
+	renderMode: LDtkEntityRenderMode,
+	tileRenderMode: LDtkTileRenderMode,
+	// Top, right, bottom, left (NineSlice)
+	nineSlice: [4]f32,
+	// Shapes: no fill; fill and line opacities. Tiles: opacity
+	hollow: bool,
+	fillOpacity, lineOpacity, tileOpacity: f32,
+	// The definition's tile (entities may show another, from a field)
+	tile: Maybe(LDtkTilesetRect),
 }
 
 // An enum definition: its values, in order
@@ -544,6 +592,11 @@ parseDefinitions :: proc(p: ^ldtkParser, defs: json.Object) {
 	for t in jArray(defs, "tilesets") {
 		to := t.(json.Object) or_continue
 		relPath := jString(to, "relPath")
+		// LDtk's internal icons (FinalBossBlues' Icons pack, which LDtk carries and nothing else may
+		// redistribute): used when the project has its own copy beside the .ldtk file
+		if jString(to, "embedAtlas") == "LdtkIcons" && relPath == "" && Platform_FileExists(JoinPath(project.dir, LDTK_ICONS_FILE)) {
+			relPath = LDTK_ICONS_FILE
+		}
 		tileset := LDtkTileset{
 			uid = jInt(to, "uid"),
 			identifier = jString(to, "identifier"),
@@ -598,14 +651,37 @@ parseDefinitions :: proc(p: ^ldtkParser, defs: json.Object) {
 	entities := make([dynamic]LDtkEntityDef)
 	for e in jArray(defs, "entities") {
 		eo := e.(json.Object) or_continue
-		append(&entities, LDtkEntityDef{
+		def := LDtkEntityDef{
 			uid = jInt(eo, "uid"),
 			identifier = jString(eo, "identifier"),
 			size = {f32(jInt(eo, "width")), f32(jInt(eo, "height"))},
 			pivot = {jFloat(eo, "pivotX"), jFloat(eo, "pivotY")},
 			color = jColor(eo, "color", {255, 255, 255, 255}),
 			tags = jStrings(eo, "tags"),
-		})
+			hollow = jBool(eo, "hollow"),
+			fillOpacity = jFloat(eo, "fillOpacity", 0.08),
+			lineOpacity = jFloat(eo, "lineOpacity", 1),
+			tileOpacity = jFloat(eo, "tileOpacity", 1),
+		}
+		switch jString(eo, "renderMode") {
+		case "Ellipse": def.renderMode = .Ellipse
+		case "Tile":    def.renderMode = .Tile
+		case "Cross":   def.renderMode = .Cross
+		case:           def.renderMode = .Rectangle
+		}
+		switch jString(eo, "tileRenderMode") {
+		case "Cover":             def.tileRenderMode = .Cover
+		case "Repeat":            def.tileRenderMode = .Repeat
+		case "Stretch":           def.tileRenderMode = .Stretch
+		case "FullSizeCropped":   def.tileRenderMode = .FullSizeCropped
+		case "FullSizeUncropped": def.tileRenderMode = .FullSizeUncropped
+		case "NineSlice":         def.tileRenderMode = .NineSlice
+		case:                     def.tileRenderMode = .FitInside
+		}
+		borders := jFloats(eo, "nineSliceBorders")
+		if len(borders) == 4 do def.nineSlice = {borders[0], borders[1], borders[2], borders[3]}
+		if tile, ok := parseTileRect(jObject(eo, "tileRect")); ok do def.tile = tile
+		append(&entities, def)
 	}
 	project.entities = entities[:]
 
@@ -750,6 +826,7 @@ parseLevel :: proc(p: ^ldtkParser, lo: json.Object) -> LDtkLevel {
 				fields = parseFields(jArray(eo, "fieldInstances")),
 			}
 			if tile, ok := parseTileRect(jObject(eo, "__tile")); ok do entity.tile = tile
+			for &def in p.project.entities do if def.identifier == entity.identifier do entity.def = &def
 			append(&entities, entity)
 		}
 		layer.entities = entities[:]
