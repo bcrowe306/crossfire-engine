@@ -28,6 +28,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Box2D's sources (third_party/box2d): the bindings check for its library
+          submodules: true
 
       - name: Odin and libcmark
         run: |
