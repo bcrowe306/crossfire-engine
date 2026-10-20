@@ -104,7 +104,12 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 			continue
 		}
 		scene := game->createScene(ref.name)
-		if scene != nil do Scene_Build(scene, &data, projectDir)
+		if scene != nil {
+			Scene_Build(scene, &data, projectDir)
+			// Kept to build it again when it's entered again (Game_RebuildScene)
+			if game.sceneFiles == nil do game.sceneFiles = make(map[string]string, Game_GetAllocator(game))
+			game.sceneFiles[strings.clone(ref.name, Game_GetAllocator(game))] = strings.clone(path, Game_GetAllocator(game))
+		}
 		SceneData_Destroy(&data)
 	}
 

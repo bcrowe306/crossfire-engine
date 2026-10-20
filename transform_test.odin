@@ -296,3 +296,46 @@ negative_scale_mirrors_textures :: proc(t: ^testing.T) {
 	draw(renderer, texture, Transform2D{x = {1, 0}, y = {0, -1}, origin = {20, 20}})
 	testing.expect_value(t, pixel(surface, 15, 15), colors[2])
 }
+
+// A hitstop gives scenes 0 seconds for its length (in real time); a camera shake moves only the
+// view, settles in its duration, keeps going through a hitstop, and a weaker shake doesn't cut a stronger one
+@(test)
+hitstop_and_camera_shake :: proc(t: ^testing.T) {
+	game: Game
+	game.scenes = make(map[string]^Scene)
+	defer delete(game.scenes)
+	scene := new(Scene)
+	Scene_Init(scene)
+	scene.game = &game
+	game.size = {320, 180}
+	game.currentScene = scene
+	defer { Scene_Destroy(scene); free(scene) }
+	ticker := CreateNode(scene, Node)
+	ticker.update = proc(node: ^Node, _: []sdl.Event, deltaTime: f64) { node.position.x += f32(deltaTime) }
+	camera := Scene_CreateCamera(scene)
+	camera.zoom = 2
+	Game_Update(&game, nil, 0.1)
+	testing.expect_value(t, ticker.position.x, f32(0.1))
+
+	Game_HitStop(&game, 0.25)
+	Game_HitStop(&game, 0.1) // shorter: doesn't cut it
+	Camera2D_Shake(camera, 4, 0.5)
+	before := Camera2D_GetTarget(camera)
+	for _ in 0 ..< 2 do Game_Update(&game, nil, 0.1)
+	testing.expect_value(t, ticker.position.x, f32(0.1)) // frozen
+	testing.expect(t, camera.shake.left < 0.31 && camera.shake.left > 0.29, "the shake goes on in real time")
+	offset := camera.shake.offset
+	testing.expect(t, offset != {} && abs(offset.x) <= 4 && abs(offset.y) <= 4, "shaken, within its strength")
+	testing.expect_value(t, Camera2D_GetTarget(camera), before) // the node doesn't move
+	view := Camera2D_ViewTransform(camera)
+	testing.expect_value(t, Transform2D_Apply(view, before), camera.offset + offset)
+	Camera2D_Shake(camera, 1, 0.5) // weaker than what's left
+	testing.expect(t, camera.shake.strength == 4, "a weaker shake is ignored")
+
+	Game_Update(&game, nil, 0.1) // the hitstop's last 0.05 s, then it's over
+	Game_Update(&game, nil, 0.1)
+	testing.expect_value(t, ticker.position.x, f32(0.2))
+	for _ in 0 ..< 4 do Game_Update(&game, nil, 0.1)
+	testing.expect_value(t, camera.shake.offset, [2]f32{})
+	free_all(context.temp_allocator)
+}

@@ -246,3 +246,44 @@ save_and_load :: proc(t: ^testing.T) {
 	}
 	free_all(context.temp_allocator)
 }
+
+// A scene entered again is built afresh from its file (what happened in it is gone); switching
+// to the scene that's playing restarts it; the first visit uses the scene as loaded
+@(test)
+scenes_start_fresh_when_entered_again :: proc(t: ^testing.T) {
+	dir := tempFolder("engine_test_fresh_scenes")
+	defer os.remove_all(dir)
+	_ = os.write_entire_file(JoinPath(dir, "a.scene.xml"), transmute([]u8)string(`<scene formatVersion="12" name="A"><node kind="Node2D" name="Thing" x="10" y="0"/></scene>`))
+	_ = os.write_entire_file(JoinPath(dir, "b.scene.xml"), transmute([]u8)string(`<scene formatVersion="12" name="B"/>`))
+	project, err := ParseProject(`<project formatVersion="12" name="F" startScene="A"><scene name="A" path="a.scene.xml"/><scene name="B" path="b.scene.xml"/></project>`)
+	defer ProjectData_Destroy(&project)
+	testing.expect_value(t, err, ProjectError.None)
+	game := testGame(dir)
+	defer { Game_Destroy(game); free(game) }
+	testing.expect(t, Game_LoadProject(game, &project, dir), "loads")
+	Game_Update(game, nil, 1.0 / 60)
+	a := game.scenes["A"]
+	thing := Scene_FindNode(a, "Thing")
+	testing.expect(t, thing != nil && thing.position.x == 10, "the first visit is the scene as loaded")
+	if thing == nil do return
+	thing.position.x = 99
+	extra := CreateNode(a, Node)
+	extra.name = "Extra"
+
+	game->switchScene("B")
+	Game_Update(game, nil, 1.0 / 60)
+	testing.expect(t, Scene_FindNode(a, "Thing").position.x == 99, "left as it was while away")
+	game->switchScene("A")
+	Game_Update(game, nil, 1.0 / 60)
+	again := Scene_FindNode(a, "Thing")
+	testing.expect(t, again != nil && again.position.x == 10, "fresh when entered again")
+	testing.expect(t, Scene_FindNode(a, "Extra") == nil, "what was added is gone")
+	testing.expect(t, game.currentScene == a && a.name == "A", "the same scene, still named")
+
+	// Restarting: switching to the scene that's playing
+	again.position.x = 50
+	game->switchScene("A")
+	Game_Update(game, nil, 1.0 / 60)
+	testing.expect_value(t, Scene_FindNode(a, "Thing").position.x, f32(10))
+	free_all(context.temp_allocator)
+}

@@ -27,6 +27,9 @@ Scene :: struct {
 	// Don't step the physics (bodies still exist and can be queried). Editors set it: their
 	// previews update scenes for animations, and bodies mustn't fall there
 	physicsPaused: bool,
+	// It has been the current scene before: entering it again rebuilds it from its file
+	// (Game.sceneFiles), so every visit starts fresh
+	played: bool,
 	addNode: proc(scene: ^Scene, node: ^Node),
 	removeNode: proc(scene: ^Scene, nodeId: EntityId),
 	getNode: proc(scene: ^Scene, nodeId: EntityId) -> ^Node,
@@ -65,6 +68,19 @@ Returns:
 */
 Scene_GetAllocator :: proc(scene: ^Scene) -> mem.Allocator {
 	return MemoryArena_Allocator(&scene.arena)
+}
+
+/*
+Empties a scene: every node is destroyed and its physics world goes, as Scene_Destroy does, but
+the scene itself stays (its name, game, screen layers, physicsPaused), ready to be built again.
+Listeners on its onEnter / onExit are dropped with it.
+*/
+Scene_Clear :: proc(scene: ^Scene) {
+	name, game, screenLayers, paused, played := scene.name, scene.game, scene.screenLayers, scene.physicsPaused, scene.played
+	Scene_Destroy(scene)
+	scene^ = {}
+	Scene_Init(scene)
+	scene.name, scene.game, scene.screenLayers, scene.physicsPaused, scene.played = name, game, screenLayers, paused, played
 }
 
 Scene_Destroy :: proc(scene: ^Scene) {

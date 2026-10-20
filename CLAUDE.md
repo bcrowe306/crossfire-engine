@@ -191,7 +191,18 @@ draw shapes and SDL_ttf text alike (pixels read back), and the demo runs with ea
   determinant is negative (`scale.x = -1` faces a sprite the other way), since
   `RenderTextureRotated` only takes a rotation.
 - `Scene_DrawWithView(scene, renderer, view, ...)` draws through any view transform instead of the
-  camera. The editor's viewport uses it with `positionOnlyScale` set to its zoom.
+  camera.
+- **Camera shake** (`Camera2D_Shake`) is a screen-space offset in `Camera2D_ViewTransform` only:
+  the camera node, following and bounds don't see it. Game_Update advances it with the real
+  frame time, so it runs through a hitstop.
+- **Scenes start fresh on every visit:** Game_LoadProject keeps each scene's file
+  (`Game.sceneFiles`); entering a scene that has been played before (`Scene.played`) rebuilds it
+  from its file (`Game_RebuildScene`: `Scene_Clear`, then `Scene_Build`), and switching to the
+  current scene restarts it. Scenes made by code (no file) keep their nodes. Scripts holding
+  pointers to nodes must drop them in their `destroy` hook.
+- **Hitstop** (`Game_HitStop`, `Game.hitStop`): for that many real seconds Game_Update hands
+  scenes and globals a delta of 0 (physics, animations, particles freeze; scripts still run and
+  see input). The editor's viewport uses it with `positionOnlyScale` set to its zoom.
 - `Node.getBounds` (optional) reports the local rectangle a node draws (`Node_GetLocalBounds`).
   The editor uses it for picking and selection boxes. Sprite, AnimatedSprite, Label and Menu set
   it; **give new drawable node types (including game-code nodes) a `getBounds`**.

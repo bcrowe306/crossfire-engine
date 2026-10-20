@@ -73,6 +73,11 @@ Game :: struct {
 	ldtkWatchTimer: f64,
 	// The folder asset paths are relative to (owned; set by Game_LoadProject, "" for the working directory)
 	projectDir: string,
+	// Seconds left of a hitstop (Game_HitStop): scenes and globals get a delta time of 0
+	hitStop: f64,
+	// Each scene's file, by scene name (Game_LoadProject; in the game's arena): a scene entered
+	// again is rebuilt from it
+	sceneFiles: map[string]string,
 	update: proc(game: ^Game, events: []sdl.Event, deltaTime: f64),
 	draw: proc(game: ^Game),
 	createScene: proc(game: ^Game, name: string) -> ^Scene,
@@ -197,12 +202,26 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 			// Its sounds stop (and start again when it's back)
 			Audio_SceneExited(game, game.currentScene)
 		}
+		// Every visit starts fresh: a scene played before is built again from its file (switching
+		// to the current scene restarts it)
+		if game.nextScenePtr.played do Game_RebuildScene(game, game.nextScenePtr)
+		game.nextScenePtr.played = true
 		game.nextScenePtr.onEnter->notify(game.nextScenePtr, nil)
 		game.currentScene = game.nextScenePtr
 		game.nextScenePtr = nil
 		Globals_SceneChanged(game, game.currentScene)
 	}
 
+
+	// A hitstop freezes the game (scripts still run, with 0 seconds: they see input); the camera
+	// shake moves on in real time
+	realDeltaTime := deltaTime
+	deltaTime := deltaTime
+	if game.hitStop > 0 {
+		game.hitStop -= deltaTime
+		deltaTime = 0
+	}
+	if scene := game.currentScene; scene != nil && scene.camera != nil do Camera2D_UpdateShake(scene.camera, realDeltaTime)
 
 	// Development runs: LDtk files saved since are read again (ldtk_nodes.odin)
 	if game.devKeys && len(game.ldtk) > 0 do LDtk_WatchFiles(game, deltaTime)
@@ -223,6 +242,43 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 	}
 }
 
+
+/*
+Builds a scene again from its file (`Game.sceneFiles`): its nodes are destroyed and made anew, as
+when the game started. The game does it when a scene that has been played is entered again; a
+scene made by code (no file) is left as it is.
+*/
+Game_RebuildScene :: proc(game: ^Game, scene: ^Scene) {
+	path, known := game.sceneFiles[scene.name]
+	if !known do return
+	data, err := LoadSceneFile(path)
+	if err != .None {
+		log.errorf("Couldn't rebuild scene '%s' from %s: %v", scene.name, path, err)
+		return
+	}
+	defer SceneData_Destroy(&data)
+	Scene_Clear(scene)
+	Scene_Build(scene, &data, game.projectDir)
+}
+
+/*
+Freezes the game for a moment: a hitstop, the short pause that makes a hit feel heavy. For
+`seconds` of real time, scenes and globals update with a delta time of 0: physics, animations,
+particles, timers and anything scripts move by the delta stop, while input, drawing and the
+camera's shake (`Camera2D_Shake`) go on. A longer hitstop extends a running one; a shorter one
+doesn't cut it.
+
+Inputs:
+- game: The game
+- seconds: How long, in real seconds (around 0.05 to 0.12 for a hit)
+
+Example:
+	e.Game_HitStop(self.game, 0.08)
+	e.Camera2D_Shake(self.scene.camera, 3, 0.15)
+*/
+Game_HitStop :: proc(game: ^Game, seconds: f64) {
+	game.hitStop = max(game.hitStop, seconds)
+}
 
 Game_Draw :: proc(game: ^Game) {
 	if game.currentScene != nil {

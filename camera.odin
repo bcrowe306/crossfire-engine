@@ -73,6 +73,7 @@ Example:
 package engine
 
 import "core:math"
+import "core:math/rand"
 
 /*
 How a camera tracks a moving position in `Camera2D_Follow`.
@@ -145,6 +146,15 @@ Camera2D :: struct {
 	// Internal state; read it if useful but don't modify it
 	velocity: [2]f32, // Current follow velocity in world units per second (.SmoothDamp)
 	move: CameraMove, // Active `Camera2D_MoveTo` pan
+	shake: CameraShake, // Active `Camera2D_Shake`
+}
+
+// State of a `Camera2D_Shake`
+CameraShake :: struct {
+	// Screen pixels at the start, seconds in all, seconds left
+	strength, duration, left: f32,
+	// The view's offset this frame, in screen pixels
+	offset: [2]f32,
 }
 
 // State of a `Camera2D_MoveTo` pan
@@ -243,7 +253,7 @@ Camera2D_ViewTransform :: proc(camera: ^Camera2D) -> Transform2D {
 	// As drawn: a camera under a smoothed body moves with what's drawn, not ahead of it
 	world := Node_GetRenderWorldTransform(camera)
 	zoom := cameraZoom(camera)
-	view := Transform2D_Make(camera.offset, 0, {zoom, zoom})
+	view := Transform2D_Make(camera.offset + camera.shake.offset, 0, {zoom, zoom})
 	view = Transform2D_Multiply(view, Transform2D_Make({0, 0}, -Transform2D_Rotation(world), {1, 1}))
 	return Transform2D_Multiply(view, Transform2D_Make(-world.origin, 0, {1, 1}))
 }
@@ -397,6 +407,47 @@ Camera2D_Update :: proc(camera: ^Camera2D, viewSize: [2]f32, deltaTime: f64) {
 		if t >= 1 do move.active = false
 	}
 	Camera2D_ClampToBounds(camera, viewSize)
+}
+
+/*
+Shakes the view: it jumps around its place by up to `strength` screen pixels, less and less over
+`duration` seconds (a hit, an explosion). A stronger shake replaces a weaker one; a weaker one
+started during a stronger one is ignored. The shake only moves what's drawn (the view transform),
+never the camera node, so following, bounds and scripts reading its position are unaffected.
+
+The game advances it in real time (`Camera2D_UpdateShake`, from Game_Update), so it keeps going
+through a hitstop (`Game_HitStop`).
+
+Inputs:
+- camera: The camera
+- strength: Largest offset, in screen pixels (game coordinates)
+- duration: Seconds until it settles
+
+Example:
+	e.Camera2D_Shake(self.scene.camera, 4, 0.2)
+*/
+Camera2D_Shake :: proc(camera: ^Camera2D, strength, duration: f32) {
+	if camera == nil || duration <= 0 do return
+	current := camera.shake.duration > 0 ? camera.shake.strength * camera.shake.left / camera.shake.duration : 0
+	if strength < current do return
+	camera.shake = {strength = strength, duration = duration, left = duration}
+}
+
+/*
+Moves a shake on by `deltaTime` real seconds: a new random offset, scaled by the square of the
+time left (strong at first, settling softly). Game_Update calls it for the current scene's camera.
+*/
+Camera2D_UpdateShake :: proc(camera: ^Camera2D, deltaTime: f64) {
+	shake := &camera.shake
+	if shake.left <= 0 {
+		shake.offset = {}
+		return
+	}
+	shake.left = max(shake.left - f32(deltaTime), 0)
+	fade := shake.left / shake.duration
+	amount := shake.strength * fade * fade
+	angle := rand.float32() * math.TAU
+	shake.offset = {math.cos(angle), math.sin(angle)} * amount
 }
 
 /*
