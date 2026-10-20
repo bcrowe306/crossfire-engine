@@ -111,8 +111,9 @@ Current limits:
   sound nodes (and from code on first use); Font assets are listed but not used.
 
 Version history:
-- 13: every node's `processMode`, `blendMode`, `zIndex`, `ySort` and `groups`. Version 12 files
-  are valid version 13 files.
+- 13: every node's `processMode`, `blendMode`, `zIndex`, `ySort` and `groups`; the project's
+  window: `fullscreen`, `vsync` (default true), `highDPI`. Version 12 files are valid version 13
+  files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
 - 11: the project's `renderer`. Version 10 files are valid version 11 files.
@@ -444,7 +445,25 @@ ProjectData :: struct {
 	buses: [dynamic]AudioBusData,
 	// The renderer games draw with (`renderer="Vulkan"`, format 11; Auto: SDL's choice)
 	renderer: RenderBackend,
+	// The game's window (`fullscreen`, `vsync`, `highDPI`, format 13)
+	window: WindowSettings,
 }
+
+/*
+How a game's window starts. Games change fullscreen and vsync while running with
+`Game_SetFullscreen` / `Game_SetVSync` (an options menu).
+*/
+WindowSettings :: struct {
+	// Start fullscreen (the desktop's resolution; the game scales into it)
+	fullscreen: bool,
+	// Wait for the display's refresh (no tearing; the frame rate follows the display)
+	vsync: bool,
+	// Use the display's full pixel density (sharper on high-DPI and Retina screens; more pixels to draw)
+	highDPI: bool,
+}
+
+// A window as games had it before these settings: windowed, vsync, not high-DPI
+DEFAULT_WINDOW_SETTINGS :: WindowSettings{vsync = true}
 
 ProjectError :: enum {
 	None,
@@ -482,6 +501,11 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		size = {attrF32(doc, 0, "width", 1280), attrF32(doc, 0, "height", 720)},
 		scaleMode = attrEnum(doc, 0, "scaleMode", ScaleMode.Letterbox),
 		renderer = attrEnum(doc, 0, "renderer", RenderBackend.Auto),
+		window = {
+			fullscreen = attrBool(doc, 0, "fullscreen", DEFAULT_WINDOW_SETTINGS.fullscreen),
+			vsync = attrBool(doc, 0, "vsync", DEFAULT_WINDOW_SETTINGS.vsync),
+			highDPI = attrBool(doc, 0, "highDPI", DEFAULT_WINDOW_SETTINGS.highDPI),
+		},
 		background = attrColor(doc, 0, "background", {0, 0, 0, 255}),
 		startScene = cloneAttr(doc, 0, "startScene", ""),
 		scenes = make([dynamic]SceneRef),

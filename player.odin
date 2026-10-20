@@ -95,7 +95,7 @@ Player_Setup :: proc(options: PlayerOptions, app: ^Application) -> bool {
 		if backend, ok := RenderBackend_Parse(options.renderer); ok do playerProject.renderer = backend
 		else do log.warnf("Unknown renderer '%s': using the project's", options.renderer)
 	}
-	if !Application_Setup(app, fmt.tprintf("%s", playerProject.name), playerProject.size, playerProject.renderer) {
+	if !Application_Setup(app, fmt.tprintf("%s", playerProject.name), playerProject.size, playerProject.renderer, playerProject.window) {
 		return false
 	}
 

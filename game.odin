@@ -282,6 +282,35 @@ Example:
 	e.Camera2D_Shake(self.scene.camera, 3, 0.15)
 */
 /*
+Switches the game's window between fullscreen (the desktop's resolution, the game scaled into it)
+and windowed.
+
+Returns:
+- false if the window couldn't change (logged), or there's no window
+*/
+Game_SetFullscreen :: proc(game: ^Game, fullscreen: bool) -> bool {
+	if game.window == nil do return false
+	if !sdl.SetWindowFullscreen(game.window, fullscreen) {
+		log.errorf("Game_SetFullscreen: %s", sdl.GetError())
+		return false
+	}
+	return true
+}
+
+// Whether the game's window is fullscreen
+Game_IsFullscreen :: proc(game: ^Game) -> bool {
+	return game.window != nil && .FULLSCREEN in sdl.GetWindowFlags(game.window)
+}
+
+/*
+Turns vsync on (frames wait for the display's refresh: no tearing) or off (as fast as it can).
+Not in the browser, where frames always follow the display.
+*/
+Game_SetVSync :: proc(game: ^Game, vsync: bool) {
+	if game.renderer != nil && !PLATFORM_WEB do sdl.SetRenderVSync(game.renderer, vsync ? 1 : 0)
+}
+
+/*
 Sets how fast time runs for scenes and globals (physics, animations, particles, timers, tweens,
 scripts' delta time): 1 is normal, 0.5 slow motion, 2 double speed. Hitstops and camera shakes
 run in real time.

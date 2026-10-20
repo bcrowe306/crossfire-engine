@@ -25,13 +25,16 @@ choose), the audio device and SDL_ttf.
 Returns:
 - false (logged) if any of them couldn't start
 */
-Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2]f32, backend := RenderBackend.Auto) -> bool {
+Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2]f32, backend := RenderBackend.Auto, window := DEFAULT_WINDOW_SETTINGS) -> bool {
 	if !sdl.Init({ .VIDEO, .AUDIO, .GAMEPAD, .EVENTS}) {
 		log.error("Error initializing SDL: ", sdl.GetError())
 		return false
 	}
 
-	app.window = sdl.CreateWindow(fmt.ctprint(windowTitle), c.int(windowSize[0]), c.int(windowSize[1]), {.RESIZABLE})
+	flags: sdl.WindowFlags = {.RESIZABLE}
+	if window.fullscreen do flags += {.FULLSCREEN}
+	if window.highDPI do flags += {.HIGH_PIXEL_DENSITY}
+	app.window = sdl.CreateWindow(fmt.ctprint(windowTitle), c.int(windowSize[0]), c.int(windowSize[1]), flags)
 	if app.window == nil {
 		log.error("Error creating window: ", sdl.GetError())
 		return false
@@ -42,7 +45,7 @@ Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2
 
 	// In the browser, vsync means "frames on requestAnimationFrame", which SDL can only set once
 	// Emscripten's main loop exists (before that, Present blocks): see Player_StartWeb
-	if !PLATFORM_WEB do sdl.SetRenderVSync(app.renderer, 1)
+	if !PLATFORM_WEB do sdl.SetRenderVSync(app.renderer, window.vsync ? 1 : 0)
 
 	mixer, audioOk := Audio_Init()
 	if !audioOk do return false

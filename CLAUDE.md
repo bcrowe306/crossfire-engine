@@ -565,7 +565,10 @@ comment. What was needed, and why:
   - Sound nodes load their sound when the scene is built (`Scene_Build` with scripts attached; the
     editor's viewport doesn't); `Game_PlaySound` still plays any sound from code, loaded on first use.
 - **Format version 13** adds every node's `processMode`, `blendMode`, `zIndex`, `ySort` and
-  `groups` (comma-separated). A component instance keeps its root's values unless it sets them.
+  `groups` (comma-separated); a component instance keeps its root's values unless it sets them.
+  And the project's window (`WindowSettings`: `fullscreen`, `vsync` default true, `highDPI`),
+  applied by `Application_Setup`; `Game_SetFullscreen` / `Game_IsFullscreen` / `Game_SetVSync`
+  change it while running.
 - **Format version 12** adds `LDtkLevel` nodes (`ldtk`, `level`, `allLevels`, `intGridCollision`,
   `collisionValues`, `spawnEntities`, `background`, `smoothTiles`, `<entity name component/>`)
   and assets of kind "LDtk".
