@@ -129,7 +129,8 @@ Version history:
   `oneWay`; the project's window: `fullscreen`, `vsync` (default true), `highDPI`; assets of
   kind "Translation" (CSV tables: localization.odin), the project's `locale` and `icon`, and the
   editor's `<grid width height majorEvery opacity majorOpacity/>` (`GridSettings`; games ignore
-  it); scenes' own settings (`SceneSettings`: `screenLayers`, `background`, `gravityX` /
+  it); the project's sound output format (`audioFrequency`, `audioChannels`: `AudioOutputSettings`,
+  0 for the device's own; stereo 48 kHz without them); scenes' own settings (`SceneSettings`: `screenLayers`, `background`, `gravityX` /
   `gravityY` on the root element). Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
@@ -664,6 +665,9 @@ ProjectData :: struct {
 	// The editor's grid for this project (`<grid width="16" height="16"/>`, format 13); games
 	// don't use it
 	grid: GridSettings,
+	// The format the game's sound output asks for (`audioFrequency`, `audioChannels`, format 13;
+	// 0 for the device's own). The device isn't the project's: the player's `--audio-device`
+	audioOutput: AudioOutputSettings,
 }
 
 /*
@@ -755,6 +759,10 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		locale = cloneAttr(doc, 0, "locale", ""),
 		icon = cloneAttr(doc, 0, "icon", ""),
 		grid = DEFAULT_GRID_SETTINGS,
+		audioOutput = {
+			frequency = max(attrInt(doc, 0, "audioFrequency", DEFAULT_AUDIO_OUTPUT.frequency), 0),
+			channels = clamp(attrInt(doc, 0, "audioChannels", DEFAULT_AUDIO_OUTPUT.channels), 0, 8),
+		},
 		scenes = make([dynamic]SceneRef),
 		assets = make([dynamic]AssetRef),
 		globals = make([dynamic]GlobalData),

@@ -43,6 +43,7 @@ Inputs:
 - windowSize: The window's size in pixels (ignored when `window.fullscreen` is set)
 - backend: The renderer to use (`RenderBackend`). `.Auto` lets SDL choose
 - window: Fullscreen, vsync and high-DPI settings (vsync is applied later on the web)
+- audio: The sound output's format and device (`Audio_OpenMixer` falls back when it won't open)
 
 Returns:
 - false (logged) if SDL, the window, the renderer, the audio device or SDL_ttf couldn't start
@@ -53,7 +54,7 @@ Example:
 	defer e.Application_Cleanup(&app)
 	e.Application_Run(&app, game)
 */
-Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2]f32, backend := RenderBackend.Auto, window := DEFAULT_WINDOW_SETTINGS) -> bool {
+Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2]f32, backend := RenderBackend.Auto, window := DEFAULT_WINDOW_SETTINGS, audio := DEFAULT_AUDIO_OUTPUT) -> bool {
 	if !sdl.Init({ .VIDEO, .AUDIO, .GAMEPAD, .EVENTS}) {
 		log.error("Error initializing SDL: ", sdl.GetError())
 		return false
@@ -78,7 +79,7 @@ Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2
 	// Emscripten's main loop exists (before that, Present blocks): see Player_StartWeb
 	if !PLATFORM_WEB do sdl.SetRenderVSync(app.renderer, window.vsync ? 1 : 0)
 
-	mixer, audioOk := Audio_Init()
+	mixer, audioOk := Audio_Init(audio)
 	if !audioOk do return false
 	app.mixer = mixer
 

@@ -1,7 +1,9 @@
 #+build !js
 package crossfire
 
+import "core:log"
 import "core:testing"
+import mix "vendor:sdl3/mixer"
 import sdl "vendor:sdl3"
 
 // Audio tests: buses, panning and distance math, sound nodes from scene files (no audio device)
@@ -134,4 +136,51 @@ audio_meters_measure_and_apply :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, AudioLevel_ToDecibels(0), AUDIO_SILENCE_DB)
 	testing.expect(t, abs(AudioLevel_ToDecibels(0.5) + 6.0206) < 0.001, "half is -6 dB")
+}
+
+@(test)
+audio_output_opens_with_the_asked_format_and_falls_back :: proc(t: ^testing.T) {
+	// SDL's dummy audio driver: a device that takes any format, on every machine
+	sdl.SetHint(sdl.HINT_AUDIO_DRIVER, "dummy")
+	if !sdl.InitSubSystem({.AUDIO}) || !mix.Init() {
+		log.warnf("No SDL audio here (%s): skipped", sdl.GetError())
+		return
+	}
+	defer { mix.Quit(); sdl.QuitSubSystem({.AUDIO}) }
+	got :: proc(mixer: ^mix.Mixer) -> sdl.AudioSpec {
+		spec: sdl.AudioSpec
+		_ = mix.GetMixerFormat(mixer, &spec)
+		return spec
+	}
+	// The asked rate is the mixer's (the channels too where the device takes them: SDL's dummy
+	// device mixes in stereo whatever it's asked)
+	mono := Audio_OpenMixer({frequency = 44100, channels = 1})
+	if testing.expect(t, mono != nil, "opens") {
+		spec := got(mono)
+		testing.expectf(t, spec.freq == 44100 && spec.channels >= 1 && spec.channels <= 2, "at 44.1 kHz: got %v", spec)
+		mix.DestroyMixer(mono)
+	}
+	// Stereo at 48 kHz without settings
+	stereo := Audio_OpenMixer()
+	if testing.expect(t, stereo != nil) {
+		spec := got(stereo)
+		testing.expect(t, spec.freq == 48000 && spec.channels == 2, "the default")
+		mix.DestroyMixer(stereo)
+	}
+	// A device that isn't there: the default instead (logged)
+	{
+		context.logger = log.nil_logger()
+		other := Audio_OpenMixer({frequency = 48000, channels = 2, device = "No Such Device"})
+		testing.expect(t, other != nil, "the default device")
+		if other != nil do mix.DestroyMixer(other)
+	}
+	testing.expect(t, len(Audio_PlaybackDevices(context.temp_allocator)) >= 1, "the dummy device is listed")
+	// A project's format, from project.xml (stereo 48 kHz without one)
+	project, _ := ParseProject(`<project formatVersion="13" name="A" audioFrequency="44100" audioChannels="1"/>`)
+	defer ProjectData_Destroy(&project)
+	testing.expect_value(t, project.audioOutput, AudioOutputSettings{frequency = 44100, channels = 1})
+	plain, _ := ParseProject(`<project formatVersion="13" name="B"/>`)
+	defer ProjectData_Destroy(&plain)
+	testing.expect_value(t, plain.audioOutput, DEFAULT_AUDIO_OUTPUT)
+	free_all(context.temp_allocator)
 }

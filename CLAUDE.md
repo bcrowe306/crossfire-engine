@@ -139,7 +139,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `audio_nodes.odin` | **Sound nodes and mix buses**: `AudioPlayer` (a sound: volume, pitch, pan, loop, autostart), `AudioPlayer2D` (panned and faded by its position from the listener: the camera, else the game area's middle; `Audio_Positional`), `MusicPlayer` (streams a Music asset; fades, seek, position); `AudioSettings`; buses (`Game.buses`, Master first: `Audio_SetBuses` from project.xml, `Audio_AddBus`, `Audio_SetBusVolume` / `Pan` / `Mute`), `Audio_Output` (node × bus × Master, applied per track every frame) |
 | `audio_meter.odin` | **Level meters** on SDL3_mixer's mix callbacks: `AudioMeter` (atomic peaks), `AudioMeter_AttachGroup` (a bus's group) / `AttachMixer` (the final stage: applies Master's gains, then meters), `Audio_GetBusLevel`, `AudioLevel_ToDecibels`; its own C-convention declarations of the two callback setters |
 | `audio_test.odin` | Tests: bus output (volume, pan laws, mute, unknown bus), positional volume and pan, sound nodes and buses from scene files (no device needed) |
-| `audio.odin` | SDL3_mixer setup (`Audio_Init`: no device means silence, not an error), loading, and `Game_PlaySound(game, path)` (paths relative to `game.projectDir`, cached). The same on desktop and web |
+| `audio.odin` | SDL3_mixer setup (`Audio_Init`: no device means silence, not an error; `Audio_OpenMixer`, `AudioOutputSettings`, `Audio_PlaybackDevices`), loading, and `Game_PlaySound(game, path)` (paths relative to `game.projectDir`, cached). The same on desktop and web |
 | `ldtk.odin` | **LDtk projects** (ldtk.io): `LDtk_Load` / `LDtk_Parse` into plain data (`LDtkProject`: worlds, levels, layers top-most first, tiles, IntGrid, entities and their `LDtkValue` fields, tilesets, layer/entity/enum definitions) in the project's own arena (`LDtk_Destroy`); lookups (`LDtk_FindLevel`, `LDtk_FindLayer`, `LDtk_IntGridAt`, `LDtk_FieldValue`), `LDtk_ValueText`, `LDtk_Dependencies` |
 | `ldtk_nodes.odin` | **LDtkLevel nodes**: `LDtkLevelSettings` (scene files), `LDtkLevelNode` / `LDtkLevelView` / `LDtkTileLayer` (one batched RenderGeometry per layer) / `LDtkEntityNode`; entities as mapped components, `LDtk_RegisterEntity` spawners or rectangles, scripts named like them with their fields; merged IntGrid collision; `Game_LoadLDtk` / `Game_ForgetLDtk`, `LDtk_FindEntityNodes`, `LDtk_EntityOf`, `LDtk_IntGridAtPosition` |
 | `ldtk_test.odin` | Tests: a hand-written project (one level in the file, one apart): every field kind, IntGrid, tiles' flips, definitions, paths outliving the frame; built: layer order, merged collision, the script's fields from LDtk, allLevels in a linear world, scene files |
@@ -380,6 +380,17 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
 - An action's strength is the strongest binding: 1 for keys and buttons, a stick's travel past
   the deadzone rescaled to 0..1. The wheel's directions are buttons pressed for one frame.
 - Losing window focus releases every key and mouse button.
+
+**Opening the sound device** (audio.odin): never with the device's own format by default.
+`CreateMixerDevice(..., nil)` failed on a MacBook ("Unsupported audio channels": outputs whose
+channel layout SDL won't open natively, like multichannel interfaces, some Bluetooth and HDMI
+outputs). `Audio_OpenMixer` asks for the project's format (`AudioOutputSettings`, project.xml's
+`audioFrequency` / `audioChannels`; stereo 48 kHz F32 by default) and SDL converts; if a device
+refuses, it tries stereo 48 / 44.1 kHz, mono, 16-bit, the device's own format, then the default
+device, then every other device, and logs what it got ("Audio: <device>, 48000 Hz, 2 channels")
+and what failed. The device is the machine's choice: the player's `--audio-device <name>`
+(`--list-audio-devices` prints them), the editor's Settings for Play. SDL's dummy device mixes
+in stereo whatever's asked (audio_test.odin checks the rate).
 
 **Sound** (audio_nodes.odin; its doc comment has the details):
 - Each player owns one SDL3_mixer track (made on first use, so no device means no track and
