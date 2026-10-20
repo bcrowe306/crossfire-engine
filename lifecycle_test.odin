@@ -139,8 +139,9 @@ removing_nodes_exits_and_frees_them_once :: proc(t: ^testing.T) {
 	Scene_RemoveNode(scene, parent.id)
 	Scene_RemoveNode(scene, EntityId{})
 	Scene_ProcessQueues(scene)
-	// Exits parents first; destroys children first, each while its parent is alive
-	expectLog(t, &log, {"exit C", "exit G", "destroy G under C", "destroy C", "exit P", "destroy P"})
+	// One batch: every exit first (parents first, all nodes alive), then the frees, children
+	// first, each while its parent is alive
+	expectLog(t, &log, {"exit C", "exit G", "exit P", "destroy G under C", "destroy C", "destroy P"})
 	testing.expect(t, Scene_GetNode(scene, parentId) == nil, "gone")
 	testing.expect_value(t, len(scene.nodes), 1)
 	testing.expect(t, scene.nodes[0] == other, "the other node stays")
@@ -170,7 +171,7 @@ removing_nodes_exits_and_frees_them_once :: proc(t: ^testing.T) {
 	}, second)
 	Scene_RemoveNode(scene, first.id)
 	Scene_ProcessQueues(scene)
-	expectLog(t, &log, {"exit F", "destroy F", "exit S", "destroy S"})
+	expectLog(t, &log, {"exit F", "exit S", "destroy F", "destroy S"})
 	free_all(context.temp_allocator)
 }
 

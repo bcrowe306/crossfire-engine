@@ -1,8 +1,8 @@
 package engine
 
 import "core:log"
-import "core:crypto"
 import "core:encoding/uuid"
+import "core:math/rand"
 
 EventData :: union {
 	int,
@@ -15,6 +15,18 @@ EventData :: union {
 }
 
 EntityId :: uuid.Identifier
+
+/*
+A new random id (a version 4 UUID) from Odin's fast per-thread generator. Ids needn't be
+secret, and the OS's cryptographic source (what `uuid.generate_v4` insists on) cost a system call
+per node and per listener.
+*/
+NewEntityId :: proc() -> EntityId {
+	id := transmute(EntityId)rand.uint128()
+	id[6] = (id[6] & 0x0f) | 0x40 // version 4
+	id[8] = (id[8] & 0x3f) | 0x80 // RFC 4122 variant
+	return id
+}
 
 ListenerHandle :: EntityId
 
@@ -52,8 +64,7 @@ EventSubject_Init :: proc(subject: ^EventSubject, allocator := context.allocator
 }
 
 Event_Subscribe :: proc(subject: ^EventSubject, callback: proc(event: ^EventSubject, source: rawptr, data: EventData, userData: rawptr), userData: rawptr) -> ListenerHandle {
-	context.random_generator = crypto.random_generator()
-	handle := uuid.generate_v4()
+	handle := NewEntityId()
 	listener := EventListener{
 		id = handle,
 		callback = callback,

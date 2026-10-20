@@ -1,9 +1,7 @@
 package engine
 
-import "core:encoding/uuid"
 import "core:log"
 import "core:strings"
-import "core:crypto"
 import "core:mem"
 import sdl "vendor:sdl3"
 
@@ -19,6 +17,8 @@ Scene :: struct {
 	// Nodes made with `CreateNode(..., addToScene = false)` and not added yet: the scene still
 	// owns them, so destroying the scene frees them
 	detached: [dynamic]^Node,
+	// Every node the scene owns (in it, queued, detached) by id: Scene_GetNode and removals
+	index: map[EntityId]^Node,
 	arena: MemoryArena,
 	// Optional camera, nil by default. When set, every layer not in `screenLayers` is drawn
 	// through it, and its pans and bounds are applied after each update. Create with `Scene_CreateCamera`
@@ -54,6 +54,7 @@ Scene_Init :: proc(scene: ^Scene) {
 	scene.update = Scene_Update
 	scene.draw = Scene_Draw
 	scene.processQueues = Scene_ProcessQueues
+	scene.index = make(map[EntityId]^Node)
 	EventSubject_Init(&scene.onEnter, Scene_GetAllocator(scene))
 	EventSubject_Init(&scene.onExit, Scene_GetAllocator(scene))
 }
@@ -127,6 +128,7 @@ Scene_Destroy :: proc(scene: ^Scene) {
 	delete(scene.removeQueue)
 	delete(scene.detached)
 	delete(scene.nodes)
+	delete(scene.index)
 	// Destroy, not free_all: free_all keeps the first block, which leaked once the scene was freed
 	MemoryArena_Destroy(&scene.arena)
 }
@@ -155,11 +157,11 @@ Example:
 CreateNode :: proc(scene: ^Scene, $T: typeid, addToScene: bool = true) -> ^T {
 	newObject := allocateNode(T)
 	node := cast(^Node)newObject
-	context.random_generator = crypto.random_generator()
-	node.id = uuid.generate_v4()
+	node.id = NewEntityId()
 	node.type = T
 	node.scene = scene
 	Node_Init(node, Node_GetAllocator(node))
+	scene.index[node.id] = node
 	if addToScene {
 		Scene_AddNode(scene, node)
 	} else {
@@ -182,8 +184,9 @@ Scene_AddNode :: proc(scene: ^Scene, node: ^Node) {
 		log.errorf("Scene_AddNode: the node belongs to another scene")
 		return
 	}
-	if node.inScene || listHas(scene.addQueue[:], node) do return
-	removeFromList(&scene.detached, node)
+	if node.inScene || node.queued do return
+	if len(scene.detached) > 0 do removeFromList(&scene.detached, node)
+	node.queued = true
 	append(&scene.addQueue, node)
 }
 
@@ -216,22 +219,73 @@ added). `Scene_Update` does it first; editors and tests call it to apply changes
 updating.
 */
 Scene_ProcessQueues :: proc(scene: ^Scene) {
-	// By index: removing a node can queue more removals (a collision exit's handler)
-	for i := 0; i < len(scene.removeQueue); i += 1 {
-		nodeId := scene.removeQueue[i]
-		node := findQueuedOrLive(scene, nodeId)
-		if node != nil do removeSubtree(scene, node)
-	}
-	clear(&scene.removeQueue)
+	if len(scene.removeQueue) > 0 do processRemovals(scene)
 
-	// By index too: an onEnter handler can make more nodes, which join in the same pass
+	// By index: an onEnter handler can make more nodes, which join in the same pass
 	for i := 0; i < len(scene.addQueue); i += 1 {
 		node := scene.addQueue[i]
+		node.queued = false
 		node.inScene = true
 		append(&scene.nodes, node)
 		node.onEnter->notify(node, nil)
 	}
 	clear(&scene.addQueue)
+}
+
+/*
+The frame's removals, as one batch: each removed subtree gets onExit (parents first) while every
+node is still alive; then the scene's lists drop them in one pass each (the rest keep their
+order); then they're freed, children before parents. Cost O(nodes + removed), not O(nodes x
+removed): removing 500 of 5500 nodes took 17 ms one by one.
+*/
+@(private="file")
+processRemovals :: proc(scene: ^Scene) {
+	pending := make(map[^Node]bool, 2 * len(scene.removeQueue), context.temp_allocator)
+	roots := make([dynamic]^Node, 0, len(scene.removeQueue), context.temp_allocator)
+	exit :: proc(node: ^Node, pending: ^map[^Node]bool) {
+		pending[node] = true
+		if node.inScene do node.onExit->notify(node, nil)
+		node.inScene = false
+		node.queued = false
+		for child in slice_clone_temp(node.children[:]) do if child not_in pending do exit(child, pending)
+	}
+	// By index: an exit handler can queue more removals, which join this batch
+	for i := 0; i < len(scene.removeQueue); i += 1 {
+		node := scene.index[scene.removeQueue[i]] or_else nil
+		if node == nil || node in pending do continue
+		if node.parent != nil && node.parent not_in pending {
+			removeChild(node.parent, node)
+			node.parent = nil
+		}
+		append(&roots, node)
+		exit(node, &pending)
+	}
+	clear(&scene.removeQueue)
+
+	keep :: proc(list: ^[dynamic]^Node, pending: ^map[^Node]bool) {
+		kept := 0
+		for node in list^ {
+			if node in pending do continue
+			list[kept] = node
+			kept += 1
+		}
+		resize(list, kept)
+	}
+	keep(&scene.nodes, &pending)
+	keep(&scene.addQueue, &pending)
+	keep(&scene.detached, &pending)
+	for node in pending {
+		delete_key(&scene.index, node.id)
+		// The scene's camera went with it: draw without one rather than through freed memory
+		if scene.camera != nil && node == cast(^Node)scene.camera do scene.camera = nil
+	}
+
+	// Freed children first: a parent's arena holds its children list
+	destroyTree :: proc(node: ^Node) {
+		for child in node.children do destroyTree(child)
+		Node_Destroy(node)
+	}
+	for root in roots do destroyTree(root)
 }
 
 Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
@@ -287,13 +341,11 @@ Inputs:
 Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D, screenLayersUseView := false, positionOnlyScale: f32 = 1) {
 	defer SetDrawState(TRANSFORM2D_IDENTITY)
 
-	items := drawOrder(scene)
-	for layer in RenderLayer {
+	layers := drawOrder(scene)
+	for &items, layer in layers {
 		base := layer in scene.screenLayers && !screenLayersUseView ? TRANSFORM2D_IDENTITY : view
 		for item in items {
 			node := item.node
-			scriptDraw := node.script.info != nil ? node.script.info.draw : nil
-			if (node.draw == nil && scriptDraw == nil) || node.layer != layer do continue
 			transform := Transform2D_Multiply(base, item.world)
 			if node.transformMode == .Position_Only {
 				transform = {x = {positionOnlyScale, 0}, y = {0, positionOnlyScale}, origin = transform.origin}
@@ -301,7 +353,7 @@ Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transfo
 			SetDrawState(transform, item.tint)
 			if node.draw != nil do node.draw(node, renderer)
 			// A script draws after its node, in the same local space
-			if scriptDraw != nil do scriptDraw(node.script.data, renderer)
+			if item.scriptDraw != nil do item.scriptDraw(node.script.data, renderer)
 		}
 	}
 	if scene.physics != nil && scene.physics.settings.debugDraw do Physics_DrawDebug(scene, renderer, view)
@@ -317,44 +369,44 @@ Node_IsVisibleInTree :: proc(node: ^Node) -> bool {
 	return true
 }
 
-// A node to draw, with its world transform and inherited tint
+// A node to draw, with its world transform, inherited tint and its script's draw
 @(private="file")
 DrawItem :: struct {
 	node: ^Node,
 	world: Transform2D,
 	tint: sdl.Color,
+	scriptDraw: proc(self: rawptr, renderer: ^sdl.Renderer),
 }
 
-// Visible nodes in tree order, with world transforms computed top-down (temp allocated)
+/*
+The nodes to draw, by layer, each layer in tree order, with world transforms and tints computed
+top-down (temp allocated). One walk of the tree; nodes that draw nothing (no draw procedure, no
+script draw) aren't listed, though their children are.
+*/
 @(private="file")
-drawOrder :: proc(scene: ^Scene) -> []DrawItem {
-	items := make([dynamic]DrawItem, 0, len(scene.nodes), context.temp_allocator)
-	visit :: proc(items: ^[dynamic]DrawItem, node: ^Node, parentWorld: Transform2D, parentTint: sdl.Color) {
+drawOrder :: proc(scene: ^Scene) -> [RenderLayer][dynamic]DrawItem {
+	layers: [RenderLayer][dynamic]DrawItem
+	for &items in layers do items = make([dynamic]DrawItem, 0, 64, context.temp_allocator)
+	visit :: proc(layers: ^[RenderLayer][dynamic]DrawItem, node: ^Node, parentWorld: Transform2D, parentTint: sdl.Color) {
 		if !node.inScene || !node.visible do return
 		// Smoothed for dynamic bodies (physics_debug.odin)
 		world := Transform2D_Multiply(parentWorld, Node_GetRenderLocalTransform(node))
 		tint := multiplyColor(parentTint, node.tint)
-		append(items, DrawItem{node, world, tint})
-		for child in node.children do visit(items, child, world, tint)
+		scriptDraw := node.script.info != nil ? node.script.info.draw : nil
+		if node.draw != nil || scriptDraw != nil {
+			append(&layers[node.layer], DrawItem{node, world, tint, scriptDraw})
+		}
+		for child in node.children do visit(layers, child, world, tint)
 	}
 	for node in scene.nodes {
-		if node.parent == nil do visit(&items, node, TRANSFORM2D_IDENTITY, {255, 255, 255, 255})
+		if node.parent == nil do visit(&layers, node, TRANSFORM2D_IDENTITY, {255, 255, 255, 255})
 	}
-	return items[:]
+	return layers
 }
 
 @(private="file")
 findQueuedOrLive :: proc(scene: ^Scene, id: EntityId) -> ^Node {
-	for node in scene.nodes do if node.id == id do return node
-	for node in scene.addQueue do if node.id == id do return node
-	for node in scene.detached do if node.id == id do return node
-	return nil
-}
-
-@(private="file")
-listHas :: proc(list: []^Node, node: ^Node) -> bool {
-	for n in list do if n == node do return true
-	return false
+	return scene.index[id] or_else nil
 }
 
 // A temp copy of a node list, to walk while handlers change the original
@@ -371,34 +423,6 @@ notifyExit :: proc(node: ^Node) {
 	if node.inScene do node.onExit->notify(node, nil)
 	node.inScene = false
 	for child in slice_clone_temp(node.children[:]) do notifyExit(child)
-}
-
-// Removes a node and its descendants from the scene and frees them
-@(private="file")
-removeSubtree :: proc(scene: ^Scene, root: ^Node) {
-	if root.parent != nil {
-		removeChild(root.parent, root)
-		root.parent = nil
-	}
-
-	subtree := make([dynamic]^Node, context.temp_allocator)
-	collect :: proc(list: ^[dynamic]^Node, node: ^Node) {
-		append(list, node)
-		for child in node.children do collect(list, child)
-	}
-	collect(&subtree, root)
-
-	for node in subtree {
-		if node.inScene do node.onExit->notify(node, nil)
-		node.inScene = false
-		removeFromList(&scene.nodes, node)
-		removeFromList(&scene.addQueue, node)
-		removeFromList(&scene.detached, node)
-		// The scene's camera went with it: draw without one rather than through freed memory
-		if scene.camera != nil && node == cast(^Node)scene.camera do scene.camera = nil
-	}
-	// Children first: a parent's arena holds its children list
-	#reverse for node in subtree do Node_Destroy(node)
 }
 
 @(private="file")
@@ -422,20 +446,16 @@ Returns:
 - The first match in tree order (nodes waiting to be added included), or nil
 */
 Scene_FindNode :: proc(scene: ^Scene, path: string) -> ^Node {
-	first, _, rest := strings.partition(path, "/")
-	search :: proc(nodes: []^Node, first, rest, path: string) -> ^Node {
-		for node in nodes {
-			if rest == "" && strings.index_byte(path, '/') < 0 {
-				// A bare name matches anywhere in the tree
-				if node.name == first do return node
-			} else if node.parent == nil && node.name == first {
-				return Node_FindChild(node, rest)
-			}
-		}
+	lists := [2][]^Node{scene.nodes[:], scene.addQueue[:]}
+	// A bare name matches anywhere in the tree
+	if strings.index_byte(path, '/') < 0 {
+		for list in lists do for node in list do if node.name == path do return node
 		return nil
 	}
-	if found := search(scene.nodes[:], first, rest, path); found != nil do return found
-	return search(scene.addQueue[:], first, rest, path)
+	// A path starts at a top-level node
+	first, _, rest := strings.partition(path, "/")
+	for list in lists do for node in list do if node.parent == nil && node.name == first do return Node_FindChild(node, rest)
+	return nil
 }
 
 /*

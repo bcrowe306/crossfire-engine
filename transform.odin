@@ -36,6 +36,8 @@ Returns:
 - The transform
 */
 Transform2D_Make :: proc(position: [2]f32, rotation: f32, scale: [2]f32) -> Transform2D {
+	// Most nodes aren't rotated: no sin / cos for them (draw order makes one per node per frame)
+	if rotation == 0 do return {x = {scale.x, 0}, y = {0, scale.y}, origin = position}
 	r := math.to_radians(rotation)
 	c, s := math.cos(r), math.sin(r)
 	return {

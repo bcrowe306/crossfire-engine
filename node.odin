@@ -1,5 +1,6 @@
 package engine
 
+import "base:runtime"
 import "core:log"
 import "core:mem"
 import sdl "vendor:sdl3"
@@ -17,7 +18,15 @@ TransformMode :: enum {
 
 // Initial (and minimum) size of each block of a node's arena. Small, because most nodes only
 // hold a few event listener lists; the arena adds blocks if a node needs more
-NODE_ARENA_BLOCK_SIZE :: 16 * mem.Kilobyte
+NODE_ARENA_BLOCK_SIZE :: 4 * mem.Kilobyte
+
+/*
+A node's memory: an arena of heap blocks (Odin's `runtime.Arena`) holding the node itself and
+whatever it allocates with `Node_GetAllocator`, freed in one step with the node. Heap blocks, not
+virtual memory: making and freeing a node then costs no system calls (scenes, games and LDtk
+projects, which are few and large, keep `MemoryArena`).
+*/
+NodeArena :: runtime.Arena
 
 /*
 Base type of everything in a scene. Node types embed it as their first field:
@@ -72,13 +81,15 @@ Node :: struct {
 	children: [dynamic]^Node,
 	// Set while the node is part of its scene (after it was added, until it's removed)
 	inScene: bool,
+	// Set while it waits to be added (Scene_AddNode until the next Scene_ProcessQueues)
+	queued: bool,
 	// The script attached to the node, if any (script.odin)
 	script: NodeScript,
 
 	onEnter: EventSubject,
 	onExit: EventSubject,
 	// Holds this node and everything allocated with Node_GetAllocator
-	arena: MemoryArena,
+	arena: NodeArena,
 }
 
 /*
@@ -116,7 +127,7 @@ Example:
 	e.EventSubject_Init(&enemy.onHit, allocator)
 */
 Node_GetAllocator :: proc(node: ^Node) -> mem.Allocator {
-	return MemoryArena_Allocator(&node.arena)
+	return runtime.Allocator{procedure = runtime.arena_allocator_proc, data = &node.arena}
 }
 
 /*
@@ -137,17 +148,26 @@ Node_Destroy :: proc(node: ^Node) {
 	// The arena lives inside its own memory, so destroy a copy: freeing the blocks would
 	// otherwise also free the Arena struct while arena_destroy is still using it
 	arena := node.arena
-	MemoryArena_Destroy(&arena)
+	runtime.arena_destroy(&arena)
 }
 
 // Allocates a node of type T inside a new arena that the node owns
 @(private)
 allocateNode :: proc($T: typeid) -> ^T {
-	// T embeds Node as its first field, so the arena is at the same offset in T as in Node
-	object, ok := MemoryArena_BootstrapNew(T, offset_of(Node, arena), NODE_ARENA_BLOCK_SIZE)
-	if !ok {
+	// The arena's blocks come from the heap whatever the caller's allocator is (a temp allocator
+	// would free a live node at the end of the frame)
+	arena: runtime.Arena
+	if runtime.arena_init(&arena, NODE_ARENA_BLOCK_SIZE, runtime.heap_allocator()) != nil {
 		log.panicf("Failed to allocate node %v", typeid_of(T))
 	}
+	object, err := runtime.new(T, runtime.Allocator{procedure = runtime.arena_allocator_proc, data = &arena})
+	if err != nil {
+		runtime.arena_destroy(&arena)
+		log.panicf("Failed to allocate node %v", typeid_of(T))
+	}
+	// Then the arena moves into the node (T embeds Node first, and the arena has no pointers to
+	// itself), so the node owns the memory it lives in
+	(cast(^Node)object).arena = arena
 	return object
 }
 
