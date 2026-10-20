@@ -1,4 +1,4 @@
-package engine
+package crossfire
 
 /*
 The layer a node draws on (`Node.layer`). A scene draws Layer1 first and Layer8 last (on top);

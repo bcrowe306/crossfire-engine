@@ -1,5 +1,5 @@
 #+build js
-package engine
+package crossfire
 
 import "base:runtime"
 import "core:c"

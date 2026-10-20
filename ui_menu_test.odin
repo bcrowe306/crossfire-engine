@@ -1,5 +1,5 @@
 #+build !js
-package engine
+package crossfire
 
 import "core:testing"
 import sdl "vendor:sdl3"

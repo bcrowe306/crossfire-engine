@@ -1,5 +1,5 @@
 #+build linux, darwin, windows
-package engine
+package crossfire
 
 /*
 Static SDL: when tools/build_sdl_static.sh has built SDL3, SDL3_image, SDL3_ttf and SDL3_mixer for

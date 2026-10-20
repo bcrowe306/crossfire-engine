@@ -2,7 +2,7 @@
 
 # Crossfire Engine
 
-[![Build](https://github.com/bcrowe306/odin_sdl_engine/actions/workflows/build.yml/badge.svg)](https://github.com/bcrowe306/odin_sdl_engine/actions/workflows/build.yml)
+[![Build](https://github.com/bcrowe306/crossfire-engine/actions/workflows/build.yml/badge.svg)](https://github.com/bcrowe306/crossfire-engine/actions/workflows/build.yml)
 
 Crossfire (this repository: `odin_sdl_engine`) is a 2D game engine in [Odin](https://odin-lang.org) on SDL3: scenes of nodes with transforms, sprites
 and animation, text and menus, a camera, Box2D physics (bodies, areas, ray casts, joints, a
@@ -14,7 +14,7 @@ z-index and y-sort, blend modes, render targets, groups, localization (CSV table
 and an overlay, physics queries and one-way platforms, levels made in the
 [LDtk](https://ldtk.io) level editor (tile layers, entities that become components or scripted
 nodes with their LDtk fields, IntGrid collision), scripts in Odin, global game state with JSON saves, data resources, and a player
-that runs projects made with [odin_sdl_editor](https://github.com/bcrowe306/odin_sdl_editor). It
+that runs projects made with [odin_sdl_editor](https://github.com/bcrowe306/crossfire-editor). It
 builds for Linux, Windows, macOS and the web (WebAssembly).
 
 ## Building
@@ -25,7 +25,7 @@ so games are a single executable; without it, the system's SDL3 libraries are us
 Odin ships them).
 
 ```bash
-git clone --recursive https://github.com/bcrowe306/odin_sdl_engine
+git clone --recursive https://github.com/bcrowe306/crossfire-engine odin_sdl_engine
 cd odin_sdl_engine
 tools/build_box2d.sh                         # once: Box2D (third_party/box2d) into box2d/lib
 tools/build_sdl_static.sh                    # once (Linux, macOS; needs CMake): SDL linked statically
@@ -40,7 +40,7 @@ Use it from a game as a package: `import e "engine:."` with `-collection:engine=
 
 Pushing a version tag (`v0.2.0`, or `v0.2.0-dev.1` for a pre-release) builds and tests the engine on
 Linux x86_64, Windows x86_64 and macOS arm64 (`.github/workflows/build.yml`) and, when all pass,
-publishes the player for each as a [release](https://github.com/bcrowe306/odin_sdl_engine/releases).
+publishes the player for each as a [release](https://github.com/bcrowe306/crossfire-engine/releases).
 `tools/ci/` holds the scripts the workflow runs (and the editor's reuses).
 
 ## Documentation

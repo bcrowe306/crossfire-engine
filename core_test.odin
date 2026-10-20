@@ -1,5 +1,5 @@
 #+build !js
-package engine
+package crossfire
 
 import "core:log"
 import "core:sync"

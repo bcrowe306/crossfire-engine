@@ -1,5 +1,5 @@
 #+build !js
-package engine
+package crossfire
 
 import "core:testing"
 import b2 "box2d"

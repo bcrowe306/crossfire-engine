@@ -1,4 +1,4 @@
-package engine
+package crossfire
 
 import "core:log"
 import "core:encoding/uuid"

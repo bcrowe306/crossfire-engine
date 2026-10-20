@@ -1,4 +1,4 @@
-package engine
+package crossfire
 
 import "core:fmt"
 import sdl "vendor:sdl3"

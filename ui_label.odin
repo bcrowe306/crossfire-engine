@@ -1,4 +1,4 @@
-package engine
+package crossfire
 
 import "core:strings"
 import sdl "vendor:sdl3"

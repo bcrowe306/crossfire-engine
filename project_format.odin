@@ -1,4 +1,4 @@
-package engine
+package crossfire
 
 import "core:encoding/xml"
 import "core:fmt"

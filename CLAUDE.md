@@ -1,12 +1,15 @@
 # odin_sdl_engine: the Crossfire Engine
 
-The product name is **Crossfire Engine** (its editor: **Crossfire Editor**, the odin_sdl_editor
-repository). Use the names in anything users see (docs, release titles and archives, the
-player's window); the repository, the Odin package (`engine`) and file names keep `odin_sdl`.
+The product name is **Crossfire Engine** (its editor: **Crossfire Editor**). The repositories
+are `bcrowe306/crossfire-engine` and `bcrowe306/crossfire-editor` (renamed 2026-10-20 from
+`odin_sdl_engine` / `odin_sdl_editor`; GitHub redirects the old URLs); the Odin package is
+`crossfire`. Local checkouts keep the folder names `odin_sdl_engine/` and `odin_sdl_editor/`
+(the editor's `ENGINE_DIR` default and CI's checkout paths), and the collection games and the
+editor import it through is still named `engine`.
 
 A 2D game engine in Odin on SDL3 (renderer, SDL_image, SDL_ttf, SDL_mixer). It is a library
-package, `package engine`, used by games (the `asteroids` sample in the workspace) and by the
-**odin_sdl_editor**. Consumers import it as `e`:
+package, `package crossfire`, used by games (the `asteroids` sample in the workspace) and by the
+**Crossfire Editor**. Consumers import it as `e`:
 
 ```odin
 import e "odin_sdl_engine"   // or "../odin_sdl_engine" from a sibling package
@@ -545,7 +548,7 @@ docs/all -all-packages -doc-format` (docs/all imports the engine), then the gene
 `docs/config.json` (the `engine` collection; `url_prefix` /odin_sdl_engine for GitHub Pages).
 `.github/workflows/docs.yml` runs it on pushes to main and deploys to GitHub Pages (the
 repository's Pages source is "GitHub Actions"; the generator is pinned by commit). Published at
-https://bcrowe306.github.io/odin_sdl_engine/engine/ (Pages enabled 2026-10-20). The engine has no LICENSE file: config.json's license
+https://bcrowe306.github.io/crossfire-engine/engine/ (Pages enabled 2026-10-20). The engine has no LICENSE file: config.json's license
 says "See the repository" until it has one.
 
 ## Web build (js_wasm32 + Emscripten)

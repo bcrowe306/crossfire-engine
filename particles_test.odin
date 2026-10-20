@@ -1,5 +1,5 @@
 #+build !js
-package engine
+package crossfire
 
 import "core:strings"
 import "core:testing"

@@ -1,4 +1,4 @@
-package engine
+package crossfire
 
 import "core:log"
 import mix "vendor:sdl3/mixer"

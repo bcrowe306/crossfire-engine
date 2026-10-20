@@ -73,4 +73,4 @@ Memory: each node lives in its own arena, freed when it's removed (`Node_GetAllo
 scene's and the game's shared data live in their arenas (`Scene_GetAllocator`,
 `Game_GetAllocator`); `context.temp_allocator` is freed every frame.
 */
-package engine
+package crossfire
