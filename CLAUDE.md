@@ -80,6 +80,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `text_primitives.odin` | `DrawText`, `DrawTextCentered`, `DrawTextWrapped`, `MeasureText`; positioned and scaled by the draw transform, never rotated |
 | `camera.odin` | `Camera2D` node (looks at its world position; offset, zoom, bounds), follow modes, timed pans |
 | `easing.odin` | `Ease(EaseType, t)`, 18 curves |
+| `render_target.odin` | **Render targets**: `RenderTarget_Create` / `Destroy`, `RenderTarget_Begin` / `End` (draw into its texture; the game's logical presentation is off meanwhile and restored after), `Scene_DrawToTarget` (a scene through its camera fitted to the target, or a given view) |
 | `tween.odin` | **Tweens**: `Tween_Create(owner)` / `Scene_CreateTween`, steps `Tween_To` / `Tween_FromTo` (f32, [2]f32, sdl.Color), `Tween_Delay`, `Tween_Call`, `Tween_Parallel`, `Tween_SetLoops`, pause, kill; updated by `Scene_Update` after the nodes |
 | `animation.odin` | `Animation` base, `SpriteSheetAnimation`, `FrameAnimation` |
 | `animation_player.odin` | Plays animations by name or index, with events |

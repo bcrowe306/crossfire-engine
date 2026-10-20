@@ -178,3 +178,53 @@ the_application_swaps_games :: proc(t: ^testing.T) {
 	app.game = nil
 	sdl.DestroyRenderer(app.renderer)
 }
+
+@(test)
+scenes_draw_into_render_targets :: proc(t: ^testing.T) {
+	surface := sdl.CreateSurface(200, 100, .RGBA32)
+	defer sdl.DestroySurface(surface)
+	renderer := sdl.CreateSoftwareRenderer(surface)
+	defer sdl.DestroyRenderer(renderer)
+	game: Game
+	game.renderer = renderer
+	game.size = {100, 50}
+	Game_ApplyScaling(&game)
+	scene := new(Scene)
+	Scene_Init(scene)
+	scene.game = &game
+	defer { Scene_Destroy(scene); free(scene) }
+	// A red square in the game's top-left quarter (0..50, 0..25)
+	square := CreateNode(scene, Node)
+	square.draw = proc(_: ^Node, renderer: ^sdl.Renderer) {
+		rect := sdl.FRect{0, 0, 50, 25}
+		DrawRectangle(renderer, &rect, {255, 0, 0, 255})
+	}
+	Scene_ProcessQueues(scene)
+
+	target := RenderTarget_Create(&game, {50, 26})
+	defer RenderTarget_Destroy(target)
+	testing.expect(t, target != nil && target.size == {50, 26}, "made")
+	if target == nil do return
+	Scene_DrawToTarget(scene, target)
+	// Read the target: the game view fitted to 50 x 26, so the square fills its top-left quarter
+	RenderTarget_Begin(renderer, target)
+	pixels := sdl.RenderReadPixels(renderer, nil)
+	RenderTarget_End(renderer, target)
+	defer sdl.DestroySurface(pixels)
+	at :: proc(s: ^sdl.Surface, x, y: int) -> [4]u8 {
+		converted := sdl.ConvertSurface(s, .RGBA32)
+		defer sdl.DestroySurface(converted)
+		row := ([^]u8)(converted.pixels)[y * int(converted.pitch):]
+		return {row[x * 4], row[x * 4 + 1], row[x * 4 + 2], row[x * 4 + 3]}
+	}
+	testing.expect_value(t, at(pixels, 5, 5), [4]u8{255, 0, 0, 255})
+	testing.expect_value(t, at(pixels, 40, 20), [4]u8{0, 0, 0, 0}) // cleared, transparent
+	// Drawing goes back to the screen with the game's logical size
+	current := sdl.GetRenderTarget(renderer).? or_else nil
+	testing.expect(t, current == nil, "back on the screen")
+	w, h: i32
+	mode: sdl.RendererLogicalPresentation
+	sdl.GetRenderLogicalPresentation(renderer, &w, &h, &mode)
+	testing.expect(t, w == 100 && h == 50 && mode == .LETTERBOX, "logical presentation restored")
+	free_all(context.temp_allocator)
+}
