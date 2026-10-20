@@ -1,3 +1,12 @@
+package engine
+
+import "core:encoding/xml"
+import "core:fmt"
+import "core:reflect"
+import "core:strconv"
+import "core:strings"
+import sdl "vendor:sdl3"
+
 /*
 Project and scene files: the XML format the editor saves and the engine loads.
 
@@ -101,7 +110,8 @@ WhenPaused, Always, Disabled), `blendMode` (a `BlendMode`: Blend, Add, Multiply,
 None), `zIndex` (draw order in the layer), `ySort` (children drawn by their y), `groups` (names,
 separated by commas: `groups="enemies,flying"`). Kind-specific attributes are listed on `SceneNodeData`.
 Missing attributes use the defaults in `DEFAULT_SCENE_NODE`. Paths are relative to the project
-folder and use `/`. Colors are `#rrggbb` or `#rrggbbaa`.
+folder and use `/`. Colors are `#rrggbb` or `#rrggbbaa`. Booleans are `true` or `1`; any other
+value is false. A number or color that can't be read keeps the default.
 
 Current limits:
 - A scene's Camera applies to every node in it, including Labels and Menus (scene files can't
@@ -145,15 +155,6 @@ Version history:
 Parsing (this file) only turns XML into plain data, without SDL, so it can be tested and used
 by the editor. `project_loader.odin` builds engine scenes and nodes from that data.
 */
-
-package engine
-
-import "core:encoding/xml"
-import "core:fmt"
-import "core:reflect"
-import "core:strconv"
-import "core:strings"
-import sdl "vendor:sdl3"
 
 // Version written by the editor. This loader also reads older versions
 PROJECT_FORMAT_VERSION :: 13
@@ -236,27 +237,36 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 }
 
 /*
-A button in a Menu node. `action` is `scene:<SceneName>` to switch scene, or `quit`.
+A button in a Menu node: `<item label="Play" action="scene:PlayScene"/>`.
 */
 MenuItemData :: struct {
+	// The button's text
 	label: string,
+	// `scene:<SceneName>` switches to that scene, `quit` quits the game
 	action: string,
 }
 
 /*
-One node from a scene file. Fields that don't apply to a node's kind are ignored.
+One node from a scene file. Fields that don't apply to a node's kind are ignored. Each field is
+read from the attribute of the same name unless its comment names another one; a missing (or
+unreadable) attribute keeps the value in `DEFAULT_SCENE_NODE`.
 */
 SceneNodeData :: struct {
+	// `kind`: what node it becomes (unknown or missing: Node2D)
 	kind: SceneNodeKind,
+	// `name` (missing: the kind's name, "Sprite")
 	name: string,
 	// Index of the parent node, -1 for top-level nodes. Nodes are stored depth-first:
 	// every node's children follow it directly
 	parent: int,
-	// Position relative to the parent. Sprites and labels are centered on it (labels unless
-	// `centered` is false)
+	// `x`, `y`: position relative to the parent, in pixels. Sprites and labels are centered on it
+	// (labels unless `centered` is false)
 	position: [2]f32,
+	// Degrees clockwise, relative to the parent
 	rotation: f32,
+	// `scaleX`, `scaleY`: scale relative to the parent (1: unscaled)
 	scale: [2]f32,
+	// The render layer, 0-7 (out-of-range values are clamped)
 	layer: int,
 	// Hidden nodes, and everything under them, aren't drawn
 	visible: bool,
@@ -268,91 +278,140 @@ SceneNodeData :: struct {
 	zIndex: i32,
 	// Its children draw sorted by their y (Node.ySort)
 	ySort: bool,
-	// Groups it belongs to (Node.groups)
+	// Groups it belongs to (Node.groups): `groups="enemies,flying"`
 	groups: [dynamic]string,
 
 	// Sprite, AnimatedSprite, ParticleEmitter (its Texture shape): image path relative to the project folder
 	texture: string,
-	// Label
+	// Label: its text
 	text: string,
+	// Label: font size (default 24)
 	fontSize: f32,
+	// Label: text color (`#rrggbb` or `#rrggbbaa`; default white)
 	color: sdl.Color,
+	// Label: centered on its position (false: its top-left corner is there)
 	centered: bool,
-	// Camera
+	// Camera: zoom (1: none, 2: twice as big)
 	zoom: f32,
-	// AnimatedSprite: the texture is a columns x rows grid of frames
+	// AnimatedSprite: the texture is a columns x rows grid of cells (at least 1 each)
 	columns: int,
+	// AnimatedSprite: rows of the sheet's grid (see `columns`)
 	rows: int,
+	// AnimatedSprite without `<animation>` elements: frames per second of its "default" animation
 	fps: f32,
+	// AnimatedSprite without `<animation>` elements: the "default" animation loops (default true).
+	// Sound nodes read `loop` too, into `audio` (default false there)
 	loop: bool,
+	// AnimatedSprite without `<animation>` elements: the "default" animation's play mode
 	playMode: AnimationPlayMode,
 	// AnimatedSprite: the sheet's grid margin and spacing (pixels), its animations (none: one
-	// "default" animation of every cell, from fps/loop/playMode above), and the one played first
+	// "default" animation of every cell, from fps/loop/playMode above), and the one played first.
+	// `margin`: pixels around the grid
 	margin: f32,
+	// AnimatedSprite: pixels between cells
 	spacing: f32,
+	// AnimatedSprite: its `<animation>` child elements, in order
 	animations: [dynamic]AnimationData,
+	// AnimatedSprite: the animation it plays from the start ("" or unknown: the first)
 	autoplay: string,
-	// Menu
+	// Menu: its `<item>` child elements, top to bottom
 	items: [dynamic]MenuItemData,
-	// Any kind: the script attached to the node ("" for none), and its exported field values
+	// Any kind: the script attached to the node (`<script name="...">`; "" for none)
 	script: string,
+	// Any kind: the script's exported field values (its `<prop>` elements)
 	props: [dynamic]ScriptPropData,
 
 	// StaticBody, DynamicBody, CharacterMover, Area: the layers it's on and collides with
-	// (`collisionLayer="1 3"`, `collisionMask="all"`), and its surface
+	// (`collisionLayer="1 3"`, `collisionMask="all"`), and its surface.
+	// `collisionLayer`: the layers it's on, as bits (layer n is bit n-1; default layer 1)
 	collisionLayer: u64,
+	// Bodies: the layers it collides with (default all). RayCast: the layers it hits
 	collisionMask: u64,
+	// Bodies: surface friction (default 0.6)
 	friction: f32,
+	// Bodies: bounciness, 0 to 1 (default 0)
 	restitution: f32,
+	// Bodies: density, for the mass of dynamic bodies (default 1)
 	density: f32,
-	// DynamicBody
+	// DynamicBody: multiplies the project's gravity (default 1)
 	gravityScale: f32,
+	// DynamicBody: slows its movement over time (0: none)
 	linearDamping: f32,
+	// DynamicBody: slows its spin over time (0: none)
 	angularDamping: f32,
+	// DynamicBody: it doesn't rotate
 	fixedRotation: bool,
+	// DynamicBody: continuous collision for fast bodies (doesn't pass through thin walls)
 	bullet: bool,
 	// CharacterMover: the steepest floor, degrees
 	floorMaxAngle: f32,
 	// CollisionShape: `shape`; Rectangle `width` and `height`; Circle `radius`; Capsule `radius`
 	// and `height` (overall); Polygon and Segment `points="x,y x,y ..."`; `disabled`; `oneWay`
-	// (format 13: only its top stops what comes down on it)
+	// (format 13: only its top stops what comes down on it).
+	// `shape`: Rectangle (default), Circle, Capsule, Polygon or Segment
 	shape: CollisionShapeKind,
+	// CollisionShape: `width`, `height` in pixels (Rectangle; a Capsule's overall height is `.y`)
 	shapeSize: [2]f32,
+	// CollisionShape: Circle and Capsule radius, in pixels
 	radius: f32,
+	// CollisionShape: Polygon and Segment points, in the node's space (`points="x,y x,y ..."`)
 	points: [dynamic][2]f32,
+	// CollisionShape: left out of its body
 	disabled: bool,
+	// CollisionShape (format 13): a one-way platform, only its top stops what comes down on it
 	oneWay: bool,
 	// RayCast: `targetX`, `targetY` (relative to the node), `enabled`, `excludeParent`
-	// (collisionMask is the layers it hits)
+	// (collisionMask is the layers it hits).
+	// `targetX`, `targetY`: the ray's end, relative to the node
 	target: [2]f32,
+	// RayCast: casting (default true)
 	enabled: bool,
+	// RayCast: ignore the body it's under (default true)
 	excludeParent: bool,
 	// Joint (physics_joints.odin): `joint` (the kind), `bodyA` / `bodyB` (names or paths; bodyA
 	// "" = the body it's under, or the world), `offsetX`/`offsetY` (Distance: body B's anchor),
 	// `limit`, `lower`, `upper`, `motor`, `motorSpeed`, `maxMotor`, `spring`, `hertz`, `damping`,
-	// `collideConnected`
+	// `collideConnected`.
+	// `joint`: the joint's kind (default Revolute)
 	jointKind: JointKind,
+	// Joint: name or path of body A ("" = the body the joint is under, or the world)
 	bodyA: string,
+	// Joint: name or path of body B
 	bodyB: string,
+	// Joint: `offsetX`, `offsetY`: Distance joints' anchor on body B, relative to the joint
 	jointOffset: [2]f32,
+	// Joint: `limit`: `lower` and `upper` apply
 	enableLimit: bool,
+	// Joint: the lower limit (Revolute: degrees; Distance: length in px; Prismatic, Wheel: px)
 	lower: f32,
+	// Joint: the upper limit, in `lower`'s units
 	upper: f32,
+	// Joint: `motor`: the motor runs
 	enableMotor: bool,
+	// Joint: motor speed (Revolute, Wheel: degrees per second; Distance, Prismatic: px/s)
 	motorSpeed: f32,
+	// Joint: the motor's maximum torque (Revolute, Wheel) or force (Distance, Prismatic)
 	maxMotor: f32,
+	// Joint: `spring`: the joint is springy
 	enableSpring: bool,
+	// Joint: the spring's frequency, in hertz
 	hertz: f32,
+	// Joint: `damping`: the spring's damping ratio (default 0.5)
 	dampingRatio: f32,
+	// Joint: the two bodies still collide with each other
 	collideConnected: bool,
 	// ParticleEmitter: its `<particles>` element (particles.odin)
 	particles: ParticleSettings,
 	// Component: the component file it's an instance of (relative to the project folder)
 	component: string,
 	// AudioPlayer, AudioPlayer2D, MusicPlayer: the sound (or music) file, the bus ("" Master),
-	// and `volume`, `pitch`, `pan`, `loop`, `autostart`, `maxDistance`, `attenuation`, `fadeIn`, `fadeOut`
+	// and `volume`, `pitch`, `pan`, `loop`, `autostart`, `maxDistance`, `attenuation`, `fadeIn`, `fadeOut`.
+	// `sound`: the sound (or music) file, relative to the project folder
 	sound: string,
+	// Sound nodes: the mix bus it plays through ("" for Master)
 	bus: string,
+	// Sound nodes: `volume`, `pitch`, `pan`, `loop`, `autostart`, `maxDistance`, `attenuation`,
+	// `fadeIn`, `fadeOut` (missing ones from DEFAULT_AUDIO_SETTINGS)
 	audio: AudioSettings,
 	// LDtkLevel: `ldtk` (the .ldtk file), `level`, `allLevels`, `intGridCollision`,
 	// `collisionValues`, `spawnEntities`, `background`, `smoothTiles`, and `<entity name="..."
@@ -367,18 +426,25 @@ An AnimatedSprite's animation: a named range of its sheet's cells.
 	<animation name="walk" start="0" end="3" fps="10" loop="true" playMode="Forward"/>
 */
 AnimationData :: struct {
+	// The name scripts play it by (missing: "default")
 	name: string,
 	// First and last cell played, inclusive; end -1 is the sheet's last cell
 	start: int,
+	// The last cell played (inclusive; -1, the default: the sheet's last cell)
 	end: int,
+	// Frames per second (default 8)
 	fps: f32,
+	// Plays again from the start when it ends (default false, unlike the node's `loop`)
 	loop: bool,
+	// Forward (default), or another `AnimationPlayMode`
 	playMode: AnimationPlayMode,
 }
 
 // A script field's value in a scene file: `<prop name="speed" value="250"/>`
 ScriptPropData :: struct {
+	// The exported field's name
 	name: string,
+	// The value in its text form (see `Script_SetField`)
 	value: string,
 }
 
@@ -413,32 +479,51 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	ldtk = DEFAULT_LDTK_LEVEL_SETTINGS,
 }
 
+/*
+A parsed scene (or component) file: `ParseScene`, `ParseComponent`. Free with `SceneData_Destroy`.
+*/
 SceneData :: struct {
+	// The root element's `name`
 	name: string,
+	// Every node, depth-first: a node's children follow it directly (`SceneNodeData.parent`)
 	nodes: [dynamic]SceneNodeData,
 }
 
+// A scene of a project: `<scene name="MenuScene" path="scenes/MenuScene.scene.xml"/>`
 SceneRef :: struct {
+	// The scene's name (what `game->switchScene` and menu actions use)
 	name: string,
 	// Scene file path relative to the project folder
 	path: string,
 }
 
+// An asset a project lists: `<asset path="assets/ship.png" kind="Image"/>`
 AssetRef :: struct {
+	// The file, relative to the project folder
 	path: string,
 	// "Image", "Audio", "Music", "Font", "Data", "Component", "LDtk" or "Translation"
 	kind: string,
 }
 
+/*
+A parsed project.xml (`ParseProject`, `LoadProjectFile`). Free with `ProjectData_Destroy`.
+*/
 ProjectData :: struct {
+	// The game's name (`name`)
 	name: string,
+	// `width`, `height`: the game's size in pixels (default 1280 x 720)
 	size: [2]f32,
+	// How the game fits its window (`scaleMode`; default Letterbox)
 	scaleMode: ScaleMode,
+	// The color behind everything (`background`; default black)
 	background: sdl.Color,
+	// The scene the game starts in (`startScene`; missing: the first scene listed)
 	startScene: string,
+	// Its scenes, in file order (`<scene>` elements)
 	scenes: [dynamic]SceneRef,
+	// Its assets, in file order (`<asset>` elements)
 	assets: [dynamic]AssetRef,
-	// pixelsPerMeter, gravityX / gravityY (px/s²), physicsDebug
+	// pixelsPerMeter, gravityX / gravityY (px/s²), physicsDebug, physicsSmoothing
 	physics: PhysicsSettings,
 	// Global scripts, in start order: `<global script="GameState"><prop .../></global>` (globals.odin)
 	globals: [dynamic]GlobalData,
@@ -471,11 +556,14 @@ WindowSettings :: struct {
 // A window as games had it before these settings: windowed, vsync, not high-DPI
 DEFAULT_WINDOW_SETTINGS :: WindowSettings{vsync = true}
 
+// What went wrong reading a project, scene or component file
 ProjectError :: enum {
 	None,
+	// The file couldn't be read (`LoadProjectFile`, `LoadSceneFile`)
 	File_Not_Found,
+	// The text isn't well-formed XML, or is empty
 	Invalid_XML,
-	// The root element isn't <project> / <scene>
+	// The root element isn't <project> / <scene> / <component>, as the parser expected
 	Wrong_Root,
 	// formatVersion is newer than PROJECT_FORMAT_VERSION
 	Unsupported_Version,
@@ -492,7 +580,9 @@ Returns:
 - The project data, and .None or what went wrong. Free with `ProjectData_Destroy`
 
 Example:
+	// Given: xmlText: string
 	project, err := e.ParseProject(xmlText)
+	if err != .None do log.errorf("Can't read the project: %v", err)
 	defer e.ProjectData_Destroy(&project)
 */
 ParseProject :: proc(text: string, allocator := context.allocator) -> (project: ProjectData, err: ProjectError) {
@@ -582,6 +672,13 @@ Inputs:
 Returns:
 - The scene data with its nodes in depth-first order, and .None or what went wrong.
   Free with `SceneData_Destroy`
+
+Example:
+	// Given: xmlText: string
+	data, err := e.ParseScene(xmlText)
+	if err != .None do log.errorf("Can't read the scene: %v", err)
+	defer e.SceneData_Destroy(&data)
+	for n in data.nodes do fmt.println(n.kind, n.name)
 */
 ParseScene :: proc(text: string, allocator := context.allocator) -> (scene: SceneData, err: ProjectError) {
 	doc := parseXML(text) or_return
@@ -614,6 +711,10 @@ node, `<node kind="Component" name="Ship2" x="100" y="50" component="components/
 the component's nodes are built in its place, the root taking the instance's name, transform,
 layer and visibility (Scene_Build); `Scene_Instantiate` adds one from code.
 
+Inputs:
+- text: The XML
+- allocator: Allocator for the result's strings and lists
+
 Returns:
 - The nodes (depth-first, the root first), and .None or what went wrong. Free with `SceneData_Destroy`
 */
@@ -636,7 +737,11 @@ ParseComponent :: proc(text: string, allocator := context.allocator) -> (compone
 }
 
 /*
-Frees everything `ParseProject` allocated. Must use the same allocator.
+Frees everything `ParseProject` allocated and zeroes the project. Must use the same allocator.
+
+Inputs:
+- project: The project data
+- allocator: The allocator it was parsed with
 */
 ProjectData_Destroy :: proc(project: ^ProjectData, allocator := context.allocator) {
 	context.allocator = allocator
@@ -664,7 +769,12 @@ ProjectData_Destroy :: proc(project: ^ProjectData, allocator := context.allocato
 }
 
 /*
-Frees everything `ParseScene` allocated. Must use the same allocator.
+Frees everything `ParseScene` (or `ParseComponent`) allocated and zeroes the scene. Must use the
+same allocator.
+
+Inputs:
+- scene: The scene data
+- allocator: The allocator it was parsed with
 */
 SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 	context.allocator = allocator
@@ -731,6 +841,13 @@ ParseColor :: proc(text: string) -> (sdl.Color, bool) {
 /*
 Formats collision layers the way the format stores them: `all`, the layer numbers ("1 3"), or ""
 for none.
+
+Inputs:
+- layers: The layer bits (layer n is bit n-1)
+- allocator: Allocator for the string
+
+Returns:
+- The text
 */
 FormatPhysicsLayers :: proc(layers: u64, allocator := context.allocator) -> string {
 	if layers == PHYSICS_ALL_LAYERS do return strings.clone("all", allocator)
@@ -746,8 +863,12 @@ FormatPhysicsLayers :: proc(layers: u64, allocator := context.allocator) -> stri
 /*
 Parses collision layers: `all`, or layer numbers 1-64 separated by spaces or commas ("" = none).
 
+Inputs:
+- text: The layers' text
+
 Returns:
-- The layer bits, and false if a number isn't a layer
+- The layer bits (layer n is bit n-1), and false if a part isn't a layer number 1-64 (it's
+  skipped; the others are still in the bits)
 */
 ParsePhysicsLayers :: proc(text: string) -> (u64, bool) {
 	text := strings.trim_space(text)
@@ -766,7 +887,16 @@ ParsePhysicsLayers :: proc(text: string) -> (u64, bool) {
 	return bits, ok
 }
 
-// Formats points the way the format stores them: "x,y x,y"
+/*
+Formats points the way the format stores them: "x,y x,y".
+
+Inputs:
+- points: The points
+- allocator: Allocator for the string
+
+Returns:
+- The text
+*/
 FormatPoints :: proc(points: [][2]f32, allocator := context.allocator) -> string {
 	b := strings.builder_make(allocator)
 	for p, i in points {
@@ -778,6 +908,9 @@ FormatPoints :: proc(points: [][2]f32, allocator := context.allocator) -> string
 
 /*
 Parses points: "x,y x,y ...".
+
+Inputs:
+- text: The points' text
 
 Returns:
 - The points (temp allocated), and false if one couldn't be read (it's skipped)

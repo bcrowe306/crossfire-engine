@@ -16,6 +16,7 @@ set start).
 Tweens are freed when they finish or are killed: making one per hit or per pickup is fine.
 
 Example:
+	// Given: coin: ^e.Node
 	// A coin pops up and fades out, then goes
 	tween := e.Tween_Create(coin)
 	e.Tween_To(tween, &coin.position, coin.position + {0, -24}, 0.4, .OutBack)
@@ -29,10 +30,13 @@ Example:
 Tween :: struct {
 	// The node it belongs to (nil: the scene's own, `Scene_CreateTween`)
 	owner: ^Node,
+	// The scene whose update runs it
 	scene: ^Scene,
+	// Its steps, in order (heap-allocated, freed with the tween)
 	steps: [dynamic]TweenStep,
-	// The first step of the group running now, and the seconds into it
+	// Index of the first step of the group running now
 	current: int,
+	// Seconds into the group running now
 	elapsed: f32,
 	// Times to play it again after the first (-1: forever)
 	loops: int,
@@ -61,11 +65,15 @@ TweenStep :: struct {
 	from, to: [4]f32,
 	// The start was given (Tween_FromTo); otherwise it's read when the step begins
 	fromGiven: bool,
+	// It has begun in the current play (reset each loop)
 	started: bool,
+	// Seconds it lasts (0 for a callback)
 	duration: f32,
+	// The curve from `from` to `to` (easing.odin)
 	ease: EaseType,
 	// Called when the step runs (a Tween_Call step)
 	callback: proc(user: rawptr),
+	// Passed to `callback`
 	user: rawptr,
 	// Runs together with the step before it
 	parallel: bool,
@@ -80,6 +88,11 @@ Inputs:
 
 Returns:
 - The tween (freed when it finishes or is killed; don't keep the pointer past that)
+
+Example:
+	tween := e.Tween_Create(node)
+	e.Tween_To(tween, &node.scale, [2]f32{1.2, 1.2}, 0.15, .OutQuad)
+	e.Tween_To(tween, &node.scale, [2]f32{1, 1}, 0.15, .InQuad)
 */
 Tween_Create :: proc(owner: ^Node) -> ^Tween {
 	tween := makeTween(owner.scene)
@@ -89,7 +102,13 @@ Tween_Create :: proc(owner: ^Node) -> ^Tween {
 
 /*
 Makes a tween that belongs to the scene itself (no node): it runs while the scene isn't paused,
-and dies with the scene.
+and dies with the scene. Only animate values that live as long as the scene.
+
+Inputs:
+- scene: The scene
+
+Returns:
+- The tween (freed when it finishes or is killed; don't keep the pointer past that)
 */
 Scene_CreateTween :: proc(scene: ^Scene) -> ^Tween {
 	return makeTween(scene)
@@ -119,54 +138,99 @@ Inputs:
 
 Returns:
 - The tween, to chain more steps
+
+Example:
+	// Given: tween: ^e.Tween
+	e.Tween_To(tween, &node.position, node.position + {0, -40}, 0.5, .OutQuad)
+	e.Tween_To(tween, &node.tint, sdl.Color{255, 255, 255, 0}, 0.3)
 */
 Tween_To :: proc{Tween_ToF32, Tween_ToVector, Tween_ToColor}
 
+// `Tween_To` for an f32
 Tween_ToF32 :: proc(tween: ^Tween, target: ^f32, to: f32, duration: f32, ease := EaseType.Linear) -> ^Tween {
 	return addValueStep(tween, target, {to, 0, 0, 0}, duration, ease)
 }
 
+// `Tween_To` for a [2]f32 (positions, scales)
 Tween_ToVector :: proc(tween: ^Tween, target: ^[2]f32, to: [2]f32, duration: f32, ease := EaseType.Linear) -> ^Tween {
 	return addValueStep(tween, target, {to.x, to.y, 0, 0}, duration, ease)
 }
 
+// `Tween_To` for an sdl.Color (each channel animated, rounded to the nearest value)
 Tween_ToColor :: proc(tween: ^Tween, target: ^sdl.Color, to: sdl.Color, duration: f32, ease := EaseType.Linear) -> ^Tween {
 	return addValueStep(tween, target, {f32(to.r), f32(to.g), f32(to.b), f32(to.a)}, duration, ease)
 }
 
 /*
-Like `Tween_To`, from a given start (the value jumps to `from` when the step begins).
+Like `Tween_To`, from a given start (the value jumps to `from` when the step begins, and again on
+each loop).
+
+Inputs:
+- tween: The tween
+- target: The value: an f32, a [2]f32 (positions, scales) or an sdl.Color (tints)
+- from: The value at the start
+- to: The value at the end
+- duration: Seconds
+- ease: The curve (easing.odin)
+
+Returns:
+- The tween, to chain more steps
+
+Example:
+	// Given: tween: ^e.Tween
+	e.Tween_FromTo(tween, &node.tint, sdl.Color{255, 255, 255, 0}, sdl.Color{255, 255, 255, 255}, 0.5)
 */
 Tween_FromTo :: proc{Tween_FromToF32, Tween_FromToVector, Tween_FromToColor}
 
+// `Tween_FromTo` for an f32
 Tween_FromToF32 :: proc(tween: ^Tween, target: ^f32, from, to: f32, duration: f32, ease := EaseType.Linear) -> ^Tween {
 	addValueStep(tween, target, {to, 0, 0, 0}, duration, ease)
 	setFrom(tween, {from, 0, 0, 0})
 	return tween
 }
 
+// `Tween_FromTo` for a [2]f32 (positions, scales)
 Tween_FromToVector :: proc(tween: ^Tween, target: ^[2]f32, from, to: [2]f32, duration: f32, ease := EaseType.Linear) -> ^Tween {
 	addValueStep(tween, target, {to.x, to.y, 0, 0}, duration, ease)
 	setFrom(tween, {from.x, from.y, 0, 0})
 	return tween
 }
 
+// `Tween_FromTo` for an sdl.Color
 Tween_FromToColor :: proc(tween: ^Tween, target: ^sdl.Color, from, to: sdl.Color, duration: f32, ease := EaseType.Linear) -> ^Tween {
 	addValueStep(tween, target, {f32(to.r), f32(to.g), f32(to.b), f32(to.a)}, duration, ease)
 	setFrom(tween, {f32(from.r), f32(from.g), f32(from.b), f32(from.a)})
 	return tween
 }
 
-// Adds a pause of `seconds` before the next step
+/*
+Adds a pause before the next step.
+
+Inputs:
+- tween: The tween
+- seconds: Length of the pause (negative counts as 0)
+
+Returns:
+- The tween, to chain more steps
+*/
 Tween_Delay :: proc(tween: ^Tween, seconds: f32) -> ^Tween {
 	addStep(tween, TweenStep{duration = max(seconds, 0)})
 	return tween
 }
 
 /*
-Adds a step that calls `callback(user)` (once per play), then goes on.
+Adds a step that calls `callback(user)` (once per play, including each loop), then goes on.
+
+Inputs:
+- tween: The tween
+- callback: Called when the step is reached
+- user: Passed to the callback (nil if unused); it must still be valid then
+
+Returns:
+- The tween, to chain more steps
 
 Example:
+	// Given: tween: ^e.Tween
 	e.Tween_Call(tween, proc(user: rawptr) { log.info("done") }, nil)
 */
 Tween_Call :: proc(tween: ^Tween, callback: proc(user: rawptr), user: rawptr) -> ^Tween {
@@ -174,29 +238,68 @@ Tween_Call :: proc(tween: ^Tween, callback: proc(user: rawptr), user: rawptr) ->
 	return tween
 }
 
-// The next step added runs together with the last one (a group ends with its longest step)
+/*
+Makes the next step added run together with the last one. Consecutive parallel steps form a group,
+which ends with its longest step. Does nothing when the tween has no steps yet.
+
+Inputs:
+- tween: The tween
+
+Returns:
+- The tween, to chain more steps
+*/
 Tween_Parallel :: proc(tween: ^Tween) -> ^Tween {
 	tween.parallelNext = true
 	return tween
 }
 
-// Plays the tween `count` more times after the first (-1: forever)
+/*
+Sets how many more times the tween plays after the first. Each loop starts its steps again from
+the values as they are then (`Tween_FromTo` steps jump back to their start).
+
+Inputs:
+- tween: The tween
+- count: Extra plays after the first (0: once, -1: forever)
+
+Returns:
+- The tween, to chain more steps
+*/
 Tween_SetLoops :: proc(tween: ^Tween, count: int) -> ^Tween {
 	tween.loops = count
 	return tween
 }
 
-// Pauses or resumes a tween where it is
+/*
+Pauses or resumes a tween where it is.
+
+Inputs:
+- tween: The tween
+- paused: true to pause, false to resume
+*/
 Tween_Pause :: proc(tween: ^Tween, paused: bool) {
 	tween.paused = paused
 }
 
-// Stops a tween where it is; it's freed at the scene's next update
+/*
+Stops a tween where it is; it's freed at the scene's next update. Its remaining callbacks don't run.
+
+Inputs:
+- tween: The tween
+*/
 Tween_Kill :: proc(tween: ^Tween) {
 	tween.done = true
 }
 
-// Whether a tween is still going (not finished or killed)
+/*
+Tells whether a tween is still going. Only valid until the update that frees a finished tween:
+don't call it on a pointer you kept longer.
+
+Inputs:
+- tween: The tween
+
+Returns:
+- true while it isn't finished or killed (a paused tween is running)
+*/
 Tween_IsRunning :: proc(tween: ^Tween) -> bool {
 	return !tween.done
 }

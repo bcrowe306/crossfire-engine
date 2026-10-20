@@ -16,8 +16,23 @@ import sdl "vendor:sdl3"
 MAX_CURVE_SEGMENTS :: 128
 // Segments used per corner of a rounded rectangle
 ROUNDED_CORNER_SEGMENTS :: 8
+// Perimeter points of a rounded rectangle (four corners of ROUNDED_CORNER_SEGMENTS + 1 points)
 ROUNDED_RECT_POINT_COUNT :: 4 * (ROUNDED_CORNER_SEGMENTS + 1)
 
+/*
+Draws a filled rectangle.
+
+A rotated draw transform draws it as a rotated quad.
+
+Inputs:
+- renderer: The renderer to draw with
+- rect: The rectangle, in local coordinates (x, y is its top-left corner)
+- color: The color (multiplied by the node's tint)
+
+Example:
+	rect := sdl.FRect{10, 10, 200, 40}
+	e.DrawRectangle(renderer, &rect, {40, 40, 60, 255})
+*/
 DrawRectangle :: proc(renderer: ^ sdl.Renderer, rect: ^sdl.FRect, color: sdl.Color) {
 	color := tinted(color)
 	if Transform2D_IsAxisAligned(drawState().transform) {
@@ -32,6 +47,14 @@ DrawRectangle :: proc(renderer: ^ sdl.Renderer, rect: ^sdl.FRect, color: sdl.Col
 	fillScreenPolygon(renderer, corners[:], color)
 }
 
+/*
+Draws a rectangle's 1-pixel outline.
+
+Inputs:
+- renderer: The renderer to draw with
+- rect: The rectangle, in local coordinates (x, y is its top-left corner)
+- color: The color (multiplied by the node's tint)
+*/
 DrawRectangleOutline :: proc(renderer: ^sdl.Renderer, rect: ^sdl.FRect, color: sdl.Color) {
 	if Transform2D_IsAxisAligned(drawState().transform) {
 		color := tinted(color)
@@ -45,12 +68,32 @@ DrawRectangleOutline :: proc(renderer: ^sdl.Renderer, rect: ^sdl.FRect, color: s
 	strokeScreenPolygon(renderer, corners[:], color)
 }
 
+/*
+Draws a single pixel.
+
+Inputs:
+- renderer: The renderer to draw with
+- p: The point, in local coordinates
+- color: The color (multiplied by the node's tint)
+*/
 DrawPoint :: proc(renderer: ^sdl.Renderer, p: sdl.FPoint, color: sdl.Color) {
 	p, color := tp(p), tinted(color)
 	sdl.SetRenderDrawColor(renderer, color[0], color[1], color[2], color[3])
 	sdl.RenderPoint(renderer, p.x, p.y)
 }
 
+/*
+Draws a 1-pixel line (1 pixel wide at any scale; `DrawLineThick` for wider lines).
+
+Inputs:
+- renderer: The renderer to draw with
+- a: The start, in local coordinates
+- b: The end, in local coordinates
+- color: The color (multiplied by the node's tint)
+
+Example:
+	e.DrawLine(renderer, {0, 0}, {100, 50}, {255, 255, 255, 255})
+*/
 DrawLine :: proc(renderer: ^sdl.Renderer, a, b: sdl.FPoint, color: sdl.Color) {
 	a, b := tp(a), tp(b)
 	color := tinted(color)
@@ -58,7 +101,17 @@ DrawLine :: proc(renderer: ^sdl.Renderer, a, b: sdl.FPoint, color: sdl.Color) {
 	sdl.RenderLine(renderer, a.x, a.y, b.x, b.y)
 }
 
-// Line with a thickness, drawn as a quad. Thickness scales with camera zoom
+/*
+Draws a line with a thickness, as a quad. The thickness scales with the node's scale and the
+camera's zoom. Nothing is drawn when `a` and `b` are the same point.
+
+Inputs:
+- renderer: The renderer to draw with
+- a: The start, in local coordinates
+- b: The end, in local coordinates
+- thickness: The width, in local units
+- color: The color (multiplied by the node's tint)
+*/
 DrawLineThick :: proc(renderer: ^sdl.Renderer, a, b: sdl.FPoint, thickness: f32, color: sdl.Color) {
 	a, b := tp(a), tp(b)
 	thickness := toScreenLength(thickness)
@@ -73,49 +126,152 @@ DrawLineThick :: proc(renderer: ^sdl.Renderer, a, b: sdl.FPoint, thickness: f32,
 	fillScreenPolygon(renderer, quad[:], color)
 }
 
+/*
+Draws a filled triangle.
+
+Inputs:
+- renderer: The renderer to draw with
+- a: The first corner, in local coordinates
+- b: The second corner
+- c: The third corner
+- color: The color (multiplied by the node's tint)
+*/
 DrawTriangle :: proc(renderer: ^sdl.Renderer, a, b, c: sdl.FPoint, color: sdl.Color) {
 	points := [3]sdl.FPoint{tp(a), tp(b), tp(c)}
 	fillScreenPolygon(renderer, points[:], color)
 }
 
+/*
+Draws a triangle's 1-pixel outline.
+
+Inputs:
+- renderer: The renderer to draw with
+- a: The first corner, in local coordinates
+- b: The second corner
+- c: The third corner
+- color: The color (multiplied by the node's tint)
+*/
 DrawTriangleOutline :: proc(renderer: ^sdl.Renderer, a, b, c: sdl.FPoint, color: sdl.Color) {
 	points := [3]sdl.FPoint{tp(a), tp(b), tp(c)}
 	strokeScreenPolygon(renderer, points[:], color)
 }
 
+/*
+Draws a filled circle (a polygon with more segments the larger it is on screen).
+
+Inputs:
+- renderer: The renderer to draw with
+- center: The center, in local coordinates
+- radius: The radius, in local units
+- color: The color (multiplied by the node's tint)
+
+Example:
+	e.DrawCircle(renderer, {0, 0}, 16, {120, 200, 255, 255})
+*/
 DrawCircle :: proc(renderer: ^sdl.Renderer, center: sdl.FPoint, radius: f32, color: sdl.Color) {
 	DrawEllipse(renderer, center, radius, radius, color)
 }
 
+/*
+Draws a circle's 1-pixel outline.
+
+Inputs:
+- renderer: The renderer to draw with
+- center: The center, in local coordinates
+- radius: The radius, in local units
+- color: The color (multiplied by the node's tint)
+*/
 DrawCircleOutline :: proc(renderer: ^sdl.Renderer, center: sdl.FPoint, radius: f32, color: sdl.Color) {
 	DrawEllipseOutline(renderer, center, radius, radius, color)
 }
 
+/*
+Draws a filled ellipse, its axes along the local x and y axes.
+
+Inputs:
+- renderer: The renderer to draw with
+- center: The center, in local coordinates
+- rx: The horizontal radius, in local units
+- ry: The vertical radius, in local units
+- color: The color (multiplied by the node's tint)
+*/
 DrawEllipse :: proc(renderer: ^sdl.Renderer, center: sdl.FPoint, rx, ry: f32, color: sdl.Color) {
 	points := ellipsePoints(center, rx, ry)
 	fillScreenPolygon(renderer, points, color)
 }
 
+/*
+Draws an ellipse's 1-pixel outline, its axes along the local x and y axes.
+
+Inputs:
+- renderer: The renderer to draw with
+- center: The center, in local coordinates
+- rx: The horizontal radius, in local units
+- ry: The vertical radius, in local units
+- color: The color (multiplied by the node's tint)
+*/
 DrawEllipseOutline :: proc(renderer: ^sdl.Renderer, center: sdl.FPoint, rx, ry: f32, color: sdl.Color) {
 	points := ellipsePoints(center, rx, ry)
 	strokeScreenPolygon(renderer, points, color)
 }
 
-// Filled polygon. Points must describe a convex shape (filled as a triangle fan)
+/*
+Draws a filled convex polygon (filled as a triangle fan from the first point; concave shapes
+draw wrong).
+
+Inputs:
+- renderer: The renderer to draw with
+- points: The corners in order, in local coordinates (at least 3). Not modified
+- color: The color (multiplied by the node's tint)
+
+Example:
+	points := []sdl.FPoint{{0, -20}, {15, 15}, {-15, 15}}
+	e.DrawPolygon(renderer, points, {255, 200, 0, 255})
+*/
 DrawPolygon :: proc(renderer: ^sdl.Renderer, points: []sdl.FPoint, color: sdl.Color) {
 	fillScreenPolygon(renderer, transformedCopy(points), color)
 }
 
+/*
+Draws a closed 1-pixel outline through the points (the last joins the first).
+
+Inputs:
+- renderer: The renderer to draw with
+- points: The corners in order, in local coordinates (at least 2). Not modified
+- color: The color (multiplied by the node's tint)
+*/
 DrawPolygonOutline :: proc(renderer: ^sdl.Renderer, points: []sdl.FPoint, color: sdl.Color) {
 	strokeScreenPolygon(renderer, transformedCopy(points), color)
 }
 
+/*
+Draws a filled rectangle with rounded corners.
+
+Inputs:
+- renderer: The renderer to draw with
+- rect: The rectangle, in local coordinates (x, y is its top-left corner)
+- radius: The corners' radius, in local units (clamped to half the shorter side)
+- color: The color (multiplied by the node's tint)
+
+Example:
+	button := sdl.FRect{20, 20, 160, 48}
+	e.DrawRoundedRectangle(renderer, &button, 8, {60, 60, 90, 255})
+*/
 DrawRoundedRectangle :: proc(renderer: ^sdl.Renderer, rect: ^sdl.FRect, radius: f32, color: sdl.Color) {
 	points := RoundedRectanglePoints(rect, radius)
 	toScreenPoints(points[:])
 	fillScreenPolygon(renderer, points[:], color)
 }
 
+/*
+Draws the 1-pixel outline of a rectangle with rounded corners.
+
+Inputs:
+- renderer: The renderer to draw with
+- rect: The rectangle, in local coordinates (x, y is its top-left corner)
+- radius: The corners' radius, in local units (clamped to half the shorter side)
+- color: The color (multiplied by the node's tint)
+*/
 DrawRoundedRectangleOutline :: proc(renderer: ^sdl.Renderer, rect: ^sdl.FRect, radius: f32, color: sdl.Color) {
 	points := RoundedRectanglePoints(rect, radius)
 	toScreenPoints(points[:])
@@ -139,6 +295,7 @@ Inputs:
   like a sprite node with scale.x -1, mirrors it too)
 
 Example:
+	// Given: rm: ^e.ResourceManager, pos: [2]f32, heading: f32, sheet: ^sdl.Texture, x: f32, y: f32
 	ship := rm->loadTexture("ship.png")
 	e.DrawTexture(renderer, ship, {pos.x, pos.y, 64, 64}, rotation = heading)
 

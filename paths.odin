@@ -2,8 +2,23 @@ package engine
 
 import "core:strings"
 
-// The engine's own path join ("a" + "b" -> "a/b"): `core:path/filepath` needs `core:os`, which the
-// web build doesn't have. Paths in project files always use "/". Temp allocated
+/*
+Joins path parts with "/" ("a" + "b" -> "a/b"). The engine's own: `core:path/filepath` needs
+`core:os`, which the web build doesn't have. Paths in project files always use "/".
+
+Empty parts are skipped; leading "/" of later parts are dropped, and no "/" is doubled after a
+part that ends in one.
+
+Inputs:
+- parts: The parts, in order
+
+Returns:
+- The joined path (temp allocated)
+
+Example:
+	path := e.JoinPath(game.projectDir, "assets", "ship.png")
+	_ = path
+*/
 JoinPath :: proc(parts: ..string) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	for part, i in parts {

@@ -58,7 +58,9 @@ MAX_PARTICLES :: 1000
 
 // A color at a point of a particle's life: `position` 0 is when it's emitted, 1 when it dies
 ColorStop :: struct {
+	// 0 (emitted) to 1 (dies)
 	position: f32,
+	// The color there
 	color: sdl.Color,
 }
 
@@ -67,7 +69,9 @@ Colors along a particle's life, blended between the stops (kept sorted by positi
 store it as `position:#color` pairs: `"0:#ffe664 0.5:#e63228 1:#28282800"`.
 */
 ColorRamp :: struct {
+	// The stops; the first `count` are used
 	stops: [MAX_COLOR_STOPS]ColorStop,
+	// How many stops it has (an empty ramp is white)
 	count: int,
 }
 
@@ -133,6 +137,11 @@ ColorRamp_Sort :: proc(ramp: ^ColorRamp, tracking: ^int = nil) {
 /*
 Adds a stop (kept sorted).
 
+Inputs:
+- ramp: The ramp
+- position: 0 (emitted) to 1 (dies); clamped
+- color: The color there
+
 Returns:
 - Its index, or -1 if the ramp is full (MAX_COLOR_STOPS)
 */
@@ -148,6 +157,10 @@ ColorRamp_AddStop :: proc(ramp: ^ColorRamp, position: f32, color: sdl.Color) -> 
 /*
 Removes a stop. A ramp keeps at least two.
 
+Inputs:
+- ramp: The ramp
+- index: The stop's index
+
 Returns:
 - false if it wasn't removed
 */
@@ -159,7 +172,16 @@ ColorRamp_RemoveStop :: proc(ramp: ^ColorRamp, index: int) -> bool {
 	return true
 }
 
-// Formats a ramp the way scene files store it: "0:#ffe664 0.5:#e63228 1:#28282800"
+/*
+Formats a ramp the way scene files store it: `"0:#ffe664 0.5:#e63228 1:#28282800"`.
+
+Inputs:
+- ramp: The ramp
+- allocator: For the text
+
+Returns:
+- The text (the caller frees it with `allocator`)
+*/
 FormatColorRamp :: proc(ramp: ColorRamp, allocator := context.allocator) -> string {
 	b := strings.builder_make(allocator)
 	for i in 0 ..< clamp(ramp.count, 0, MAX_COLOR_STOPS) {
@@ -172,6 +194,9 @@ FormatColorRamp :: proc(ramp: ColorRamp, allocator := context.allocator) -> stri
 /*
 Parses `position:#color` pairs separated by spaces (sorted afterwards; extra stops past
 MAX_COLOR_STOPS are dropped).
+
+Inputs:
+- text: The pairs, as `FormatColorRamp` writes them
 
 Returns:
 - The ramp, and false if a pair couldn't be read (it's skipped)
@@ -234,51 +259,70 @@ ParticleSettings :: struct {
 	// Particles move with the emitter (its local space) instead of staying in the world
 	localSpace: bool `label:"Local space"`,
 
+	// What each particle is drawn as
 	shape: ParticleShape `label:"Shape" group:"Shape"`,
+	// A particle's size in pixels (what x and y mean depends on `shape`)
 	size: [2]f32 `min:"0.01" max:"100" label:"Size"`,
+	// How much of sizeSpread is used: 0 none, 1 all of it
 	sizeVariance: f32 `min:"0" max:"1" label:"Size var."`,
+	// Random change of each particle's size, up to this many pixels either way (per axis)
 	sizeSpread: f32 `min:"0" max:"50" label:"Size spread"`,
-	// Scale at birth and at death, blended over the particle's life
+	// Scale at birth, blended toward scaleEnd over the particle's life
 	scaleStart: [2]f32 `min:"0" max:"1" label:"Scale start"`,
+	// Scale at death
 	scaleEnd: [2]f32 `min:"0" max:"1" label:"Scale end"`,
 
 	// Starting rotation of each particle
 	rotation: f32 `min:"0" max:"359" label:"Rotation" group:"Rotation"`,
+	// How much of rotationSpread is used: 0 none, 1 all of it
 	rotationVariance: f32 `min:"0" max:"1" label:"Rotation var."`,
+	// Random change of the starting rotation, up to this many degrees either way
 	rotationSpread: f32 `min:"0" max:"359" label:"Rot. spread"`,
-	// Spin, degrees per second, and how fast the spin changes
+	// Spin, degrees per second
 	torque: f32 `min:"-2000" max:"2000" label:"Torque"`,
+	// How much of torqueSpread is used: 0 none, 1 all of it
 	torqueVariance: f32 `min:"0" max:"1" label:"Torque var."`,
+	// Random change of the spin, up to this many degrees per second either way
 	torqueSpread: f32 `min:"0" max:"2000" label:"Torque spread"`,
+	// How fast the spin changes, degrees per second²
 	torqueAcceleration: f32 `min:"-2000" max:"2000" label:"Torque accel."`,
 
 	// Colors from colorRamp; otherwise from particleColor to colorEnd
 	useColorRamp: bool `label:"Color ramp" group:"Color"`,
+	// The colors over a particle's life (with useColorRamp)
 	colorRamp: ColorRamp `label:"Ramp"`,
+	// The color at birth (without useColorRamp)
 	particleColor: sdl.Color `label:"Start color"`,
+	// The color at death (without useColorRamp)
 	colorEnd: sdl.Color `label:"End color"`,
 	// Random change of each particle's red, green and blue
 	colorVariance: f32 `min:"0" max:"1" label:"Color var."`,
 
 	// Direction particles are emitted in
 	angle: f32 `min:"0" max:"359" label:"Angle" group:"Motion"`,
+	// How much of angleSpread is used: 0 none, 1 all of it
 	angleVariance: f32 `min:"0" max:"1" label:"Angle var."`,
+	// Random change of the direction, up to this many degrees either way
 	angleSpread: f32 `min:"0" max:"360" label:"Angle spread"`,
 	// Starting speed, px/s
 	velocity: f32 `min:"0" max:"2000" label:"Velocity"`,
+	// How much of velocitySpread is used: 0 none, 1 all of it
 	velocityVariance: f32 `min:"0" max:"1" label:"Velocity var."`,
+	// Random change of the starting speed, up to this many px/s either way
 	velocitySpread: f32 `min:"0" max:"2000" label:"Vel. spread"`,
 	// Multiplies how far particles move each frame
 	velocityScale: f32 `min:"0" max:"10" label:"Speed scale"`,
 	// Speeds particles up (or down) along their emitted direction, px/s²
 	acceleration: f32 `min:"-2000" max:"2000" label:"Acceleration"`,
 
-	// Gravity's direction (normalized when used) and strength, px/s²
+	// Gravity's direction (normalized when used; {0, 0} turns gravity off)
 	gravityDirection: [2]f32 `min:"-1" max:"1" label:"Gravity dir." group:"Forces"`,
+	// Gravity's strength, px/s² (negative pulls the other way)
 	gravityVelocity: f32 `min:"-2000" max:"2000" label:"Gravity"`,
 	// Pushes every particle, px/s²
 	wind: [2]f32 `min:"-1000" max:"1000" label:"Wind"`,
 
+	// Particles bounce off each other and the edges of the view (see the top of particles.odin)
 	collisionEnabled: bool `label:"Collide" group:"Collision"`,
 	// Speed kept after a bounce
 	elasticity: f32 `min:"0" max:"1" label:"Elasticity"`,
@@ -307,27 +351,41 @@ DEFAULT_PARTICLE_SETTINGS :: ParticleSettings{
 
 // One particle, in the emitter's world or local space (`ParticleSettings.localSpace`)
 Particle :: struct {
+	// Pixels, in the world or the emitter's space
 	position: [2]f32,
+	// px/s
 	velocity: [2]f32,
+	// px/s², along its emitted direction
 	acceleration: [2]f32,
+	// Pixels, before scaling
 	size: [2]f32,
+	// Its scale at birth
 	scaleStart: [2]f32,
+	// Its scale at death
 	scaleEnd: [2]f32,
+	// Its scale now (drawn size: size × scale)
 	scale: [2]f32,
-	// Degrees, clockwise; torque is its spin (degrees per second)
+	// Degrees, clockwise
 	rotation: f32,
+	// Its spin, degrees per second
 	torque: f32,
+	// How fast its spin changes, degrees per second²
 	torqueAcceleration: f32,
-	// Seconds it lives, has lived, and the fraction of its life gone (0 to 1)
+	// Seconds it lives
 	lifetime: f32,
+	// Seconds it has lived
 	age: f32,
+	// The fraction of its life gone, 0 to 1
 	agePercent: f32,
-	// Without a color ramp: blended from colorStart to colorEnd
+	// Without a color ramp: its color at birth, blended toward colorEnd
 	colorStart: sdl.Color,
+	// Its color at death (without a color ramp)
 	colorEnd: sdl.Color,
 	// Random change of red, green and blue (colorVariance), kept for its whole life
 	colorJitter: [3]f32,
+	// Its color now
 	color: sdl.Color,
+	// In use; dead particles' slots are reused
 	alive: bool,
 }
 
@@ -336,24 +394,27 @@ A node that emits particles (see the top of particles.odin). Change `settings` a
 particles use the new values, and live ones the forces and colors.
 */
 ParticleEmitter :: struct {
+	// The node part: transform, hierarchy, hooks
 	using node: Node,
+	// How it emits and what its particles do
 	settings: ParticleSettings,
 	// Emitting now (`settings.emitting` is how it starts; a non-continuous emitter stops after a cycle)
 	emitting: bool,
 	// For the Texture shape
 	texture: ^sdl.Texture,
-	/*
-	For the Custom shape: draws one particle. The draw state is the particle's space, so the
-	Draw* helpers draw at it (origin at the particle, turned by its rotation; sizes aren't
-	scaled: use `particle.size * particle.scale`).
-	*/
+	// For the Custom shape: draws one particle. The draw state is the particle's space, so the
+	// Draw* helpers draw at it (origin at the particle, turned by its rotation; sizes aren't
+	// scaled: use `particle.size * particle.scale`)
 	customDraw: proc(emitter: ^ParticleEmitter, particle: ^Particle, renderer: ^sdl.Renderer),
 	// MAX_PARTICLES slots, used as a ring (in the node's arena)
 	particles: []Particle,
-	// The current cycle: seconds since it started, time toward the next emission, particles emitted
+	// Seconds since the current cycle started
 	cycleTime: f32,
+	// Seconds toward the next emission
 	emitTimer: f32,
+	// Particles emitted in the current cycle
 	emittedInCycle: int,
+	// A cycle is under way (false: the next update starts one)
 	cycleStarted: bool,
 	// The slot the next particle goes in
 	head: int,
@@ -380,7 +441,18 @@ CreateParticleEmitter :: proc(scene: ^Scene, settings := DEFAULT_PARTICLE_SETTIN
 	return emitter
 }
 
-// Starts emitting: a new cycle begins now (live particles carry on)
+/*
+Starts emitting: a new cycle begins on the next update (live particles carry on). Use it to fire
+a one-shot (non-continuous) emitter again.
+
+Inputs:
+- emitter: The emitter
+
+Example:
+	// Given: boom: ^e.ParticleEmitter, at: [2]f32
+	boom.position = at
+	e.ParticleEmitter_Start(boom)
+*/
 ParticleEmitter_Start :: proc(emitter: ^ParticleEmitter) {
 	emitter.emitting = true
 	emitter.cycleStarted = false
@@ -389,18 +461,36 @@ ParticleEmitter_Start :: proc(emitter: ^ParticleEmitter) {
 	emitter.emittedInCycle = 0
 }
 
-// Stops emitting; live particles finish their lives
+/*
+Stops emitting; live particles finish their lives.
+
+Inputs:
+- emitter: The emitter
+*/
 ParticleEmitter_Stop :: proc(emitter: ^ParticleEmitter) {
 	emitter.emitting = false
 	emitter.cycleStarted = false
 }
 
-// Removes every live particle
+/*
+Removes every live particle (emitting goes on if it was).
+
+Inputs:
+- emitter: The emitter
+*/
 ParticleEmitter_Clear :: proc(emitter: ^ParticleEmitter) {
 	for &p in emitter.particles do p.alive = false
 }
 
-// How many particles are alive
+/*
+How many particles are alive.
+
+Inputs:
+- emitter: The emitter
+
+Returns:
+- The count, at most MAX_PARTICLES
+*/
 ParticleEmitter_AliveCount :: proc(emitter: ^ParticleEmitter) -> int {
 	count := 0
 	for p in emitter.particles do if p.alive do count += 1
@@ -408,8 +498,8 @@ ParticleEmitter_AliveCount :: proc(emitter: ^ParticleEmitter) -> int {
 }
 
 /*
-Moves the emitter on by `deltaTime` seconds: moves every particle, then emits. Its node's update
-does this each frame; call it yourself only for an emitter outside a scene.
+Moves the emitter on by `deltaTime` seconds: moves every particle, then emits, then collides.
+Its node's update does this each frame.
 */
 @(private)
 ParticleEmitter_Update :: proc(emitter: ^ParticleEmitter, deltaTime: f32) {
@@ -508,19 +598,27 @@ ParticleSettings_Fields :: proc() -> []ParticleFieldInfo {
 
 // A ParticleSettings field, described by its tags (`ParticleSettings_Fields`)
 ParticleFieldInfo :: struct {
+	// The field's name, as scene files store it
 	name: string,
+	// The field's type (f32, int, bool, [2]f32, sdl.Color, ParticleShape, ColorRamp)
 	type: typeid,
+	// What editors show (the `label` tag; the name without one)
 	label: string,
 	// Set on the first field of each group
 	group: string,
 	// The slider range (when `ranged`)
 	min, max: f32,
+	// It has a `max` tag (a slider range)
 	ranged: bool,
 }
 
 /*
 A setting's value as scene files store it (numbers, `true`/`false`, "x,y", `#rrggbb[aa]`, enum
 names, a ramp's `position:#color` pairs).
+
+Inputs:
+- settings: The settings
+- name: The field's name (`ParticleSettings_Fields`)
 
 Returns:
 - The text (temp allocated), and false for an unknown name
@@ -544,8 +642,18 @@ ParticleSettings_Get :: proc(settings: ParticleSettings, name: string) -> (strin
 /*
 Sets a setting from text (the format of `ParticleSettings_Get`).
 
+Inputs:
+- settings: The settings to change
+- name: The field's name
+- text: Its value (surrounding spaces are ignored)
+
 Returns:
 - false if the name is unknown or the text isn't a value for it (nothing changes)
+
+Example:
+	// Given: emitter: ^e.ParticleEmitter
+	e.ParticleSettings_Set(&emitter.settings, "particleColor", "#ff8800")
+	e.ParticleSettings_Set(&emitter.settings, "spread", "16,4")
 */
 ParticleSettings_Set :: proc(settings: ^ParticleSettings, name, text: string) -> bool {
 	field := reflect.struct_field_by_name(ParticleSettings, name)
@@ -587,6 +695,9 @@ ParticleSettings_Set :: proc(settings: ^ParticleSettings, name, text: string) ->
 /*
 The settings that differ from DEFAULT_PARTICLE_SETTINGS, as name/value text in field order: the
 attributes of a scene file's `<particles>` element.
+
+Inputs:
+- settings: The settings
 
 Returns:
 - The pairs (temp allocated)
@@ -737,8 +848,8 @@ collideParticles :: proc(emitter: ^ParticleEmitter) {
 }
 
 /*
-Draws every live particle. Shapes are batched into one geometry call (the texture's into
-another); custom ones are drawn one by one by `customDraw`.
+Draws every live particle in one geometry call (textured for the Texture shape); Custom ones are
+drawn one by one by `customDraw`.
 */
 @(private="file")
 particleEmitterDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {

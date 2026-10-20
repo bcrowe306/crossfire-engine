@@ -70,6 +70,7 @@ LDtkWorldLayout :: enum {
 LDtkTilesetRect :: struct {
 	// The tileset's uid (LDtk_FindTileset)
 	tileset: int,
+	// The rectangle in the tileset's image, in pixels: top-left corner, width, height
 	x, y, w, h: int,
 }
 
@@ -78,6 +79,7 @@ LDtkGridPoint :: distinct [2]int
 
 // Where an entity is: an EntityRef field's value
 LDtkEntityRef :: struct {
+	// The iids of the entity, and of its layer, level and world (`LDtk_FindEntityByIid`)
 	entityIid, layerIid, levelIid, worldIid: string,
 }
 
@@ -99,10 +101,12 @@ LDtkValue :: union {
 
 // A custom field of a level or an entity
 LDtkField :: struct {
+	// The field's name in LDtk
 	identifier: string,
 	// LDtk's type name: "Int", "Float", "Bool", "String", "Multilines", "Color", "Point",
 	// "FilePath", "Tile", "EntityRef", "LocalEnum.Item", "ExternEnum.X", "Array<Int>"...
 	type: string,
+	// Its value (nil when null; `LDtk_FieldValue` reads it as a type)
 	value: LDtkValue,
 }
 
@@ -122,6 +126,7 @@ LDtkTile :: struct {
 
 // An entity instance
 LDtkEntity :: struct {
+	// Its definition's name ("Player")
 	identifier: string,
 	// Unique id (other entities' EntityRef fields point at it)
 	iid: string,
@@ -131,11 +136,15 @@ LDtkEntity :: struct {
 	grid: [2]int,
 	// The pivot in its rectangle: 0-1 ({0.5, 1}: bottom middle)
 	pivot: [2]f32,
+	// Width and height in pixels
 	size: [2]f32,
+	// Its definition's tags
 	tags: []string,
 	// The tile LDtk shows it with (its definition's, or a field's); none for no tile
 	tile: Maybe(LDtkTilesetRect),
+	// The color LDtk shows it in (its smart color: a Color field's, else its definition's)
 	color: sdl.Color,
+	// Its custom fields' values
 	fields: []LDtkField,
 	// Its definition (render mode, tile mode...); nil if the project has none by its name
 	def: ^LDtkEntityDef,
@@ -143,27 +152,36 @@ LDtkEntity :: struct {
 
 // A layer of a level
 LDtkLayer :: struct {
+	// The layer's name ("Collisions")
 	identifier: string,
+	// Unique id of this layer instance
 	iid: string,
+	// What it holds
 	type: LDtkLayerType,
+	// Cell size in pixels
 	gridSize: int,
 	// Width and height in cells
 	cells: [2]int,
 	// Total pixel offset (definition plus instance)
 	offset: [2]f32,
+	// Opacity 0-1
 	opacity: f32,
+	// Shown (LDtk's eye)
 	visible: bool,
 	// The tileset its tiles come from: its uid (-1 for none) and its image's path
 	tileset: int,
+	// The tileset image's path, joined to the project's folder ("" for none)
 	tilesetPath: string,
 	// IntGrid layers: cells.x * cells.y values, row by row; 0 is empty
 	intGrid: []i32,
 	// Tiles layers' tiles, and auto-layers' (IntGrid layers with rules too), back to front
 	tiles: []LDtkTile,
+	// Entities layers: its entities
 	entities: []LDtkEntity,
 	// From the layer definition: how much slower it scrolls (-1 to 1, 0 = none), and whether
 	// parallax also scales it
 	parallax: [2]f32,
+	// Parallax also scales the layer
 	parallaxScaling: bool,
 }
 
@@ -171,7 +189,9 @@ LDtkLayer :: struct {
 LDtkBackground :: struct {
 	// "" for none
 	path: string,
+	// Where the image's top-left corner goes in the level, in pixels
 	topLeft: [2]f32,
+	// Its scale ({1, 1}: its own size)
 	scale: [2]f32,
 	// The part of the image shown: x, y, width, height
 	crop: [4]f32,
@@ -180,22 +200,33 @@ LDtkBackground :: struct {
 // A level touching this one in the world: its iid, and the side (n, s, e, w, ne..., or <, >, o
 // for levels below, above, overlapping)
 LDtkNeighbour :: struct {
+	// The neighbour's iid (`LDtk_FindLevel`)
 	levelIid: string,
+	// The side: "n", "s", "e", "w", "ne"..., or "<", ">", "o"
 	dir: string,
 }
 
 // A level
 LDtkLevel :: struct {
+	// The level's name ("Level_0")
 	identifier: string,
+	// Unique id (what neighbours and entity references use)
 	iid: string,
+	// LDtk's numeric id
 	uid: int,
 	// Its top-left corner in the world (Free and GridVania layouts; -1 for linear ones)
 	world: [2]f32,
+	// Its depth in the world (levels stacked over each other)
 	worldDepth: int,
+	// Width and height in pixels
 	size: [2]f32,
+	// Its background color (the project's when it doesn't set one)
 	bgColor: sdl.Color,
+	// Its background image
 	background: LDtkBackground,
+	// The levels touching it
 	neighbours: []LDtkNeighbour,
+	// Its custom fields' values
 	fields: []LDtkField,
 	// Top-most first, as LDtk lists them
 	layers: []LDtkLayer,
@@ -203,11 +234,15 @@ LDtkLevel :: struct {
 
 // A world: its levels and how they're laid out
 LDtkWorld :: struct {
+	// The world's name ("World" for projects without Multi-worlds)
 	identifier: string,
+	// Unique id
 	iid: string,
+	// How its levels are placed
 	layout: LDtkWorldLayout,
 	// GridVania's cell size
 	gridSize: [2]int,
+	// Its levels, in LDtk's order
 	levels: []LDtkLevel,
 }
 
@@ -220,18 +255,25 @@ LDTK_ICONS_FILE :: "finalbossblues-icons_full_16.png"
 
 // A tileset definition
 LDtkTileset :: struct {
+	// Its id (what layers and tile rects point at: `LDtk_FindTileset`)
 	uid: int,
+	// Its name
 	identifier: string,
 	// The image, joined to the project's folder ("" for none, or LDtk's internal icons)
 	path: string,
 	// LDtk's own icon atlas (no image file the engine can load)
 	embedded: bool,
+	// Tile size in pixels
 	gridSize: int,
+	// Pixels between tiles
 	spacing: int,
+	// Pixels around the tiles, at the image's edges
 	padding: int,
 	// Image size in pixels, and in cells
 	size: [2]int,
+	// Image size in cells
 	cells: [2]int,
+	// Its tags
 	tags: []string,
 	// Text attached to tiles in LDtk ("custom data"), by tile id
 	customData: []LDtkTileData,
@@ -241,32 +283,45 @@ LDtkTileset :: struct {
 
 // A tile's custom data (a tileset's)
 LDtkTileData :: struct {
+	// The tile's id in the tileset
 	tileId: int,
+	// The text LDtk holds for it
 	data: string,
 }
 
 // The tiles tagged with an enum value (a tileset's)
 LDtkEnumTag :: struct {
+	// The enum value's name
 	enumValue: string,
+	// The ids of the tiles tagged with it
 	tileIds: []int,
 }
 
 // An IntGrid value's name and color (a layer definition's)
 LDtkIntGridValue :: struct {
+	// The value cells hold (1 and up)
 	value: int,
 	// "" when unnamed
 	identifier: string,
+	// The color LDtk shows its cells in
 	color: sdl.Color,
 }
 
 // A layer definition
 LDtkLayerDef :: struct {
+	// Its id
 	uid: int,
+	// The layer's name (layers of levels have the same: `LDtk_FindLayerDef`)
 	identifier: string,
+	// What its layers hold
 	type: LDtkLayerType,
+	// Cell size in pixels
 	gridSize: int,
+	// IntGrid layers: their values' names and colors
 	intGridValues: []LDtkIntGridValue,
+	// How much slower its layers scroll (-1 to 1, 0 = none)
 	parallax: [2]f32,
+	// Parallax also scales its layers
 	parallaxScaling: bool,
 }
 
@@ -298,18 +353,27 @@ LDtkTileRenderMode :: enum {
 
 // An entity definition
 LDtkEntityDef :: struct {
+	// Its id
 	uid: int,
+	// The entity's name ("Player")
 	identifier: string,
+	// Default width and height in pixels
 	size: [2]f32,
+	// The pivot in its rectangle: 0-1
 	pivot: [2]f32,
+	// The color LDtk draws it in
 	color: sdl.Color,
+	// Its tags
 	tags: []string,
+	// How LDtk draws it
 	renderMode: LDtkEntityRenderMode,
+	// How its tile fills its rectangle
 	tileRenderMode: LDtkTileRenderMode,
 	// Top, right, bottom, left (NineSlice)
 	nineSlice: [4]f32,
 	// Shapes: no fill; fill and line opacities. Tiles: opacity
 	hollow: bool,
+	// Opacities 0-1: the shape's fill (default 0.08) and line (default 1), and the tile (default 1)
 	fillOpacity, lineOpacity, tileOpacity: f32,
 	// The definition's tile (entities may show another, from a field)
 	tile: Maybe(LDtkTilesetRect),
@@ -317,8 +381,11 @@ LDtkEntityDef :: struct {
 
 // An enum definition: its values, in order
 LDtkEnumDef :: struct {
+	// Its id
 	uid: int,
+	// The enum's name
 	identifier: string,
+	// Its values' names, in order
 	values: []string,
 }
 
@@ -326,16 +393,23 @@ LDtkEnumDef :: struct {
 An LDtk project. Made by LDtk_Load; everything in it is in its arena (LDtk_Destroy).
 */
 LDtkProject :: struct {
+	// Holds everything below (`LDtk_Destroy` frees it)
 	arena: MemoryArena,
 	// The .ldtk file, and its folder (paths in the data are joined to it)
 	path, dir: string,
+	// The LDtk version that saved it ("1.5.3")
 	jsonVersion: string,
+	// The levels' default background color
 	bgColor: sdl.Color,
 	// At least one (projects without Multi-worlds have one, from the file's root)
 	worlds: []LDtkWorld,
+	// Tileset definitions
 	tilesets: []LDtkTileset,
+	// Layer definitions
 	layers: []LDtkLayerDef,
+	// Entity definitions
 	entities: []LDtkEntityDef,
+	// Enum definitions, external ones included
 	enums: []LDtkEnumDef,
 }
 
@@ -347,6 +421,11 @@ Inputs:
 
 Returns:
 - The project (LDtk_Destroy frees it), or nil and what went wrong (temp allocated)
+
+Example:
+	project, problem := e.LDtk_Load("assets/world.ldtk")
+	if project == nil do log.errorf("LDtk: %s", problem)
+	defer e.LDtk_Destroy(project)
 */
 LDtk_Load :: proc(path: string) -> (^LDtkProject, string) {
 	text, ok := Platform_ReadFile(path)
@@ -439,7 +518,12 @@ LDtk_Parse :: proc(text, path: string) -> (^LDtkProject, string) {
 	return project, ""
 }
 
-// Frees a project and everything in it
+/*
+Frees a project and everything in it. Data taken from it (levels, entities, strings) is gone too.
+
+Inputs:
+- project: The project (nil does nothing)
+*/
 LDtk_Destroy :: proc(project: ^LDtkProject) {
 	if project == nil do return
 	MemoryArena_Destroy(&project.arena)
@@ -448,6 +532,10 @@ LDtk_Destroy :: proc(project: ^LDtkProject) {
 
 /*
 A level by identifier ("Level_0") or iid, in any world.
+
+Inputs:
+- project: The project (nil gives nil)
+- name: The level's identifier or iid
 
 Returns:
 - The level, or nil
@@ -460,21 +548,48 @@ LDtk_FindLevel :: proc(project: ^LDtkProject, name: string) -> ^LDtkLevel {
 	return nil
 }
 
-// A level's layer by identifier, or nil
+/*
+A level's layer by identifier.
+
+Inputs:
+- level: The level (nil gives nil)
+- identifier: The layer's name ("Collisions")
+
+Returns:
+- The layer, or nil
+*/
 LDtk_FindLayer :: proc(level: ^LDtkLevel, identifier: string) -> ^LDtkLayer {
 	if level == nil do return nil
 	for &layer in level.layers do if layer.identifier == identifier do return &layer
 	return nil
 }
 
-// A tileset by uid, or nil
+/*
+A tileset by uid (what `LDtkLayer.tileset` and `LDtkTilesetRect.tileset` hold).
+
+Inputs:
+- project: The project (nil gives nil)
+- uid: The tileset's uid
+
+Returns:
+- The tileset, or nil
+*/
 LDtk_FindTileset :: proc(project: ^LDtkProject, uid: int) -> ^LDtkTileset {
 	if project == nil do return nil
 	for &tileset in project.tilesets do if tileset.uid == uid do return &tileset
 	return nil
 }
 
-// A layer definition by identifier, or nil
+/*
+A layer definition by identifier.
+
+Inputs:
+- project: The project (nil gives nil)
+- identifier: The layer's name
+
+Returns:
+- The definition, or nil
+*/
 LDtk_FindLayerDef :: proc(project: ^LDtkProject, identifier: string) -> ^LDtkLayerDef {
 	if project == nil do return nil
 	for &def in project.layers do if def.identifier == identifier do return &def
@@ -484,7 +599,16 @@ LDtk_FindLayerDef :: proc(project: ^LDtkProject, identifier: string) -> ^LDtkLay
 /*
 An IntGrid layer's value at a cell: 0 when empty, outside the layer, or not an IntGrid layer.
 
+Inputs:
+- layer: The layer (nil gives 0)
+- cx: The cell's column, from the left
+- cy: The cell's row, from the top
+
+Returns:
+- The cell's value
+
 Example:
+	// Given: level: ^e.LDtkLevel, x: f32, y: f32
 	walls := e.LDtk_FindLayer(level, "Collisions")
 	cell := [2]int{int(x) / walls.gridSize, int(y) / walls.gridSize}
 	solid := e.LDtk_IntGridAt(walls, cell.x, cell.y) != 0
@@ -496,7 +620,16 @@ LDtk_IntGridAt :: proc(layer: ^LDtkLayer, cx, cy: int) -> int {
 	return int(layer.intGrid[index])
 }
 
-// A field by identifier (of a level or an entity), or nil
+/*
+A custom field by identifier (of a level or an entity).
+
+Inputs:
+- fields: The level's or entity's fields
+- identifier: The field's name
+
+Returns:
+- The field, or nil
+*/
 LDtk_FindField :: proc(fields: []LDtkField, identifier: string) -> ^LDtkField {
 	for &field in fields do if field.identifier == identifier do return &field
 	return nil
@@ -504,9 +637,18 @@ LDtk_FindField :: proc(fields: []LDtkField, identifier: string) -> ^LDtkField {
 
 /*
 A custom field's value as a type, or the default when it's missing, null or another type. Ints
-read as floats too.
+read as floats too, and as `int` (which reads Int fields).
+
+Inputs:
+- fields: The level's or entity's fields
+- identifier: The field's name
+- default: What to return when the field has no value of type T (it also sets T)
+
+Returns:
+- The value, or `default`
 
 Example:
+	// Given: entity: ^e.LDtkEntity
 	hp := e.LDtk_FieldValue(entity.fields, "hp", i64(3))
 	name := e.LDtk_FieldValue(entity.fields, "name", "nobody")
 */
@@ -531,6 +673,10 @@ A field's value in the text form scene files and script fields use: "12", "0.5",
 string, "#rrggbbaa", a point as the pixel position of its cell's middle ("x,y", from `gridSize`).
 Arrays, tiles and entity references have none.
 
+Inputs:
+- value: The field's value
+- gridSize: The layer's cell size in pixels (for points)
+
 Returns:
 - The text (temp allocated), and whether the value has a text form
 */
@@ -552,6 +698,12 @@ LDtk_ValueText :: proc(value: LDtkValue, gridSize: int) -> (string, bool) {
 /*
 The files a project needs besides the .ldtk itself: its separate level files, tileset images and
 level backgrounds, relative to the .ldtk's folder (temp allocated). Exports copy them with it.
+
+Inputs:
+- text: The .ldtk file's contents
+
+Returns:
+- The relative paths, each once (empty when the text isn't valid JSON)
 */
 LDtk_Dependencies :: proc(text: string) -> []string {
 	context.allocator = context.temp_allocator

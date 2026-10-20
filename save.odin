@@ -39,6 +39,7 @@ Where saves go:
 - Web: the browser's localStorage, under `<game name>/<slot>`.
 */
 
+// The save format written by `Save_ToJSON`; saves from a newer version aren't loaded
 SAVE_FORMAT_VERSION :: 1
 
 /*
@@ -49,7 +50,10 @@ Inputs:
 - game: The game (default: the one playing)
 
 Returns:
-- Whether it was written (failures are logged)
+- Whether it was written (failures are logged); false when there's no game
+
+Example:
+	if e.Save_Game() do log.info("saved")
 */
 Save_Game :: proc(slot := "save", game: ^Game = nil) -> bool {
 	game := game != nil ? game : currentGame
@@ -67,8 +71,15 @@ Save_Game :: proc(slot := "save", game: ^Game = nil) -> bool {
 /*
 Loads a save into the globals and calls their `loaded` hooks.
 
+Inputs:
+- slot: The save's name, as given to `Save_Game`
+- game: The game (default: the one playing)
+
 Returns:
 - false if there's no such save or it can't be read (the globals are left as they were)
+
+Example:
+	if e.Save_Exists() && !e.Load_Game() do log.warn("the save couldn't be loaded")
 */
 Load_Game :: proc(slot := "save", game: ^Game = nil) -> bool {
 	game := game != nil ? game : currentGame
@@ -84,20 +95,43 @@ Load_Game :: proc(slot := "save", game: ^Game = nil) -> bool {
 	return true
 }
 
-// Whether a save slot exists
+/*
+Whether a save slot exists.
+
+Inputs:
+- slot: The save's name
+- game: The game (default: the one playing)
+
+Returns:
+- true if it exists; false too when there's no game
+*/
 Save_Exists :: proc(slot := "save", game: ^Game = nil) -> bool {
 	game := game != nil ? game : currentGame
 	return game != nil && Platform_SaveExists(saveName(game, slot))
 }
 
-// Deletes a save slot (nothing happens if there's none)
+/*
+Deletes a save slot (nothing happens if there's none).
+
+Inputs:
+- slot: The save's name
+- game: The game (default: the one playing)
+*/
 Save_Delete :: proc(slot := "save", game: ^Game = nil) {
 	game := game != nil ? game : currentGame
 	if game != nil do Platform_SaveDelete(saveName(game, slot))
 }
 
 /*
-The globals as save JSON (what Save_Game writes).
+The globals as save JSON (what `Save_Game` writes). Fields that can't be written as JSON are
+skipped with a warning.
+
+Inputs:
+- game: The game
+- allocator: For the text
+
+Returns:
+- The JSON text (allocated with `allocator`), and true
 */
 Save_ToJSON :: proc(game: ^Game, allocator := context.allocator) -> (string, bool) {
 	b := strings.builder_make(allocator)
@@ -121,11 +155,16 @@ Save_ToJSON :: proc(game: ^Game, allocator := context.allocator) -> (string, boo
 }
 
 /*
-Sets the globals' fields from save JSON (what Load_Game reads). Fields the save doesn't have are
-left alone; globals it doesn't name too.
+Sets the globals' fields from save JSON (what `Load_Game` reads). Fields the save doesn't have are
+left alone; globals it doesn't name too. Doesn't call the `loaded` hooks (`Load_Game` does).
+Strings and other memory it reads go in the game's arena.
+
+Inputs:
+- game: The game
+- text: The save's JSON
 
 Returns:
-- false if the text isn't a save
+- false if the text isn't a save (or is from a newer `SAVE_FORMAT_VERSION`)
 */
 Save_FromJSON :: proc(game: ^Game, text: string) -> bool {
 	value, err := json.parse_string(text, allocator = context.temp_allocator)

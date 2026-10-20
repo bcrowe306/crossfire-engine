@@ -1,0 +1,63 @@
+# Builds the API documentation (tools/build_docs.sh: Odin's pkg.odin-lang.org generator) and
+# publishes it with GitHub Pages, on every push to main that changes the engine's code or docs,
+# or by hand (Actions > Docs). The repository's Pages source must be "GitHub Actions".
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths: ["*.odin", "docs/**", "README.md", "tools/build_docs.sh", ".github/workflows/docs.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  ODIN_VERSION: dev-2026-10
+  # pkg.odin-lang.org at a known commit (newer ones may need a newer Odin)
+  GENERATOR_COMMIT: 3eb3d0cbd6b4a01b898307137fdb4854b708fe50
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Odin and libcmark
+        run: |
+          sudo apt-get update && sudo apt-get install -y libcmark-dev
+          curl -fsSL -o odin.tar.gz "https://github.com/odin-lang/Odin/releases/download/$ODIN_VERSION/odin-linux-amd64-$ODIN_VERSION.tar.gz"
+          mkdir -p "$HOME/odin" && tar -xzf odin.tar.gz -C "$HOME/odin" && rm odin.tar.gz
+          echo "$(dirname "$(find "$HOME/odin" -name odin -type f -perm -u+x | head -1)")" >> "$GITHUB_PATH"
+
+      - name: Box2D (the bindings check for its library)
+        run: tools/build_box2d.sh
+
+      - name: The generator
+        run: |
+          git clone https://github.com/odin-lang/pkg.odin-lang.org "$HOME/pkg-odin"
+          git -C "$HOME/pkg-odin" checkout "$GENERATOR_COMMIT"
+          (cd "$HOME/pkg-odin" && odin build . -out:odin-doc)
+
+      - name: Build the site
+        run: tools/build_docs.sh "$HOME/pkg-odin/odin-doc"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

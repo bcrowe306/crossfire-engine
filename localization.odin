@@ -28,7 +28,9 @@ language (`Locale_Set`, from an options menu) changes them at once. "@@" starts 
 literal "@".
 
 Example:
-	coins := fmt.tprintf(e.Tr("hud.coins"), state.coins)
+	// Given: coinCount: int, item: ^e.MenuItem
+	coins := fmt.tprintf(e.Tr("hud.coins"), coinCount)
+	_ = coins
 	// An options menu's language select
 	e.Locale_Set(game, e.Locale_List(game)[item.selectedOption])
 */
@@ -58,6 +60,9 @@ Inputs:
 
 Returns:
 - false (logged) when the table can't be parsed
+
+Example:
+	e.Locale_LoadCSV(game, "key,en,fr\nmenu.play,Play,Jouer\n", "builtin")
 */
 Locale_LoadCSV :: proc(game: ^Game, text: string, source := "translations") -> bool {
 	reader: csv.Reader
@@ -123,6 +128,9 @@ Inputs:
 
 Returns:
 - false (logged) when it can't be read or parsed
+
+Example:
+	e.Locale_LoadFile(game, "i18n/extra.csv")
 */
 Locale_LoadFile :: proc(game: ^Game, path: string) -> bool {
 	bytes, ok := Platform_ReadFile(path)
@@ -144,6 +152,9 @@ Inputs:
 
 Returns:
 - false when no table has it (the language stays)
+
+Example:
+	if !e.Locale_Set(game, "fr") do log.warn("no French text")
 */
 Locale_Set :: proc(game: ^Game, locale: string) -> bool {
 	game := game != nil ? game : currentGame
@@ -161,14 +172,30 @@ Locale_Set :: proc(game: ^Game, locale: string) -> bool {
 	return false
 }
 
-// The language in use ("" when no table is loaded)
+/*
+The language in use.
+
+Inputs:
+- game: The game (nil: the one playing)
+
+Returns:
+- Its name as the tables' first row has it ("" when no table is loaded); the game's memory
+*/
 Locale_Get :: proc(game: ^Game = nil) -> string {
 	game := game != nil ? game : currentGame
 	if game == nil || len(game.localization.locales) == 0 do return ""
 	return game.localization.locales[game.localization.current]
 }
 
-// The languages the tables have, in their order (the game's: don't keep the slice past it)
+/*
+The languages the tables have, in their order (the first is the fallback).
+
+Inputs:
+- game: The game (nil: the one playing)
+
+Returns:
+- The names (the game's: don't keep the slice past it, or past loading another table); nil without a game
+*/
 Locale_List :: proc(game: ^Game = nil) -> []string {
 	game := game != nil ? game : currentGame
 	if game == nil do return nil
@@ -217,6 +244,13 @@ Tr :: proc(key: string, game: ^Game = nil) -> string {
 /*
 Text as Labels and Menu items show it: "@key" is `Tr(key)`, "@@..." is the text from its second
 character (a literal "@"), anything else is itself.
+
+Inputs:
+- text: The text
+- game: The game (nil: the one playing)
+
+Returns:
+- The text to show (a translation, or part of `text`: nothing is allocated)
 */
 Tr_Text :: proc(text: string, game: ^Game = nil) -> string {
 	if len(text) < 2 || text[0] != '@' do return text

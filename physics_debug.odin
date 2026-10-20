@@ -25,7 +25,15 @@ player, `Physics_SetDebugDraw` at run time): every shape filled and outlined in 
 */
 
 /*
-Shows or hides the shapes of every body in a game's scenes, now and in scenes made later.
+Shows or hides the physics debug shapes (bodies, joints, rays) in every scene of a game, now and
+in scenes made later (it sets `Game.physics.debugDraw`).
+
+Inputs:
+- game: The game
+- on: Show them
+
+Example:
+	if e.Input_IsKeyJustPressed(.F3) do e.Physics_SetDebugDraw(game, !game.physics.debugDraw)
 */
 Physics_SetDebugDraw :: proc(game: ^Game, on: bool) {
 	if game.physics.pixelsPerMeter <= 0 do game.physics = DEFAULT_PHYSICS
@@ -34,8 +42,14 @@ Physics_SetDebugDraw :: proc(game: ^Game, on: bool) {
 }
 
 /*
-A node's transform relative to its parent as it's drawn: for a dynamic body with smoothing on,
-between its last two physics poses; otherwise its transform.
+A node's transform relative to its parent as it's drawn: for a dynamic body with smoothing on
+(and physics not paused), between its last two physics poses; otherwise its local transform.
+
+Inputs:
+- node: The node
+
+Returns:
+- The transform (position, rotation and scale relative to the parent)
 */
 Node_GetRenderLocalTransform :: proc(node: ^Node) -> Transform2D {
 	if Node_Is(node, DynamicBody) {
@@ -53,7 +67,19 @@ Node_GetRenderLocalTransform :: proc(node: ^Node) -> Transform2D {
 
 /*
 A node's world transform as it's drawn (see `Node_GetRenderLocalTransform`): use it to draw at a
-smoothed body, or to follow one with something drawn.
+smoothed body, or to follow one with something drawn. It's `Node_GetWorldTransform` for nodes
+with no dynamic body among them and their parents.
+
+Inputs:
+- node: The node
+
+Returns:
+- The transform, node space to world
+
+Example:
+	// Given: ball: ^e.DynamicBody
+	// A shadow that follows the ball smoothly
+	shadowAt := e.Node_GetRenderWorldTransform(ball).origin + {0, 20}
 */
 Node_GetRenderWorldTransform :: proc(node: ^Node) -> Transform2D {
 	transform := Node_GetRenderLocalTransform(node)

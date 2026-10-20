@@ -33,6 +33,7 @@ Frames are numbered by the animation's source (sprite sheet cell or texture inde
 sprite sheet can hold several animations.
 */
 Animation :: struct {
+	// Name the AnimationPlayer plays it by (owned, allocated with `allocator`)
 	name: string,
 	// First source frame played, inclusive
 	startFrame: int,
@@ -42,6 +43,7 @@ Animation :: struct {
 	fps: f32,
 	// Restart after the last frame instead of ending
 	loop: bool,
+	// How it steps through its frames
 	playMode: AnimationPlayMode,
 
 	// Number of frames this animation plays: endFrame - startFrame + 1
@@ -102,9 +104,13 @@ Cells are numbered left to right, then top to bottom, starting at 0:
 	+---+---+---+
 */
 SpriteSheetAnimation :: struct {
+	// The animation part: name, frame range, fps, procedures
 	using animation: Animation,
+	// The sprite sheet (not owned: the resource manager's, usually)
 	texture: ^sdl.Texture,
+	// Number of cells across
 	columns: int,
+	// Number of cells down
 	rows: int,
 	// Pixels around the outside of the grid
 	margin: f32,
@@ -134,6 +140,7 @@ Returns:
 
 Example:
 	// A 4x2 sheet: walk is the top row, jump the bottom row
+	rm := &game.resourceManager
 	sheet := rm->loadTexture("hero.png")
 	walk := e.CreateSpriteSheetAnimation("walk", sheet, 4, 2, fps = 10, loop = true, startFrame = 0, endFrame = 3)
 	jump := e.CreateSpriteSheetAnimation("jump", sheet, 4, 2, fps = 12, startFrame = 4, endFrame = 7)
@@ -192,7 +199,8 @@ thumbnails). Cells are numbered left to right, top to bottom.
 
 Inputs:
 - sheetSize: The texture's size in pixels
-- columns, rows: The grid
+- columns: Number of cells across
+- rows: Number of cells down
 - margin: Pixels around the grid
 - spacing: Pixels between cells
 - frame: The cell
@@ -237,7 +245,9 @@ An animation where every frame is a separate texture. Frames are numbered by the
 position in `frames`, starting at 0.
 */
 FrameAnimation :: struct {
+	// The animation part: name, frame range, fps, procedures
 	using animation: Animation,
+	// The frame textures, in order (the slice is owned; the textures aren't)
 	frames: []^sdl.Texture,
 }
 
@@ -258,6 +268,7 @@ Returns:
 - The new animation. Add it to a player with `AnimationPlayer_Add`
 
 Example:
+	rm := &game.resourceManager
 	blink := e.CreateFrameAnimation("blink", {rm->loadTexture("eye_open.png"), rm->loadTexture("eye_closed.png")}, fps = 4, loop = true)
 */
 CreateFrameAnimation :: proc(
@@ -288,12 +299,18 @@ Inputs:
 - rm: Resource manager to load (and cache) the textures with
 - name: Name used to play the animation from an AnimationPlayer
 - paths: Image file paths, one per frame, in order
-- fps, loop, startFrame, endFrame, playMode, allocator: As for `CreateFrameAnimation`
+- fps: Frames per second
+- loop: Restart after the last frame instead of ending
+- startFrame: First frame played, inclusive
+- endFrame: Last frame played, inclusive. -1 means the last texture
+- playMode: Forward, Reverse or PingPong
+- allocator: Allocator for the animation. Use the owning node's (`Node_GetAllocator`) to free it with the node
 
 Returns:
 - The new animation
 
 Example:
+	rm := &game.resourceManager
 	light := e.CreateFrameAnimationFromFiles(rm, "blink", {"light_off.png", "light_on.png"}, fps = 2, loop = true)
 */
 CreateFrameAnimationFromFiles :: proc(

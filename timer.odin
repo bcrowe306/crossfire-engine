@@ -9,16 +9,30 @@ has passed. A looping timer starts over (keeping any overshoot, so it doesn't dr
 it stops. Being driven by delta time, it pauses with a hitstop and anything else that stops time.
 
 Example:
+	package mygame
+
+	import e "../engine"
+	import "core:time"
+	import sdl "vendor:sdl3"
+
 	Spawner :: struct {
 		using node: e.Node,
 		timer: e.Timer,
 	}
-	e.TimerNode_Init(&spawner.timer, 2 * time.Second, auto_start = true, loop = true, allocator = e.Node_GetAllocator(spawner))
-	spawner.timer.onExpire->subscribe(proc(_: ^e.EventSubject, _: rawptr, _: e.EventData, user: rawptr) {
-		// every two seconds
-	}, spawner)
-	// In the node's update:
-	spawner.timer->update(f32(deltaTime))
+
+	CreateSpawner :: proc(scene: ^e.Scene) -> ^Spawner {
+		spawner := e.CreateNode(scene, Spawner)
+		e.TimerNode_Init(&spawner.timer, 2 * time.Second, auto_start = true, loop = true, allocator = e.Node_GetAllocator(spawner))
+		spawner.timer.onExpire->subscribe(proc(_: ^e.EventSubject, _: rawptr, _: e.EventData, user: rawptr) {
+			spawner := cast(^Spawner)user
+			_ = spawner // every two seconds: spawn something
+		}, spawner)
+		spawner.update = proc(node: ^e.Node, _: []sdl.Event, deltaTime: f64) {
+			spawner := cast(^Spawner)node
+			spawner.timer->update(f32(deltaTime))
+		}
+		return spawner
+	}
 */
 Timer :: struct {
 	// Time run since it (re)started
@@ -33,14 +47,16 @@ Timer :: struct {
 	onTick: EventSubject,
 	// When it expires; the data is the overshoot in seconds (f32)
 	onExpire: EventSubject,
-	// Method-style procedures: `timer->start()`, `timer->setDuration(seconds)`, `timer->update(dt)`
+	// `TimerNode_Start`: `timer->start()`
 	start: proc(timer: ^Timer),
+	// `TimerNode_SetDuration`: `timer->setDuration(seconds)`
 	setDuration: proc(timer: ^Timer, durationSec: f32),
+	// Advances a running timer by `deltaTime` seconds: `timer->update(dt)`. Call it every frame
 	update: proc(timer: ^Timer, deltaTime: f32),
 }
 
 /*
-Prepares a timer.
+Prepares a timer: its events and procedures. Its elapsed time starts at zero.
 
 Inputs:
 - timer: The timer
@@ -79,13 +95,23 @@ TimerNode_Create :: proc(durationSeconds: f32, auto_start: bool = false, loop: b
 	return timer
 }
 
-// Starts (or restarts) a timer from zero
+/*
+Starts (or restarts) a timer from zero. Also `timer->start()`.
+
+Inputs:
+- timer: The timer
+*/
 TimerNode_Start :: proc(timer: ^Timer) {
 	timer.elapsed = 0
 	timer.running = true
 }
 
-// Stops a timer where it is (`timer.running = true` resumes it)
+/*
+Stops a timer where it is (`timer.running = true` resumes it).
+
+Inputs:
+- timer: The timer
+*/
 TimerNode_Stop :: proc(timer: ^Timer) {
 	timer.running = false
 }
@@ -115,7 +141,14 @@ TimerNode_Update :: proc(timer: ^Timer, deltaTime: f32) {
 	timer.onExpire->notify(timer, f32(time.duration_seconds(overshoot)))
 }
 
-// Sets how long a timer runs before it expires, in seconds (its elapsed time is kept)
+/*
+Sets how long a timer runs before it expires (its elapsed time is kept). Also
+`timer->setDuration(seconds)`.
+
+Inputs:
+- timer: The timer
+- durationSec: The new duration, in seconds
+*/
 TimerNode_SetDuration :: proc(timer: ^Timer, durationSec: f32) {
 	timer.duration = time.Duration(f64(durationSec) * f64(time.Second))
 }

@@ -10,6 +10,7 @@ helpers between `RenderTarget_Begin` and `RenderTarget_End`; then draw its `text
 (`DrawTexture`, a Sprite's texture).
 
 Example:
+	// Given: level: ^e.Scene
 	// A minimap: the level, drawn small every frame, shown in a corner by a HUD global
 	minimap := e.RenderTarget_Create(game, {320, 180})
 	// In the HUD's draw:
@@ -23,8 +24,11 @@ RenderTarget :: struct {
 	size: [2]f32,
 	// The renderer target RenderTarget_Begin replaced, put back by RenderTarget_End
 	previous: ^sdl.Texture,
+	// The renderer viewport before RenderTarget_Begin, put back by RenderTarget_End
 	previousViewport: sdl.Rect,
+	// The logical presentation size before RenderTarget_Begin, put back by RenderTarget_End
 	previousLogical: [2]i32,
+	// The logical presentation mode before RenderTarget_Begin, put back by RenderTarget_End
 	previousMode: sdl.RendererLogicalPresentation,
 }
 
@@ -38,6 +42,10 @@ Inputs:
 
 Returns:
 - The target (`RenderTarget_Destroy` frees it), or nil (logged) when the renderer can't make one
+
+Example:
+	minimap := e.RenderTarget_Create(game, {320, 180})
+	defer e.RenderTarget_Destroy(minimap)
 */
 RenderTarget_Create :: proc(game: ^Game, size: [2]f32, smooth := false) -> ^RenderTarget {
 	texture := sdl.CreateTexture(game.renderer, .RGBA32, .TARGET, i32(max(size.x, 1)), i32(max(size.y, 1)))
@@ -57,7 +65,12 @@ RenderTarget_Create :: proc(game: ^Game, size: [2]f32, smooth := false) -> ^Rend
 	return target
 }
 
-// Frees a render target and its texture
+/*
+Frees a render target and its texture.
+
+Inputs:
+- target: The target (nil does nothing)
+*/
 RenderTarget_Destroy :: proc(target: ^RenderTarget) {
 	if target == nil do return
 	sdl.DestroyTexture(target.texture)
@@ -66,12 +79,20 @@ RenderTarget_Destroy :: proc(target: ^RenderTarget) {
 
 /*
 Draws into a target from now on (until `RenderTarget_End`): the Draw* helpers and SDL calls land in
-its texture, in its own pixels (the game's logical presentation is off meanwhile).
+its texture, in its own pixels (the game's logical presentation is off meanwhile). Calls can
+nest across different targets; don't begin the same target twice before ending it.
 
 Inputs:
 - renderer: The renderer that made it
 - target: The target
 - clear: Clear it to `clearColor` first
+- clearColor: The color to clear to (transparent by default)
+
+Example:
+	// Given: target: ^e.RenderTarget
+	e.RenderTarget_Begin(renderer, target, clear = true)
+	e.DrawCircle(renderer, {160, 90}, 40, sdl.Color{255, 200, 0, 255})
+	e.RenderTarget_End(renderer, target)
 */
 RenderTarget_Begin :: proc(renderer: ^sdl.Renderer, target: ^RenderTarget, clear := false, clearColor := sdl.Color{0, 0, 0, 0}) {
 	target.previous = sdl.GetRenderTarget(renderer).? or_else nil
@@ -88,7 +109,14 @@ RenderTarget_Begin :: proc(renderer: ^sdl.Renderer, target: ^RenderTarget, clear
 	}
 }
 
-// Goes back to drawing where it was before `RenderTarget_Begin` (the screen, or another target)
+/*
+Goes back to drawing where it was before `RenderTarget_Begin` (the screen, or another target),
+with the renderer's viewport and logical presentation as they were.
+
+Inputs:
+- renderer: The renderer
+- target: The target given to `RenderTarget_Begin`
+*/
 RenderTarget_End :: proc(renderer: ^sdl.Renderer, target: ^RenderTarget) {
 	sdl.SetRenderTarget(renderer, target.previous)
 	sdl.SetRenderLogicalPresentation(renderer, target.previousLogical.x, target.previousLogical.y, target.previousMode)
@@ -98,7 +126,8 @@ RenderTarget_End :: proc(renderer: ^sdl.Renderer, target: ^RenderTarget) {
 
 /*
 Draws a scene into a render target (cleared first): through `view` when given, else through its
-camera scaled from the game's size to the target's (the whole game view, fitted). Its nodes don't
+camera scaled from the game's size to the target's (the whole game view, stretched when the
+aspect ratios differ). Its nodes don't
 update; the scene that's playing can draw another one this way, or itself.
 
 Inputs:
@@ -106,6 +135,10 @@ Inputs:
 - target: Where
 - view: World to target pixels; nil for the camera's view, scaled to the target
 - clearColor: What's under the scene (transparent by default)
+
+Example:
+	// Given: level: ^e.Scene, minimap: ^e.RenderTarget
+	e.Scene_DrawToTarget(level, minimap)
 */
 Scene_DrawToTarget :: proc(scene: ^Scene, target: ^RenderTarget, view: Maybe(Transform2D) = nil, clearColor := sdl.Color{0, 0, 0, 0}) {
 	renderer := scene.game != nil ? scene.game.renderer : nil

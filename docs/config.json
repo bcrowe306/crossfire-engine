@@ -1,0 +1,23 @@
+{
+	"hide_core": true,
+	"hide_base": true,
+	"url_prefix": "/odin_sdl_engine",
+	"domain": "bcrowe306.github.io",
+	"collections": {
+		"engine": {
+			"name": "engine",
+			"source_url": "https://github.com/bcrowe306/odin_sdl_engine/blob/main",
+			"base_url": "/engine",
+			"root_path": "../..",
+			"license": {
+				"text": "See the repository",
+				"url": "https://github.com/bcrowe306/odin_sdl_engine"
+			},
+			"home": {
+				"title": "Crossfire Engine",
+				"description": "A 2D game engine in Odin on SDL3, with Box2D physics: the runtime of the Crossfire Editor's games.",
+				"embed_readme": "../../README.md"
+			}
+		}
+	}
+}

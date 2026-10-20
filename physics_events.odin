@@ -22,7 +22,9 @@ removed body: already handled).
 
 // One body's contacts with another, counted per shape pair (internal)
 BodyContact :: struct {
+	// The other body
 	body: ^PhysicsBody,
+	// Shape pairs touching now (it's removed from the list at 0)
 	count: int,
 }
 
@@ -37,11 +39,19 @@ ShapeOwner :: struct {
 }
 
 /*
-The Areas a body is inside right now (in the order it entered them). Updated by every physics
-step, from Box2D's sensor events. Areas only see bodies on the layers in their mask.
+The Areas a body is inside right now. Updated by every physics step, from Box2D's sensor events.
+Areas only see bodies on the layers in their mask.
+
+Inputs:
+- body: The body
+- allocator: For the result (the frame's temp allocator by default)
 
 Returns:
-- The areas (pointing into the body's own list: valid until the next physics step)
+- The Areas, in the order it entered them
+
+Example:
+	// Given: hero: ^e.CharacterMover
+	for area in e.PhysicsBody_GetAreas(hero) do if area.name == "Water" do hero.velocity *= 0.9
 */
 PhysicsBody_GetAreas :: proc(body: ^PhysicsBody, allocator := context.temp_allocator) -> []^Area {
 	areas := make([]^Area, len(body.areas), allocator)
@@ -49,20 +59,47 @@ PhysicsBody_GetAreas :: proc(body: ^PhysicsBody, allocator := context.temp_alloc
 	return areas
 }
 
-// Whether a body is inside an Area right now
+/*
+Whether a body is inside an Area right now (a list read, no world query).
+
+Inputs:
+- body: The body
+- area: The Area
+
+Returns:
+- true while any of their shapes overlap
+*/
 PhysicsBody_IsInArea :: proc(body: ^PhysicsBody, area: ^Area) -> bool {
 	for contact in body.areas do if contact.body == area do return true
 	return false
 }
 
-// Whether two bodies are touching right now (for an Area: whether `other` is inside it)
+/*
+Whether two bodies are touching right now (for an Area: whether `other` is inside it). A list
+read, no world query.
+
+Inputs:
+- body: One body
+- other: The other
+
+Returns:
+- true while any of their shapes touch
+*/
 PhysicsBody_IsTouching :: proc(body, other: ^PhysicsBody) -> bool {
 	for contact in body.contacts do if contact.body == other do return true
 	return false
 }
 
 /*
-The bodies touching a body right now (for an Area: the bodies inside it), temp allocated.
+The bodies touching a body right now (for an Area: the bodies inside it). Updated by every
+physics step; a CharacterMover's by its moves.
+
+Inputs:
+- body: The body
+- allocator: For the result (the frame's temp allocator by default)
+
+Returns:
+- The bodies, in the order they started touching
 */
 PhysicsBody_GetContacts :: proc(body: ^PhysicsBody, allocator := context.temp_allocator) -> []^PhysicsBody {
 	bodies := make([]^PhysicsBody, len(body.contacts), allocator)

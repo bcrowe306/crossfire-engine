@@ -1,3 +1,8 @@
+package engine
+
+import "core:math"
+import "core:math/rand"
+
 /*
 2D camera support for scenes.
 
@@ -70,11 +75,6 @@ Example:
 	}
 */
 
-package engine
-
-import "core:math"
-import "core:math/rand"
-
 /*
 How a camera tracks a moving position in `Camera2D_Follow`.
 */
@@ -96,6 +96,7 @@ Settings for `Camera2D_Follow`. Each mode only reads its own strength setting;
 `deadzone` applies to every mode, `maxSpeed` to every mode but `.Snap` (which always jumps).
 */
 CameraFollow :: struct {
+	// How it eases toward the position
 	mode: CameraFollowMode,
 	// .Exponential: how tightly to follow. Higher is tighter; around 4-10 feels natural
 	smoothing: f32,
@@ -110,6 +111,7 @@ CameraFollow :: struct {
 	deadzone: [2]f32,
 }
 
+// The follow settings new cameras get: `.Exponential` with a smoothing of 6, no deadzone or speed cap
 DEFAULT_CAMERA_FOLLOW :: CameraFollow{
 	mode = .Exponential,
 	smoothing = 6,
@@ -125,6 +127,7 @@ A zero-initialized Camera2D also works as a plain value outside a scene: a zoom 
 as 1 and following snaps.
 */
 Camera2D :: struct {
+	// The node part: transform, hierarchy, hooks
 	using node: Node,
 	// Screen position the camera's target appears at, usually the center of the screen
 	offset: [2]f32,
@@ -144,9 +147,13 @@ Camera2D :: struct {
 	follow: CameraFollow,
 
 	// Internal state; read it if useful but don't modify it
-	velocity: [2]f32, // Current follow velocity in world units per second (.SmoothDamp)
-	move: CameraMove, // Active `Camera2D_MoveTo` pan
-	shake: CameraShake, // Active `Camera2D_Shake`
+
+	// Current follow velocity in world units per second (.SmoothDamp)
+	velocity: [2]f32,
+	// Active `Camera2D_MoveTo` pan
+	move: CameraMove,
+	// Active `Camera2D_Shake`
+	shake: CameraShake,
 }
 
 // State of a `Camera2D_Shake`
@@ -159,9 +166,13 @@ CameraShake :: struct {
 
 // State of a `Camera2D_MoveTo` pan
 CameraMove :: struct {
+	// A pan is going
 	active: bool,
+	// Start and end of the pan, in world pixels
 	from, to: [2]f32,
+	// Seconds the pan takes, and seconds into it
 	duration, elapsed: f32,
+	// The pan's curve (easing.odin)
 	ease: EaseType,
 }
 
@@ -197,19 +208,37 @@ Scene_CreateCamera :: proc(scene: ^Scene, parent: ^Node = nil) -> ^Camera2D {
 }
 
 /*
-Makes a camera the one the scene draws through. Pass nil to draw without a camera.
+Makes a camera the one the scene draws through (`scene.camera`). Pass nil to draw without a
+camera.
+
+Inputs:
+- scene: The scene
+- camera: The camera (normally one of the scene's nodes), or nil
 */
 Scene_SetCamera :: proc(scene: ^Scene, camera: ^Camera2D) {
 	scene.camera = camera
 }
 
-// The world position the camera looks at
+/*
+The world position the camera looks at (its world position).
+
+Inputs:
+- camera: The camera
+
+Returns:
+- The position, in world pixels
+*/
 Camera2D_GetTarget :: proc(camera: ^Camera2D) -> [2]f32 {
 	return Node_GetWorldPosition(camera)
 }
 
 /*
-Moves the camera to look at a world position, whatever its parent is.
+Moves the camera to look at a world position, whatever its parent is. Unlike `Camera2D_SnapTo`,
+a pan or follow velocity going on is left alone.
+
+Inputs:
+- camera: The camera
+- target: The world position to look at, in world pixels
 */
 Camera2D_SetTarget :: proc(camera: ^Camera2D, target: [2]f32) {
 	Node_SetWorldPosition(camera, target)
@@ -228,6 +257,7 @@ Inputs:
 - max: Bottom-right corner of the allowed world area
 
 Example:
+	// Given: camera: ^e.Camera2D
 	e.Camera2D_SetBounds(camera, {0, 0}, {3840, 2160})
 */
 Camera2D_SetBounds :: proc(camera: ^Camera2D, min, max: [2]f32) {
@@ -238,13 +268,20 @@ Camera2D_SetBounds :: proc(camera: ^Camera2D, min, max: [2]f32) {
 
 /*
 Removes the boundaries set with `Camera2D_SetBounds`, letting the camera move freely.
+
+Inputs:
+- camera: The camera
 */
 Camera2D_ClearBounds :: proc(camera: ^Camera2D) {
 	camera.bounded = false
 }
 
 /*
-The transform from world coordinates to screen coordinates for this camera.
+The transform from world coordinates to screen coordinates for this camera, including any
+shake. Uses the camera's interpolated (drawn) transform.
+
+Inputs:
+- camera: The camera
 
 Returns:
 - offset × zoom × rotate(-world rotation) × translate(-world position)
@@ -261,7 +298,15 @@ Camera2D_ViewTransform :: proc(camera: ^Camera2D) -> Transform2D {
 /*
 Converts a world position to the screen position it is drawn at.
 
+Inputs:
+- camera: The camera
+- world: A position in world pixels
+
+Returns:
+- The screen position, in game coordinates
+
 Example:
+	// Given: camera: ^e.Camera2D, enemy: ^e.Node
 	// Draw a screen-space marker over a world object
 	markerPos := e.Camera2D_WorldToScreen(camera, e.Node_GetWorldPosition(enemy))
 */
@@ -271,6 +316,18 @@ Camera2D_WorldToScreen :: proc(camera: ^Camera2D, world: [2]f32) -> [2]f32 {
 
 /*
 Converts a screen position (e.g. from a mouse event) to the world position under it.
+
+Inputs:
+- camera: The camera
+- screen: A screen position, in game coordinates
+
+Returns:
+- The world position, in world pixels
+
+Example:
+	// Given: camera: ^e.Camera2D
+	world := e.Camera2D_ScreenToWorld(camera, e.Input_GetMousePosition())
+	_ = world
 */
 Camera2D_ScreenToWorld :: proc(camera: ^Camera2D, screen: [2]f32) -> [2]f32 {
 	return Transform2D_Apply(Transform2D_Inverse(Camera2D_ViewTransform(camera)), screen)
@@ -289,6 +346,7 @@ Inputs:
 - deltaTime: Seconds since the last frame
 
 Example:
+	// Given: player: ^e.Node
 	e.Camera2D_Follow(node.scene.camera, e.Node_GetWorldPosition(player), deltaTime)
 */
 Camera2D_Follow :: proc(camera: ^Camera2D, position: [2]f32, deltaTime: f64) {
@@ -339,7 +397,7 @@ Camera2D_Follow :: proc(camera: ^Camera2D, position: [2]f32, deltaTime: f64) {
 /*
 Pans the camera to a world position over a fixed time, following an easing curve.
 
-The pan is advanced automatically by the scene whose camera it is (or by `Camera2D_Update`).
+The pan is advanced automatically by the scene whose camera it is, after its nodes update.
 While it runs, `Camera2D_Follow` does nothing; afterwards following resumes from wherever the
 pan ended. Starting a new pan replaces the current one.
 
@@ -350,6 +408,7 @@ Inputs:
 - ease: Easing curve for the pan
 
 Example:
+	// Given: camera: ^e.Camera2D, door: ^e.Node
 	// Show the exit door, then return to the player
 	e.Camera2D_MoveTo(camera, e.Node_GetWorldPosition(door), 1.2, .InOutSine)
 */
@@ -371,6 +430,14 @@ Camera2D_MoveTo :: proc(camera: ^Camera2D, position: [2]f32, duration: f32, ease
 /*
 Moves the camera to look at a world position immediately, cancelling any pan and easing.
 Use it when a scene starts or the player respawns.
+
+Inputs:
+- camera: The camera
+- position: The world position to look at, in world pixels
+
+Example:
+	// Given: camera: ^e.Camera2D, spawn: [2]f32
+	e.Camera2D_SnapTo(camera, spawn)
 */
 Camera2D_SnapTo :: proc(camera: ^Camera2D, position: [2]f32) {
 	Camera2D_SetTarget(camera, position)
@@ -379,7 +446,13 @@ Camera2D_SnapTo :: proc(camera: ^Camera2D, position: [2]f32) {
 }
 
 /*
-Returns whether a `Camera2D_MoveTo` pan is in progress.
+Tells whether a `Camera2D_MoveTo` pan is in progress.
+
+Inputs:
+- camera: The camera
+
+Returns:
+- true while it pans
 */
 Camera2D_IsMoving :: proc(camera: ^Camera2D) -> bool {
 	return camera.move.active
@@ -388,8 +461,7 @@ Camera2D_IsMoving :: proc(camera: ^Camera2D) -> bool {
 /*
 Advances an active `Camera2D_MoveTo` pan, then applies the camera's bounds.
 
-The scene calls this automatically for its camera after its nodes update. Call it yourself,
-once per frame, only for cameras you manage outside a scene.
+The scene calls this automatically for its camera after its nodes update (engine-internal).
 
 Inputs:
 - camera: The camera to update
@@ -425,7 +497,7 @@ Inputs:
 - duration: Seconds until it settles
 
 Example:
-	e.Camera2D_Shake(self.scene.camera, 4, 0.2)
+	e.Camera2D_Shake(node.scene.camera, 4, 0.2)
 */
 Camera2D_Shake :: proc(camera: ^Camera2D, strength, duration: f32) {
 	if camera == nil || duration <= 0 do return
@@ -487,6 +559,13 @@ Camera2D_ClampToBounds :: proc(camera: ^Camera2D, viewSize: [2]f32) {
 /*
 Converts a screen position to world coordinates using the scene's camera. Without a camera,
 screen and world coordinates are the same.
+
+Inputs:
+- scene: The scene
+- screen: A screen position, in game coordinates
+
+Returns:
+- The world position, in world pixels
 */
 Scene_ScreenToWorld :: proc(scene: ^Scene, screen: [2]f32) -> [2]f32 {
 	if scene.camera == nil do return screen
@@ -494,7 +573,15 @@ Scene_ScreenToWorld :: proc(scene: ^Scene, screen: [2]f32) -> [2]f32 {
 }
 
 /*
-Converts a world position to screen coordinates using the scene's camera.
+Converts a world position to screen coordinates using the scene's camera. Without a camera,
+screen and world coordinates are the same.
+
+Inputs:
+- scene: The scene
+- world: A position in world pixels
+
+Returns:
+- The screen position, in game coordinates
 */
 Scene_WorldToScreen :: proc(scene: ^Scene, world: [2]f32) -> [2]f32 {
 	if scene.camera == nil do return world
@@ -504,6 +591,16 @@ Scene_WorldToScreen :: proc(scene: ^Scene, world: [2]f32) -> [2]f32 {
 /*
 The world position currently under the mouse cursor, for code that polls the mouse instead of
 handling events.
+
+Inputs:
+- scene: The scene (its camera and game)
+
+Returns:
+- The world position, in world pixels
+
+Example:
+	target := e.Scene_GetMouseWorldPosition(scene)
+	e.Debug_Circle(scene, target, 4)
 */
 Scene_GetMouseWorldPosition :: proc(scene: ^Scene) -> [2]f32 {
 	return Scene_ScreenToWorld(scene, Game_GetMousePosition(scene.game))

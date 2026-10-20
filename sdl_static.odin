@@ -31,6 +31,7 @@ SDL_STATIC :: #config(SDL_STATIC, true)
 // imports take that) and absolute (for the linker's -L, quoted: the linker runs through a shell,
 // and the engine may be in a folder with a space, like a macOS app bundle's)
 SDL_STATIC_LIBS :: "sdl/lib/" + ODIN_OS_STRING + "_" + ODIN_ARCH_STRING
+// The same folder as an absolute path (for the linker's -L)
 SDL_STATIC_DIR :: #directory + SDL_STATIC_LIBS
 
 // Whether this build links SDL statically

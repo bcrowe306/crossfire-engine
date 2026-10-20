@@ -4,22 +4,34 @@ import sdl "vendor:sdl3"
 
 // MENU INPUT HANDLING
 
-// The input actions menus navigate with, when the game has them (Godot's names; the editor adds
-// them to new projects): arrows / WASD, the d-pad and the left stick move, Enter / Space and the
-// gamepad's South button press, Escape and East go back. A game without them gets the keys only
+/*
+The input action that moves a menu's focus up.
+
+Menus navigate with the MENU_ACTION_* input actions when the game has `MENU_ACTION_ACCEPT`
+(Godot's names; the editor adds them to new projects, bound to arrows / WASD, the d-pad and the
+left stick to move, Enter / Space and the gamepad's South button to press, Escape and East to go
+back). A game without them gets the keys only.
+*/
 MENU_ACTION_UP :: "ui_up"
+// The input action that moves a menu's focus down (see `MENU_ACTION_UP`)
 MENU_ACTION_DOWN :: "ui_down"
+// The input action that decreases a slider, steps radios back and cycles select options back (see `MENU_ACTION_UP`)
 MENU_ACTION_LEFT :: "ui_left"
+// The input action that increases a slider, steps radios forward and cycles select options forward (see `MENU_ACTION_UP`)
 MENU_ACTION_RIGHT :: "ui_right"
+// The input action that presses the focused item. Its presence makes menus use the actions instead of the keys
 MENU_ACTION_ACCEPT :: "ui_accept"
+// The input action that closes an open dropdown or runs `Menu.onBack` (see `MENU_ACTION_UP`)
 MENU_ACTION_CANCEL :: "ui_cancel"
 
-// Holding a direction repeats it: first after this many seconds, then every MENU_REPEAT_INTERVAL
+// Seconds a menu direction action is held before it starts repeating (every `MENU_REPEAT_INTERVAL`)
 MENU_REPEAT_DELAY :: 0.4
+// Seconds between repeats of a held menu direction action, after `MENU_REPEAT_DELAY`
 MENU_REPEAT_INTERVAL :: 0.08
 
-// What a key press or an action asks a menu to do
+// What a key press or an action asks a menu to do (see `Menu_Command`)
 MenuCommand :: enum u8 {
+	// Does nothing
 	None,
 	Up,
 	Down,
@@ -64,7 +76,8 @@ Menu_update :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 /*
 Does what a navigation command asks, as a key or an action would: move the focus, adjust the
 focused item, press it, or go back. For games that drive menus themselves (another input, a
-tutorial's script).
+tutorial's script). While a select's dropdown is open, Up / Down move its highlight, Accept picks
+the option and Cancel closes it; Left / Right do nothing.
 
 Inputs:
 - menu: The menu
@@ -73,6 +86,11 @@ Inputs:
 
 Returns:
 - true when a button was pressed or onBack ran (the menu may be going away: stop using it)
+
+Example:
+	// Given: menu: ^e.Menu
+	if e.Menu_Command(menu, .Accept) do return
+	e.Menu_Command(menu, .Down)
 */
 Menu_Command :: proc(menu: ^Menu, command: MenuCommand, repeat := false) -> bool {
 	// An open dropdown takes all navigation until it closes

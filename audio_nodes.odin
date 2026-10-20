@@ -20,18 +20,19 @@ Every player goes to a **bus** (`player.bus`; "" is Master), and every bus to **
 A bus has a volume, a pan and a mute; what a player sounds like is its own settings times its
 bus's times Master's (`Audio_Output`), so changing a bus changes everything on it at once. The
 player's and its bus's gains go on its track (every frame); Master's go on the final mix
-(audio_meter.odin), so each bus's level meter reads it after its fader, Master's the output. Projects list their buses in project.xml (`<bus name="Music" volume="0.8"/>`, the
-editor's Mixer tab); code can add more (`Audio_AddBus`). Each bus has an SDL3_mixer group its
+(audio_meter.odin), so each bus's level meter reads it after its fader, Master's the output.
+Projects list their buses in project.xml (`<bus name="Music" volume="0.8"/>`, the editor's Mixer
+tab); code can add more (`Audio_AddBus`). Each bus has an SDL3_mixer group its
 players' tracks join, where effects will go.
 
 Players in a scene that the game switches away from stop; ones that start by themselves start
 again when it's back. Without an audio device everything still works, silently.
 
 Example:
-	jump := cast(^e.AudioPlayer)e.Scene_FindNode(self.scene, "JumpSound")
+	jump := cast(^e.AudioPlayer)e.Scene_FindNode(scene, "JumpSound")
 	e.AudioPlayer_Play(jump)
 	e.Audio_SetBusVolume("Music", 0.5)
-	music := cast(^e.MusicPlayer)e.Scene_FindNode(self.scene, "Theme")
+	music := cast(^e.MusicPlayer)e.Scene_FindNode(scene, "Theme")
 	e.MusicPlayer_FadeOut(music, 2)
 */
 
@@ -40,11 +41,13 @@ MASTER_BUS :: "Master"
 
 // A mix bus: what goes through it is scaled by its volume, panned by its pan, silenced by mute
 AudioBus :: struct {
+	// Its name (MASTER_BUS for Master), in the game's memory
 	name: string,
 	// 0 (silent) to 1 (unchanged); up to 2 boosts
 	volume: f32,
 	// -1 left, 0 center, 1 right
 	pan: f32,
+	// Silences it (and everything on it), keeping its volume
 	mute: bool,
 	// Its SDL3_mixer group (nil without a device), where effects will go
 	group: ^mix.Group,
@@ -54,9 +57,13 @@ AudioBus :: struct {
 
 // A bus in project.xml: `<bus name="Music" volume="0.8" pan="0" mute="false"/>` (format 10)
 AudioBusData :: struct {
+	// The bus's name ("Master" sets Master's own values)
 	name: string,
+	// 0 to 1, up to 2 boosts
 	volume: f32,
+	// -1 left, 0 center, 1 right
 	pan: f32,
+	// Starts muted
 	mute: bool,
 }
 
@@ -68,17 +75,21 @@ AudioSettings :: struct {
 	pitch: f32,
 	// -1 left, 0 center, 1 right
 	pan: f32,
+	// Plays again from the start when it ends, until stopped
 	loop: bool,
 	// Starts when its scene first updates (and again each time the game comes back to it)
 	autostart: bool,
-	// AudioPlayer2D: silent this far (px) from the listener; how the volume falls (1 linear, 2 faster)
+	// AudioPlayer2D: silent this far (px) from the listener (default 1000)
 	maxDistance: f32,
+	// AudioPlayer2D: how the volume falls with distance (1 linear, 2 faster; `Audio_Positional`)
 	attenuation: f32,
-	// MusicPlayer: seconds to fade in when it starts, and out when it stops
+	// MusicPlayer: seconds to fade in when it starts (0: no fade)
 	fadeIn: f32,
+	// MusicPlayer: seconds to fade out when `AudioPlayer_Stop` stops it (0: no fade)
 	fadeOut: f32,
 }
 
+// A new sound node's settings: full volume, normal pitch, centered, 1000 px reach, linear falloff
 DEFAULT_AUDIO_SETTINGS :: AudioSettings{
 	volume = 1,
 	pitch = 1,
@@ -101,19 +112,25 @@ A node that plays a sound (AudioPlayer, AudioPlayer2D) or music (MusicPlayer: th
 `kind` says which). Change `settings` at any time: they apply the next frame.
 */
 AudioPlayer :: struct {
+	// The node part: transform (a 2D player's position), hierarchy, hooks
 	using node: Node,
+	// Sound, Positional or Music (set by `CreateAudioPlayer`)
 	kind: AudioPlayerKind,
+	// Volume, pitch, pan, looping... (read every frame)
 	settings: AudioSettings,
 	// The bus it goes to ("" or "Master": straight to Master); in the node's memory
 	bus: string,
 	// The sound or music file, relative to the project folder (`AudioPlayer_SetSound`)
 	sound: string,
+	// The loaded sound or music (nil: none, or no audio device)
 	audio: ^mix.Audio,
 	// Music is the node's own (streamed); sounds are the resource manager's (shared)
 	ownsAudio: bool,
+	// Its SDL3_mixer track (made by the first Play; nil without a device)
 	track: ^mix.Track,
-	// Playing (or paused) since the last Play
+	// Playing (or paused) since the last Play, until it stops or ends
 	playing: bool,
+	// Paused by `AudioPlayer_Pause`
 	paused: bool,
 	// Autostart happened this time its scene is current
 	started: bool,
@@ -125,12 +142,24 @@ AudioPlayer2D :: AudioPlayer
 MusicPlayer :: AudioPlayer
 
 /*
-Creates a sound node of a kind. Set its sound with `AudioPlayer_SetSound`.
+Creates a sound node of a kind, on Master. Set its sound with `AudioPlayer_SetSound` (after it's
+in a scene of a game) and its bus with `AudioPlayer_SetBus`.
 
 Inputs:
 - scene: The scene
 - kind: Sound, Positional (AudioPlayer2D) or Music (MusicPlayer)
 - settings: Volume, pitch, pan... (DEFAULT_AUDIO_SETTINGS unless given)
+
+Returns:
+- The player
+
+Example:
+	music := e.CreateAudioPlayer(scene, .Music)
+	music.settings.loop = true
+	music.settings.fadeIn = 1.5
+	e.AudioPlayer_SetSound(music, "music/theme.ogg")
+	e.AudioPlayer_SetBus(music, "Music")
+	e.AudioPlayer_Play(music)
 */
 CreateAudioPlayer :: proc(scene: ^Scene, kind := AudioPlayerKind.Sound, settings := DEFAULT_AUDIO_SETTINGS) -> ^AudioPlayer {
 	player := CreateNode(scene, AudioPlayer)
@@ -146,8 +175,13 @@ CreateAudioPlayer :: proc(scene: ^Scene, kind := AudioPlayerKind.Sound, settings
 }
 
 /*
-Sets what a player plays: a sound or music file relative to the project folder (stopping what
-played). Sounds are loaded once and shared; music streams from its file.
+Sets what a player plays, stopping what played (no fade). Sounds are loaded once by the resource
+manager and shared; music streams from its file and is the node's own. Nothing is loaded when the
+scene has no game or the game has no audio device (a warning when music can't be opened).
+
+Inputs:
+- player: The player
+- path: A sound or music file, relative to the project folder ("" for none)
 */
 AudioPlayer_SetSound :: proc(player: ^AudioPlayer, path: string) {
 	AudioPlayer_Stop(player, fade = false)
@@ -167,14 +201,24 @@ AudioPlayer_SetSound :: proc(player: ^AudioPlayer, path: string) {
 	}
 }
 
-// Sets the bus a player goes to ("" for Master)
+/*
+Sets the bus a player goes to; it takes effect at once, also while playing.
+
+Inputs:
+- player: The player
+- bus: The bus's name ("" or "Master" for Master; an unknown bus is Master too)
+*/
 AudioPlayer_SetBus :: proc(player: ^AudioPlayer, bus: string) {
 	player.bus = strings.clone(bus, Node_GetAllocator(player))
 	if player.track != nil do _ = mix.SetTrackGroup(player.track, busGroup(player.scene.game, bus))
 }
 
 /*
-Plays from the start (again, if it was playing). Music fades in over `settings.fadeIn`.
+Plays from the start (again, if it was playing), looping if `settings.loop`. Music fades in over
+`settings.fadeIn`. Without a sound or a device, it only marks the player as playing.
+
+Inputs:
+- player: The player
 */
 AudioPlayer_Play :: proc(player: ^AudioPlayer) {
 	player.playing, player.paused = true, false
@@ -197,7 +241,11 @@ AudioPlayer_Play :: proc(player: ^AudioPlayer) {
 }
 
 /*
-Stops. Music fades out over `settings.fadeOut` unless `fade` is false.
+Stops playing. Music fades out over `settings.fadeOut` unless `fade` is false.
+
+Inputs:
+- player: The player
+- fade: Fade music out (sounds stop at once either way)
 */
 AudioPlayer_Stop :: proc(player: ^AudioPlayer, fade := true) {
 	player.playing, player.paused = false, false
@@ -209,37 +257,79 @@ AudioPlayer_Stop :: proc(player: ^AudioPlayer, fade := true) {
 	_ = mix.StopTrack(player.track, fadeFrames)
 }
 
-// Pauses where it is (Resume carries on)
+/*
+Pauses where it is (`AudioPlayer_Resume` carries on). Does nothing if it isn't playing.
+
+Inputs:
+- player: The player
+*/
 AudioPlayer_Pause :: proc(player: ^AudioPlayer) {
 	if !player.playing do return
 	player.paused = true
 	if player.track != nil do _ = mix.PauseTrack(player.track)
 }
 
+/*
+Carries on from where `AudioPlayer_Pause` paused it. Does nothing if it isn't paused.
+
+Inputs:
+- player: The player
+*/
 AudioPlayer_Resume :: proc(player: ^AudioPlayer) {
 	if !player.paused do return
 	player.paused = false
 	if player.track != nil do _ = mix.ResumeTrack(player.track)
 }
 
-// Whether it's playing (not paused, not finished)
+/*
+Whether a player is playing.
+
+Inputs:
+- player: The player
+
+Returns:
+- true if it was played and isn't paused, stopped or finished (a finished sound is noticed on
+  its next update)
+*/
 AudioPlayer_IsPlaying :: proc(player: ^AudioPlayer) -> bool {
 	return player.playing && !player.paused
 }
 
-// Fades music out over `seconds` and stops it
+/*
+Fades music out and stops it, whatever its `settings.fadeOut`.
+
+Inputs:
+- player: The music player
+- seconds: How long the fade takes (0: stops at once)
+*/
 MusicPlayer_FadeOut :: proc(player: ^MusicPlayer, seconds: f32) {
 	player.playing, player.paused = false, false
 	if player.track != nil do _ = mix.StopTrack(player.track, mix.TrackMSToFrames(player.track, i64(seconds * 1000)))
 }
 
-// Where the music is, in seconds
+/*
+Where the music is.
+
+Inputs:
+- player: The music player
+
+Returns:
+- Seconds from its start (0 before it has played)
+*/
 MusicPlayer_GetPosition :: proc(player: ^MusicPlayer) -> f32 {
 	if player.track == nil do return 0
 	return f32(mix.TrackFramesToMS(player.track, mix.GetTrackPlaybackPosition(player.track))) / 1000
 }
 
-// How long the music is, in seconds (0 if unknown, as for some streams)
+/*
+How long the music is.
+
+Inputs:
+- player: The music player
+
+Returns:
+- Seconds (0 if unknown, as for some streams, or with no music loaded)
+*/
 MusicPlayer_GetDuration :: proc(player: ^MusicPlayer) -> f32 {
 	if player.audio == nil do return 0
 	frames := mix.GetAudioDuration(player.audio)
@@ -247,7 +337,13 @@ MusicPlayer_GetDuration :: proc(player: ^MusicPlayer) -> f32 {
 	return f32(mix.AudioFramesToMS(player.audio, frames)) / 1000
 }
 
-// Jumps to a time in the music, in seconds
+/*
+Jumps to a time in the music. Does nothing before it has played.
+
+Inputs:
+- player: The music player
+- seconds: From the start (negative is 0)
+*/
 MusicPlayer_Seek :: proc(player: ^MusicPlayer, seconds: f32) {
 	if player.track == nil do return
 	_ = mix.SetTrackPlaybackPosition(player.track, mix.TrackMSToFrames(player.track, i64(max(seconds, 0) * 1000)))
@@ -256,8 +352,12 @@ MusicPlayer_Seek :: proc(player: ^MusicPlayer, seconds: f32) {
 // BUSES
 
 /*
-Sets the game's buses (replacing any): Game_LoadProject does with the project's. Master is
-always there (the first), whether listed or not.
+Sets the game's buses, replacing any: `Game_LoadProject` does it with the project's. Master is
+always there (the first), whether listed or not. The buses live in the game's memory.
+
+Inputs:
+- game: The game
+- buses: The buses (a "Master" entry sets Master's volume, pan and mute)
 */
 Audio_SetBuses :: proc(game: ^Game, buses: []AudioBusData) {
 	allocator := Game_GetAllocator(game)
@@ -291,7 +391,21 @@ Audio_Update :: proc(game: ^Game) {
 	AudioMeter_SetGains(master.meter, gain * left, gain * right)
 }
 
-// Adds a bus from code (going to Master); one by that name already there is kept
+/*
+Adds a bus from code, going to Master. If one by that name already exists, it's kept as it is.
+
+Inputs:
+- name: The bus's name
+- volume: Its volume (0 to 1, up to 2 boosts)
+- game: The game (nil: the current game)
+
+Returns:
+- The bus (nil without a game). The pointer is valid until the next bus is added
+
+Example:
+	e.Audio_AddBus("Voices", 0.9)
+	e.Audio_SetBusMute("Voices", true)
+*/
 Audio_AddBus :: proc(name: string, volume: f32 = 1, game: ^Game = nil) -> ^AudioBus {
 	game := game != nil ? game : currentGame
 	if game == nil do return nil
@@ -307,7 +421,16 @@ Audio_AddBus :: proc(name: string, volume: f32 = 1, game: ^Game = nil) -> ^Audio
 	return &game.buses[len(game.buses) - 1]
 }
 
-// A bus by name ("" is Master); nil if there's none
+/*
+A bus by name. A game with no buses yet gets Master.
+
+Inputs:
+- name: The bus's name ("" is Master)
+- game: The game (nil: the current game)
+
+Returns:
+- The bus, or nil if there's none by that name. The pointer is valid until a bus is added
+*/
 Audio_GetBus :: proc(name: string, game: ^Game = nil) -> ^AudioBus {
 	game := game != nil ? game : currentGame
 	if game == nil do return nil
@@ -317,14 +440,41 @@ Audio_GetBus :: proc(name: string, game: ^Game = nil) -> ^AudioBus {
 	return nil
 }
 
+/*
+Sets a bus's volume (everything on it changes from the next frame). Unknown buses are ignored.
+
+Inputs:
+- name: The bus's name ("" is Master)
+- volume: 0 (silent) to 1 (unchanged), up to 2 boosts; negative is 0
+- game: The game (nil: the current game)
+
+Example:
+	e.Audio_SetBusVolume("Music", 0.5)
+*/
 Audio_SetBusVolume :: proc(name: string, volume: f32, game: ^Game = nil) {
 	if b := Audio_GetBus(name, game); b != nil do b.volume = max(volume, 0)
 }
 
+/*
+Sets a bus's pan (a balance). Unknown buses are ignored.
+
+Inputs:
+- name: The bus's name ("" is Master)
+- pan: -1 left, 0 center, 1 right (clamped)
+- game: The game (nil: the current game)
+*/
 Audio_SetBusPan :: proc(name: string, pan: f32, game: ^Game = nil) {
 	if b := Audio_GetBus(name, game); b != nil do b.pan = math.clamp(pan, -1, 1)
 }
 
+/*
+Mutes or unmutes a bus, keeping its volume. Unknown buses are ignored.
+
+Inputs:
+- name: The bus's name ("" is Master)
+- mute: Silence it
+- game: The game (nil: the current game)
+*/
 Audio_SetBusMute :: proc(name: string, mute: bool, game: ^Game = nil) {
 	if b := Audio_GetBus(name, game); b != nil do b.mute = mute
 }
@@ -335,6 +485,8 @@ muted), and its stereo gains, its pan's times theirs. A pan is a balance: center
 nothing, fully right silences the left side. An unknown bus is Master.
 
 Inputs:
+- game: The game (nil: the current game)
+- bus: The player's bus ("" is Master)
 - volume, pan: The player's own (positional players: with distance and position applied)
 - master: Include Master's stage (false: the track's part; the final mix applies Master's)
 
@@ -359,10 +511,20 @@ Audio_Output :: proc(game: ^Game, bus: string, volume, pan: f32, master := true)
 }
 
 /*
-A positional sound's volume factor and pan: from its world position and the listener's (the
+A positional sound's volume factor and pan, from its world position and the listener's (the
 scene's camera, or the middle of the game area). Silent at `maxDistance`; between, the volume
 falls as (1 - distance / maxDistance) ^ attenuation. Pan follows the horizontal offset, full at
-half the game's width.
+half the view's width.
+
+Inputs:
+- position: The sound's world position (pixels)
+- listener: The listener's world position
+- settings: The player's settings (`maxDistance`, `attenuation`)
+- viewWidth: The width the listener hears across, in pixels (the game's width)
+
+Returns:
+- volume: 0 to 1, to multiply the player's volume by
+- pan: -1 to 1, to add to the player's pan
 */
 Audio_Positional :: proc(position, listener: [2]f32, settings: AudioSettings, viewWidth: f32) -> (volume, pan: f32) {
 	d := position - listener

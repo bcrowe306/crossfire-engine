@@ -13,6 +13,7 @@ nodes and physics shapes. They last one frame unless given `seconds`, so drawing
 frame shows something live:
 
 Example:
+	// Given: enemy: ^e.Node, facing: [2]f32, hit: e.RayHit
 	// Where the enemy is looking, and what it saw
 	e.Debug_Line(scene, enemy.position, enemy.position + facing * 200)
 	if hit.hit do e.Debug_Circle(scene, hit.point, 6, {255, 60, 60, 255}, seconds = 0.5)
@@ -30,16 +31,23 @@ DEBUG_FRAME_HISTORY :: 120
 
 // What a debug shape is
 DebugShapeKind :: enum u8 {
+	// A line from `a` to `b`
 	Line,
+	// A rectangle: `a` the top-left corner, `b` the size
 	Rect,
+	// A circle: `a` the center, `b.x` the radius
 	Circle,
+	// Text with its top-left corner at `a`
 	Text,
 }
 
 // One queued debug shape (`Debug_Line`...), in world pixels
 DebugShape :: struct {
+	// What it is
 	kind: DebugShapeKind,
+	// Rect, Circle: filled, or only the outline
 	filled: bool,
+	// Its color
 	color: sdl.Color,
 	// Line: from `a` to `b`; Rect: `a` the top-left corner, `b` the size; Circle: `a` the center,
 	// `b.x` the radius; Text: `a` the top-left corner
@@ -63,9 +71,13 @@ Queues a line in the world, drawn over the scene.
 
 Inputs:
 - scene: The scene to draw it over
-- from, to: World pixels
+- from: Start, in world pixels
+- to: End, in world pixels
 - color: Its color
 - seconds: How long it stays (0: this frame)
+
+Example:
+	e.Debug_Line(scene, {0, 0}, {200, 100}, sdl.Color{255, 60, 60, 255}, seconds = 1)
 */
 Debug_Line :: proc(scene: ^Scene, from, to: [2]f32, color := DEBUG_COLOR, seconds: f32 = 0) {
 	queueDebug(scene, {kind = .Line, color = color, a = from, b = to, remaining = seconds})
@@ -91,7 +103,7 @@ Queues a circle in the world, drawn over the scene.
 Inputs:
 - scene: The scene to draw it over
 - center: World pixels
-- radius: Pixels
+- radius: World pixels
 - color: Its color
 - filled: Filled, or only its outline
 - seconds: How long it stays (0: this frame)
@@ -111,25 +123,39 @@ Inputs:
 - seconds: How long it stays (0: this frame)
 
 Example:
-	e.Debug_Text(scene, enemy.position + {0, -40}, fmt.tprintf("hp %d", enemy.health))
+	// Given: enemy: ^e.Node, health: int
+	e.Debug_Text(scene, enemy.position + {0, -40}, fmt.tprintf("hp %d", health))
 */
 Debug_Text :: proc(scene: ^Scene, position: [2]f32, text: string, color := DEBUG_COLOR, seconds: f32 = 0) {
 	queueDebug(scene, {kind = .Text, color = color, a = position, text = text, remaining = seconds})
 }
 
-// Removes every debug shape a scene has queued, lasting ones too
+/*
+Removes every debug shape a scene has queued, lasting ones too.
+
+Inputs:
+- scene: The scene
+*/
 Debug_Clear :: proc(scene: ^Scene) {
 	for shape in scene.debugShapes do delete(shape.text, runtime.heap_allocator())
 	clear(&scene.debugShapes)
 }
 
 /*
-The frame rate and frame times over the frames the game recorded (up to DEBUG_FRAME_HISTORY).
+The frame rate and frame times over the frames the game recorded (up to DEBUG_FRAME_HISTORY), in
+real time (not scaled by the time scale).
+
+Inputs:
+- game: The game
 
 Returns:
 - fps: Frames per second, from the average frame time (0 before the first frame)
 - average: The average frame time, milliseconds
 - worst: The longest frame, milliseconds
+
+Example:
+	fps, average, worst := e.Game_GetFrameStats(game)
+	log.infof("%.0f fps, %.1f ms (worst %.1f)", fps, average, worst)
 */
 Game_GetFrameStats :: proc(game: ^Game) -> (fps, average, worst: f32) {
 	stats := &game.frameStats

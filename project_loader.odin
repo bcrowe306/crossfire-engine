@@ -12,7 +12,9 @@ A texture drawn centered on the node's origin. Created from Sprite nodes in scen
 size comes from the texture and the node's scale.
 */
 Sprite :: struct {
+	// The node part: transform, hierarchy, hooks
 	using node: Node,
+	// The image it draws (the resource manager's; nil draws nothing)
 	texture: ^sdl.Texture,
 }
 
@@ -22,7 +24,9 @@ its player holds the node's animations (by name; "default" when the scene file h
 starts the autoplay one. Scripts switch with `AnimationPlayer_Play(&sprite.animation, "jump")`.
 */
 AnimatedSprite :: struct {
+	// The node part: transform, hierarchy, hooks
 	using node: Node,
+	// Its animations and the one playing (updated with the node; allocated in the node's arena)
 	animation: AnimationPlayer,
 }
 
@@ -34,7 +38,12 @@ Inputs:
 - allocator: Allocator for the result. Free with `ProjectData_Destroy`
 
 Returns:
-- The project data, and .None or what went wrong
+- The project data, and .None or what went wrong (.File_Not_Found when it can't be read)
+
+Example:
+	project, err := e.LoadProjectFile("MyGame/project.xml")
+	if err != .None do log.errorf("Can't load the project: %v", err)
+	defer e.ProjectData_Destroy(&project)
 */
 LoadProjectFile :: proc(path: string, allocator := context.allocator) -> (ProjectData, ProjectError) {
 	text, ok := Platform_ReadFile(path)
@@ -50,7 +59,7 @@ Inputs:
 - allocator: Allocator for the result. Free with `SceneData_Destroy`
 
 Returns:
-- The scene data, and .None or what went wrong
+- The scene data, and .None or what went wrong (.File_Not_Found when it can't be read)
 */
 LoadSceneFile :: proc(path: string, allocator := context.allocator) -> (SceneData, ProjectError) {
 	text, ok := Platform_ReadFile(path)
@@ -60,9 +69,10 @@ LoadSceneFile :: proc(path: string, allocator := context.allocator) -> (SceneDat
 
 /*
 Creates every scene of a project in a game and switches to its start scene. Also sets the game's
-physics settings from the project. Call from the
-game's `build` procedure, after `game.size` and `game.scaleMode` were set from the project
-(the scenes' cameras and menus are positioned for that size).
+background color, physics settings, name (unless code set one), input actions, mix buses,
+translations and global scripts from the project. Call from the game's `build` procedure, after
+`game.size` and `game.scaleMode` were set from the project (the scenes' cameras and menus are
+positioned for that size).
 
 Asset paths are resolved against the project folder, so the game can run from any directory.
 
@@ -75,10 +85,10 @@ Returns:
 - false if a scene file couldn't be loaded (the others are still created)
 
 Example:
+	// In the game's build procedure (game.size and game.scaleMode already set from the project)
 	project, err := e.LoadProjectFile("MyGame/project.xml")
-	game.size = project.size
-	game.scaleMode = project.scaleMode
-	game.build = proc(game: ^e.Game) { e.Game_LoadProject(game, &project, "MyGame") }
+	if err != .None do return
+	if !e.Game_LoadProject(game, &project, "MyGame") do log.warn("Some scenes didn't load")
 */
 Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string) -> bool {
 	game.backgroundColor = project.background
@@ -161,6 +171,7 @@ Returns:
 - The instance's root node (nil, logged, if the component can't be read)
 
 Example:
+	// Given: self: ^e.Script, COMPONENT_BULLET: e.ComponentAsset
 	bullet := e.Scene_Instantiate(self.scene, COMPONENT_BULLET, position = e.Node_GetWorldPosition(self.node))
 */
 Scene_Instantiate :: proc(scene: ^Scene, component: ComponentAsset, parent: ^Node = nil, position: [2]f32 = {}) -> ^Node {
@@ -179,10 +190,15 @@ Scene_Instantiate :: proc(scene: ^Scene, component: ComponentAsset, parent: ^Nod
 }
 
 /*
-A component's parsed file, read the first time and kept for the game's life (instances share it).
+A component's parsed file, read the first time and kept for the game's life, in the game's arena
+(instances share it). A file that can't be read is remembered too: it isn't read again.
+
+Inputs:
+- game: The game
+- path: The component file, relative to the project folder (`Game.projectDir`)
 
 Returns:
-- The component's nodes, and false (logged) if it can't be read
+- The component's nodes (don't free them), and false (logged) if it can't be read
 */
 Game_LoadComponent :: proc(game: ^Game, path: string) -> (^SceneData, bool) {
 	if data, found := game.components[path]; found do return data, data != nil

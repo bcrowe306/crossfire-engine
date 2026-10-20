@@ -63,6 +63,7 @@ Example:
 	}
 */
 AnimationPlayer :: struct {
+	// The animations it owns, by the index `AnimationPlayer_Add` returned
 	animations: [dynamic]^Animation,
 	// Animation name -> index in `animations`
 	names: map[string]int,
@@ -98,6 +99,7 @@ AnimationPlayer :: struct {
 	// data: int, index of the animation. Sent by AnimationPlayer_Stop
 	onAnimationStopped: EventSubject,
 
+	// Allocator of its lists and event listeners (`AnimationPlayer_Init`)
 	allocator: mem.Allocator,
 }
 
@@ -157,7 +159,12 @@ Inputs:
 - animation: Any animation type (SpriteSheetAnimation, FrameAnimation, ...)
 
 Returns:
-- The animation's index, usable instead of its name. -1 if the name is already taken
+- The animation's index, usable instead of its name. -1 (logged) if the name is already taken: the
+  player then doesn't own it, so free it yourself unless it uses a node's allocator
+
+Example:
+	// Given: player: ^e.AnimationPlayer, sheet: ^sdl.Texture
+	e.AnimationPlayer_Add(player, e.CreateSpriteSheetAnimation("run", sheet, 8, 1, fps = 12, loop = true))
 */
 AnimationPlayer_Add :: proc(player: ^AnimationPlayer, animation: ^Animation) -> int {
 	if animation.name in player.names {
@@ -181,18 +188,21 @@ onFrameChanged for its first frame.
 
 Inputs:
 - player: The player
-- name / index: Which animation to play
+- name: Which animation to play, by name (`AnimationPlayer_PlayByName`; an unknown name is logged)
+- index: Or by the index `AnimationPlayer_Add` returned (`AnimationPlayer_PlayByIndex`)
 - restart: Restart from the first frame even if it is already playing
 
 Returns:
 - false if no such animation exists
 
 Example:
-	e.AnimationPlayer_Play(&ship.anim, "thrust")
-	e.AnimationPlayer_Play(&ship.anim, 0, restart = true)
+	// Given: player: ^e.AnimationPlayer
+	e.AnimationPlayer_Play(player, "thrust")
+	e.AnimationPlayer_Play(player, 0, restart = true)
 */
 AnimationPlayer_Play :: proc{AnimationPlayer_PlayByName, AnimationPlayer_PlayByIndex}
 
+// `AnimationPlayer_Play` by the animation's name
 AnimationPlayer_PlayByName :: proc(player: ^AnimationPlayer, name: string, restart := false) -> bool {
 	index, ok := player.names[name]
 	if !ok {
@@ -202,6 +212,7 @@ AnimationPlayer_PlayByName :: proc(player: ^AnimationPlayer, name: string, resta
 	return AnimationPlayer_PlayByIndex(player, index, restart)
 }
 
+// `AnimationPlayer_Play` by the index `AnimationPlayer_Add` returned
 AnimationPlayer_PlayByIndex :: proc(player: ^AnimationPlayer, index: int, restart := false) -> bool {
 	if index < 0 || index >= len(player.animations) {
 		log.warnf("AnimationPlayer has no animation at index %d", index)
@@ -298,6 +309,10 @@ Advances the current animation. Call once per frame from the owning node's updat
 Inputs:
 - player: The player
 - deltaTime: Seconds since the last frame
+
+Example:
+	// Given: player: ^e.AnimationPlayer
+	e.AnimationPlayer_Update(player, deltaTime)
 */
 AnimationPlayer_Update :: proc(player: ^AnimationPlayer, deltaTime: f64) {
 	if !player.playing || player.current < 0 do return
@@ -327,6 +342,11 @@ Inputs:
 - rotation: Degrees, clockwise around the center of `dest`
 - tint: Multiplies the frame's colors and alpha
 - flip: Mirror horizontally and/or vertically, e.g. to face left
+
+Example:
+	// Given: player: ^e.AnimationPlayer
+	size := e.AnimationPlayer_FrameSize(player)
+	e.AnimationPlayer_Draw(player, renderer, {100, 100, size.x * 2, size.y * 2}, flip = .HORIZONTAL)
 */
 AnimationPlayer_Draw :: proc(
 	player: ^AnimationPlayer,
@@ -361,18 +381,21 @@ Looks up an animation by name or index.
 
 Inputs:
 - player: The player
-- name / index: Which animation
+- name: Which animation, by name (`AnimationPlayer_GetByName`)
+- index: Or by index (`AnimationPlayer_GetByIndex`)
 
 Returns:
 - The animation, or nil if there is none. Cast to the subtype to change type-specific settings
 */
 AnimationPlayer_Get :: proc{AnimationPlayer_GetByName, AnimationPlayer_GetByIndex}
 
+// `AnimationPlayer_Get` by name
 AnimationPlayer_GetByName :: proc(player: ^AnimationPlayer, name: string) -> ^Animation {
 	index, ok := player.names[name]
 	return ok ? player.animations[index] : nil
 }
 
+// `AnimationPlayer_Get` by index
 AnimationPlayer_GetByIndex :: proc(player: ^AnimationPlayer, index: int) -> ^Animation {
 	if index < 0 || index >= len(player.animations) do return nil
 	return player.animations[index]
@@ -380,6 +403,10 @@ AnimationPlayer_GetByIndex :: proc(player: ^AnimationPlayer, index: int) -> ^Ani
 
 /*
 Index of an animation by name.
+
+Inputs:
+- player: The player
+- name: The animation's name
 
 Returns:
 - The index and true, or -1 and false if there is no such animation
@@ -390,14 +417,26 @@ AnimationPlayer_IndexOf :: proc(player: ^AnimationPlayer, name: string) -> (int,
 }
 
 /*
-The current animation, or nil if none has been played.
+The current animation.
+
+Inputs:
+- player: The player
+
+Returns:
+- The animation, or nil if none has been played
 */
 AnimationPlayer_Current :: proc(player: ^AnimationPlayer) -> ^Animation {
 	return AnimationPlayer_GetByIndex(player, player.current)
 }
 
 /*
-Name of the current animation, or "" if none has been played.
+Name of the current animation.
+
+Inputs:
+- player: The player
+
+Returns:
+- The name (the animation's string), or "" if none has been played
 */
 AnimationPlayer_CurrentName :: proc(player: ^AnimationPlayer) -> string {
 	animation := AnimationPlayer_Current(player)
@@ -405,7 +444,14 @@ AnimationPlayer_CurrentName :: proc(player: ^AnimationPlayer) -> string {
 }
 
 /*
-Whether the named animation is the current one and is playing.
+Whether the named animation is the current one and is playing (not paused, stopped or finished).
+
+Inputs:
+- player: The player
+- name: The animation's name
+
+Returns:
+- true if it is playing
 */
 AnimationPlayer_IsPlaying :: proc(player: ^AnimationPlayer, name: string) -> bool {
 	return player.playing && AnimationPlayer_CurrentName(player) == name

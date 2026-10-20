@@ -7,13 +7,27 @@ import "core:mem"
 import sdl "vendor:sdl3"
 
 
+/*
+A scene: a tree of nodes, the queues that add and remove them between frames, and what the
+scene shares (camera, physics world, tweens, its memory arena).
+
+Make scenes with `Game_CreateScene` (`game->createScene(name)`), which owns them, and fill them
+with `CreateNode`. Each update applies the queues first, so nodes added or removed during a
+frame join or leave at the start of the next one. The procedures are called with `->`.
+*/
 Scene :: struct {
+	// Unique id
 	id: EntityId,
 	// Its name in the game (`Game_CreateScene`); "" for scenes made another way
 	name: string,
+	// The game it belongs to (set by `Game_CreateScene`; nil for scenes made another way)
 	game: ^Game,
+	// Every node in the scene, children included, in the order they were added (updates run in
+	// this order)
 	nodes: [dynamic]^Node,
+	// Nodes added since the last update; they join the scene at the start of the next one
 	addQueue: [dynamic]^Node,
+	// Ids of nodes removed since the last update; they're freed at the start of the next one
 	removeQueue: [dynamic]EntityId,
 	// Nodes made with `CreateNode(..., addToScene = false)` and not added yet: the scene still
 	// owns them, so destroying the scene frees them
@@ -24,6 +38,7 @@ Scene :: struct {
 	tweens: [dynamic]^Tween,
 	// Debug shapes queued to draw over it (debug.odin)
 	debugShapes: [dynamic]DebugShape,
+	// The scene's memory (`Scene_GetAllocator`), freed by `Scene_Destroy`
 	arena: MemoryArena,
 	// Optional camera, nil by default. When set, every layer not in `screenLayers` is drawn
 	// through it, and its pans and bounds are applied after each update. Create with `Scene_CreateCamera`
@@ -41,16 +56,32 @@ Scene :: struct {
 	// It has been the current scene before: entering it again rebuilds it from its file
 	// (Game.sceneFiles), so every visit starts fresh
 	played: bool,
+	// `Scene_AddNode`: `scene->addNode(node)`
 	addNode: proc(scene: ^Scene, node: ^Node),
+	// `Scene_RemoveNode`: `scene->removeNode(node.id)`
 	removeNode: proc(scene: ^Scene, nodeId: EntityId),
+	// `Scene_GetNode`: `scene->getNode(id)`
 	getNode: proc(scene: ^Scene, nodeId: EntityId) -> ^Node,
+	// `Scene_ProcessQueues`: `scene->processQueues()`
 	processQueues: proc(scene: ^Scene),
+	// `Scene_Update`, called by the game every frame while it's the current scene
 	update: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64),
+	// `Scene_Draw`, called by the game every frame while it's the current scene
 	draw: proc(scene: ^Scene, renderer: ^sdl.Renderer),
+	// Notified when the game switches to the scene (source: the scene)
 	onEnter: EventSubject,
+	// Notified when the game leaves the scene or is destroyed (source: the scene)
 	onExit: EventSubject,
 }
 
+/*
+Prepares an empty scene: its arena, procedures, node index and `onEnter` / `onExit`.
+`Game_CreateScene` calls it; call it yourself only for a scene outside a game (editors, tests).
+Panics if the arena can't be set up.
+
+Inputs:
+- scene: The scene (zeroed)
+*/
 Scene_Init :: proc(scene: ^Scene) {
 	log.debug("Initializing Scene")
 	if !MemoryArena_InitGrowing(&scene.arena) {
@@ -85,7 +116,11 @@ Scene_GetAllocator :: proc(scene: ^Scene) -> mem.Allocator {
 /*
 Empties a scene: every node is destroyed and its physics world goes, as Scene_Destroy does, but
 the scene itself stays (its name, game, screen layers, physicsPaused), ready to be built again.
-Listeners on its onEnter / onExit are dropped with it.
+Listeners on its onEnter / onExit are dropped with it. Procedures the game replaced
+(`update`, `draw`...) stay replaced.
+
+Inputs:
+- scene: The scene
 */
 Scene_Clear :: proc(scene: ^Scene) {
 	kept := scene^
@@ -159,10 +194,30 @@ Returns:
 - The new node, zero-initialized apart from its id, scene and event subjects
 
 Example:
-	bullet := e.CreateNode(scene, Bullet)
-	bullet.update = Bullet_update
-	...
-	scene->removeNode(bullet.id) // Freed at the start of the next update
+	package mygame
+
+	import e "../engine"
+	import sdl "vendor:sdl3"
+
+	Bullet :: struct {
+		using node: e.Node,
+		velocity: [2]f32,
+	}
+
+	Fire :: proc(scene: ^e.Scene, from: [2]f32) {
+		bullet := e.CreateNode(scene, Bullet)
+		bullet.position = from
+		bullet.velocity = {0, -600}
+		bullet.update = Bullet_update
+	}
+
+	Bullet_update :: proc(node: ^e.Node, events: []sdl.Event, deltaTime: f64) {
+		bullet := cast(^Bullet)node
+		bullet.position += bullet.velocity * f32(deltaTime)
+		if bullet.position.y < 0 {
+			node.scene->removeNode(node.id) // Freed at the start of the next update
+		}
+	}
 */
 CreateNode :: proc(scene: ^Scene, $T: typeid, addToScene: bool = true) -> ^T {
 	newObject := allocateNode(T)
@@ -215,6 +270,11 @@ Scene_RemoveNode :: proc(scene: ^Scene, nodeId: EntityId) {
 
 /*
 A node of the scene by its id: in the scene, waiting to be added, or made without being added.
+Also `scene->getNode(id)`.
+
+Inputs:
+- scene: The scene
+- nodeId: The node's `id`
 
 Returns:
 - The node, or nil (never made here, or already removed)
@@ -227,6 +287,9 @@ Scene_GetNode :: proc(scene: ^Scene, nodeId: EntityId) -> ^Node {
 Applies queued removals, then queued additions (`onEnter` for each, in the order they were
 added). `Scene_Update` does it first; editors and tests call it to apply changes without
 updating.
+
+Inputs:
+- scene: The scene
 */
 Scene_ProcessQueues :: proc(scene: ^Scene) {
 	if len(scene.removeQueue) > 0 do processRemovals(scene)
@@ -300,6 +363,19 @@ processRemovals :: proc(scene: ^Scene) {
 	for root in roots do destroyTree(root)
 }
 
+/*
+Updates the scene for one frame. The game calls it (as `scene->update`) for its current scene.
+
+In order: expired debug shapes go, the add and remove queues are applied, new physics nodes get
+their bodies, scripts get `ready`, physics steps (unless paused), every node that may process
+updates (its `update`, then its script's), tweens advance, then the camera's pan and bounds are
+applied.
+
+Inputs:
+- scene: The scene
+- events: This frame's SDL events
+- deltaTime: Seconds since the last frame (after the game's time scale and hitstop)
+*/
 Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 	// Last frame's debug shapes go (unless they last longer)
 	if len(scene.debugShapes) > 0 do debugExpire(scene, deltaTime)
@@ -334,6 +410,10 @@ Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 Pauses or resumes a scene: while paused, physics doesn't step and only nodes that may process then
 update (process mode WhenPaused or Always, or inheriting one); drawing goes on.
 
+Inputs:
+- scene: The scene
+- paused: true to pause, false to resume
+
 Example:
 	e.Scene_SetPaused(scene, !scene.paused) // the pause key
 */
@@ -342,7 +422,15 @@ Scene_SetPaused :: proc(scene: ^Scene, paused: bool) {
 }
 
 /*
-The scene's nodes in a group, in tree order (nodes waiting to be added included; temp allocated).
+The scene's nodes in a group, in the order they were added (nodes waiting to be added
+included).
+
+Inputs:
+- scene: The scene
+- group: The group's name
+
+Returns:
+- The nodes (temp allocated; empty if none)
 
 Example:
 	for enemy in e.Scene_GetGroup(scene, "enemies") do enemy.visible = false
@@ -360,7 +448,11 @@ Draws the scene: layer by layer, and within a layer in tree order (a parent befo
 siblings in the order they were added). Each node draws in its local space; the scene sets the
 draw transform to the camera view combined with the node's world transform (only the position,
 for `.Position_Only` nodes), and the draw tint to its inherited tint. Hidden nodes and their
-children are skipped.
+children are skipped. The game calls it (as `scene->draw`) for its current scene.
+
+Inputs:
+- scene: The scene
+- renderer: The renderer to draw with
 */
 Scene_Draw :: proc(scene: ^Scene, renderer: ^sdl.Renderer) {
 	view := scene.camera != nil ? Camera2D_ViewTransform(scene.camera) : TRANSFORM2D_IDENTITY
@@ -407,6 +499,12 @@ Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transfo
 
 /*
 Whether a node and all of its ancestors are visible.
+
+Inputs:
+- node: The node
+
+Returns:
+- false if the node or any ancestor has `visible` off
 */
 Node_IsVisibleInTree :: proc(node: ^Node) -> bool {
 	for n := node; n != nil; n = n.parent {
@@ -504,7 +602,11 @@ Inputs:
 - path: A name, or names separated by "/"
 
 Returns:
-- The first match in tree order (nodes waiting to be added included), or nil
+- The first match (nodes waiting to be added included), or nil. A bare name matches any node,
+  in the order they were added; a path starts at the first top-level node with the first name
+
+Example:
+	if flame := e.Scene_FindNode(scene, "Ship/Flame"); flame != nil do flame.visible = false
 */
 Scene_FindNode :: proc(scene: ^Scene, path: string) -> ^Node {
 	lists := [2][]^Node{scene.nodes[:], scene.addQueue[:]}
@@ -520,7 +622,12 @@ Scene_FindNode :: proc(scene: ^Scene, path: string) -> ^Node {
 }
 
 /*
-Finds a descendant of a node by a path of child names: "Ship/Flame".
+Finds a descendant of a node by a path of child names: "Ship/Flame". At each level the first
+child with the name is followed.
+
+Inputs:
+- node: The node to start from
+- path: Child names separated by "/". "" returns `node`
 
 Returns:
 - The node, or nil

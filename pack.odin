@@ -42,6 +42,7 @@ PACK_FOOTER_SIZE :: 32
 
 // A file in a pack: where its bytes are in the executable
 PackEntry :: struct {
+	// Byte offset from the start of the executable, and length in bytes
 	offset, size: u64,
 }
 
@@ -50,9 +51,13 @@ An open pack: a file's index, and the files read from it so far (kept: SDL strea
 from them). The game's is `gamePack` (Pack_Open); tests and tools open their own.
 */
 Pack :: struct {
+	// An open was tried (`Pack_Open` only tries once)
 	opened: bool,
+	// The file the pack is in, nil when there's no pack
 	file: ^os.File,
+	// The index: each file's path (relative to the project) and where it is (heap-allocated)
 	entries: map[string]PackEntry,
+	// The files read so far, by path (heap-allocated, kept until `Pack_CloseFile`)
 	loaded: map[string][]byte,
 }
 
@@ -76,10 +81,22 @@ Pack_Open :: proc() -> bool {
 
 /*
 Opens the pack at the end of a file into `p` (closing what it had). Pack_Open does it with the
-running executable; tools and tests open their own.
+running executable; tools and tests open their own. Close it with `Pack_CloseFile`.
+
+Inputs:
+- p: The pack to open into
+- path: The file (an executable with a pack appended)
 
 Returns:
 - Whether the file ends in a pack
+
+Example:
+	pack: e.Pack
+	defer e.Pack_CloseFile(&pack)
+	if e.Pack_OpenFile(&pack, "export/linux_x64/MyGame") {
+		data, ok := e.Pack_FileBytes(&pack, "project.xml")
+		if ok do log.infof("project.xml: %d bytes", len(data))
+	}
 */
 Pack_OpenFile :: proc(p: ^Pack, path: string) -> bool {
 	Pack_CloseFile(p)
@@ -117,7 +134,12 @@ Pack_OpenFile :: proc(p: ^Pack, path: string) -> bool {
 	return true
 }
 
-// Closes a pack and frees what was read from it
+/*
+Closes a pack and frees what was read from it (slices from `Pack_FileBytes` become invalid).
+
+Inputs:
+- p: The pack (a closed or zero one is fine)
+*/
 Pack_CloseFile :: proc(p: ^Pack) {
 	allocator := runtime.heap_allocator()
 	if p.file != nil do os.close(p.file)
@@ -133,20 +155,45 @@ Pack_CloseFile :: proc(p: ^Pack) {
 
 /*
 A file in the game's pack: its bytes (kept for the program's life: don't free them), or false when
-there's no pack or no such file. `path` is under PACK_ROOT ("<pack>/assets/ship.png") or relative
-to it.
+there's no pack or no such file. Opens the pack on first use (`Pack_Open`).
+
+Inputs:
+- path: Under PACK_ROOT ("<pack>/assets/ship.png") or relative to it ("assets/ship.png"); absolute
+  paths are never in the pack
+
+Returns:
+- The bytes and true, or nil and false
 */
 Pack_Bytes :: proc(path: string) -> ([]byte, bool) {
 	if !Pack_Open() do return nil, false
 	return Pack_FileBytes(&gamePack, path)
 }
 
-// Whether the game's pack has a file (see Pack_Bytes for paths)
+/*
+Whether the game's pack has a file, without reading it. Opens the pack on first use (`Pack_Open`).
+
+Inputs:
+- path: The file's path (see `Pack_Bytes`)
+
+Returns:
+- true when there's a pack and it has the file
+*/
 Pack_Has :: proc(path: string) -> bool {
 	return Pack_Open() && Pack_FileHas(&gamePack, path)
 }
 
-// A file in an open pack (Pack_Bytes for any pack)
+/*
+A file in an open pack (`Pack_Bytes` for the game's own pack). The first call reads it from disk;
+later ones return the same bytes.
+
+Inputs:
+- p: The pack (`Pack_OpenFile`)
+- path: The file's path (see `Pack_Bytes`)
+
+Returns:
+- The bytes (the pack's: valid until `Pack_CloseFile`, don't free them) and true, or nil and false
+  when the pack isn't open, has no such file, or it can't be read
+*/
 Pack_FileBytes :: proc(p: ^Pack, path: string) -> ([]byte, bool) {
 	if p.file == nil do return nil, false
 	key, ok := packKey(path)
@@ -163,7 +210,16 @@ Pack_FileBytes :: proc(p: ^Pack, path: string) -> ([]byte, bool) {
 	return data, true
 }
 
-// Whether an open pack has a file
+/*
+Whether an open pack has a file, without reading it.
+
+Inputs:
+- p: The pack (`Pack_OpenFile`)
+- path: The file's path (see `Pack_Bytes`)
+
+Returns:
+- true when the pack is open and has the file
+*/
 Pack_FileHas :: proc(p: ^Pack, path: string) -> bool {
 	if p.file == nil do return false
 	key, ok := packKey(path)

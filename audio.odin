@@ -34,13 +34,29 @@ Audio_Init :: proc() -> (^mix.Mixer, bool) {
 	return mixer, true
 }
 
-// Closes the device and SDL3_mixer
+/*
+Closes the playback device and SDL3_mixer. `Application_Cleanup` calls it.
+
+Inputs:
+- mixer: The mixer from `Audio_Init` (nil when silent)
+*/
 Audio_Quit :: proc(mixer: ^mix.Mixer) {
 	if mixer != nil do mix.DestroyMixer(mixer)
 	mix.Quit()
 }
 
-// Loads a sound file (predecode: decode it all now, for short effects)
+/*
+Loads a sound file, from the data pack if it's there, else from disk. Most code loads through
+`ResourceManager` (`loadAudio`), which caches the sound.
+
+Inputs:
+- mixer: The mixer to load it for
+- path: The file's path
+- predecode: Decode it all now (short effects); false streams it while it plays (music)
+
+Returns:
+- The sound (free it with `Audio_Destroy`), or nil if it can't be read (SDL's error says why)
+*/
 Audio_Load :: proc(mixer: ^mix.Mixer, path: string, predecode: bool) -> ^mix.Audio {
 	// From the data pack's memory, which lives as long as the program (music streams from it)
 	if data, packed := Pack_Bytes(path); packed {
@@ -49,22 +65,29 @@ Audio_Load :: proc(mixer: ^mix.Mixer, path: string, predecode: bool) -> ^mix.Aud
 	return mix.LoadAudio(mixer, fmt.ctprint(path), predecode)
 }
 
+/*
+Frees a sound loaded with `Audio_Load`. Sounds in the resource manager are freed by it instead.
+
+Inputs:
+- audio: The sound
+*/
 Audio_Destroy :: proc(audio: ^mix.Audio) {
 	mix.DestroyAudio(audio)
 }
 
 /*
-Plays a sound once, loading it the first time (it stays cached in the resource manager).
+Plays a sound file once, loading it the first time (it stays cached in the resource manager).
+`Game_PlaySound` with a path.
 
 Inputs:
 - game: The game
 - path: The sound file, relative to the project folder (`game.projectDir`) like other assets
 
 Returns:
-- false (logged) if it couldn't be loaded or played
+- false if there's no audio device, or (logged) it couldn't be loaded or played
 
 Example:
-	e.Game_PlaySound(self.game, "assets/laser.wav")  // or a SoundAsset (assets.odin)
+	e.Game_PlaySound(game, "assets/laser.wav") // or a SoundAsset (assets.odin)
 */
 Game_PlaySoundFile :: proc(game: ^Game, path: string) -> bool {
 	if game.mixer == nil do return false

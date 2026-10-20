@@ -7,23 +7,51 @@ import mix "vendor:sdl3/mixer"
 import ttf "vendor:sdl3/ttf"
 import "core:c"
 
+// Most SDL events `Application_Frame` collects in one frame; the rest wait for the next frame
 MAX_EVENTS :: 1000
 
+/*
+The program's window, renderer and audio device, and the game they run.
+
+Set it up with `Application_Setup`, run it with `Application_Run` and free it with
+`Application_Cleanup`. One application runs one `Game` at a time; `App_SetGame` swaps it.
+*/
 Application :: struct {
+	// The window opened by `Application_Setup`
 	window: ^sdl.Window,
+	// The window's renderer, shared by every game the application runs
 	renderer: ^sdl.Renderer,
+	// The audio mixer from `Audio_Init`
 	mixer: ^mix.Mixer,
+	// True while the frame loop runs; false once the game sets `shouldQuit`
 	running: bool,
+	// The game being played. nil until the first frame after `App_SetGame`
 	game: ^Game,
+	// The game `App_SetGame` asked for; the next frame switches to it
 	queuedGame: ^Game,
 }
 
 /*
-Starts SDL, opens the window with a renderer (`backend`: render_backend.odin; Auto lets SDL
-choose), the audio device and SDL_ttf.
+Starts SDL, opens the window with a renderer, the audio device and SDL_ttf.
+
+The window is resizable; the game's resolution is scaled into it (see `Game_SetScaleMode`).
+Call it once, before creating a game; free everything with `Application_Cleanup`.
+
+Inputs:
+- app: The application to fill in
+- windowTitle: The window's title
+- windowSize: The window's size in pixels (ignored when `window.fullscreen` is set)
+- backend: The renderer to use (`RenderBackend`). `.Auto` lets SDL choose
+- window: Fullscreen, vsync and high-DPI settings (vsync is applied later on the web)
 
 Returns:
-- false (logged) if any of them couldn't start
+- false (logged) if SDL, the window, the renderer, the audio device or SDL_ttf couldn't start
+
+Example:
+	app := e.Application{}
+	if !e.Application_Setup(&app, "My Game", {1280, 720}) do return
+	defer e.Application_Cleanup(&app)
+	e.Application_Run(&app, game)
 */
 Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2]f32, backend := RenderBackend.Auto, window := DEFAULT_WINDOW_SETTINGS) -> bool {
 	if !sdl.Init({ .VIDEO, .AUDIO, .GAMEPAD, .EVENTS}) {
@@ -62,8 +90,21 @@ Application_Setup :: proc(app: ^Application, windowTitle: string, windowSize: [2
 
 
 /*
-Runs the game until it quits: `Application_Frame` in a loop. The browser can't block like this;
-there, the page calls `Application_Frame` once per animation frame (see `Player_StartWeb`).
+Runs the game until it quits: `Application_Frame` in a loop.
+
+The browser can't block like this; there, the page calls `Application_Frame` once per animation
+frame (see `Player_StartWeb`).
+
+Inputs:
+- app: The application, set up with `Application_Setup`
+- game: The game to play (queued with `App_SetGame`; initialized on the first frame if needed).
+  nil keeps the game already set
+
+Example:
+	app := e.Application{}
+	if !e.Application_Setup(&app, "My Game", {1280, 720}) do return
+	defer e.Application_Cleanup(&app)
+	e.Application_Run(&app, game)
 */
 Application_Run :: proc(app: ^Application, game: ^Game = nil) {
 	if game != nil {
@@ -81,7 +122,14 @@ frameState: struct {
 
 /*
 Runs one frame: switches to a queued game, polls events, updates, draws and presents, and frees
-the frame's temporary memory. Sets `app.running` to false when the game quits.
+the frame's temporary memory (`context.temp_allocator`).
+
+Switching destroys the previous game (`Game_Destroy`) and initializes the new one if it isn't
+yet. Event positions are converted to the game's resolution. Sets `app.running` to false when
+the game sets `shouldQuit`.
+
+Inputs:
+- app: The application, set up with `Application_Setup`
 */
 Application_Frame :: proc(app: ^Application) {
 	freq := sdl.GetPerformanceFrequency()
@@ -157,6 +205,14 @@ Application_Frame :: proc(app: ^Application) {
 	}
 }
 
+/*
+Destroys the current game, then closes audio, SDL_ttf, the renderer, the window and SDL.
+
+A game that is only queued (`queuedGame`) is not destroyed: the caller owns it.
+
+Inputs:
+- app: The application to shut down
+*/
 Application_Cleanup :: proc(app: ^Application) {
 	if app.game != nil {
 		Game_Destroy(app.game)
@@ -174,6 +230,14 @@ Application_Cleanup :: proc(app: ^Application) {
 	sdl.Quit()
 }
 
+/*
+Queues a game to play. The next `Application_Frame` destroys the current game (if it's a
+different one) and switches to this one, initializing it if needed.
+
+Inputs:
+- app: The application
+- game: The game to switch to. Setting the current game again only re-applies its scaling
+*/
 App_SetGame :: proc(app: ^Application, game: ^Game) {
 	app.queuedGame = game
 }

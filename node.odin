@@ -82,15 +82,22 @@ scene applies its world transform (and the camera) to every Draw* call. Children
 children too.
 */
 Node :: struct {
+	// Unique id, set by `CreateNode`. Pass it to `Scene_RemoveNode` and `Scene_GetNode`
 	id: EntityId,
 	// The type `CreateNode` made it as (`Sprite`, `DynamicBody`, ...); see `Node_Is`
 	type: typeid,
 	// The name from the scene file ("" for nodes made in code unless set). Used by
 	// `Scene_FindNode` and `Node_FindChild`; owned by the node's arena when set by `Scene_Build`
 	name: string,
+	// The layer it draws on (Layer1 first, Layer8 on top). Not inherited by children
 	layer: RenderLayer,
+	// The scene that made it (`CreateNode`)
 	scene: ^Scene,
+	// Optional. Called every frame while the node is in its scene and may process
+	// (`Node_CanProcess`); `deltaTime` is in seconds
 	update: proc(node: ^Node, events: []sdl.Event, deltaTime: f64),
+	// Optional. Draws the node in its local space: (0, 0) is its position, and the scene applies
+	// its world transform, the camera and its tint to every Draw* call
 	draw: proc(node: ^Node, renderer: ^sdl.Renderer),
 	// Optional. Called just before the node's memory is freed, to release anything that is
 	// not in the node's arena (e.g. memory from another allocator, SDL resources it owns)
@@ -103,6 +110,7 @@ Node :: struct {
 	position: [2]f32,
 	// Degrees, clockwise
 	rotation: f32,
+	// Scale on each axis ({1, 1} by default; a negative x mirrors it)
 	scale: [2]f32,
 	// UI nodes use .Position_Only: they follow their world position but aren't rotated or scaled
 	transformMode: TransformMode,
@@ -122,7 +130,9 @@ Node :: struct {
 	visible: bool,
 	// Multiplies the colors of everything the node and its children draw
 	tint: sdl.Color,
+	// Its parent, nil for a top-level node. Set with `Node_AddChild` / `Node_SetParent`
 	parent: ^Node,
+	// Its children, in the order they were added (in the node's arena)
 	children: [dynamic]^Node,
 	// Set while the node is part of its scene (after it was added, until it's removed)
 	inScene: bool,
@@ -131,7 +141,11 @@ Node :: struct {
 	// The script attached to the node, if any (script.odin)
 	script: NodeScript,
 
+	// Notified when the node joins its scene, at the start of the update after it was added
+	// (source: the node)
 	onEnter: EventSubject,
+	// Notified when the node leaves its scene (removed, or the scene destroyed), before it's
+	// freed (source: the node)
 	onExit: EventSubject,
 	// Holds this node and everything allocated with Node_GetAllocator
 	arena: NodeArena,
@@ -139,7 +153,8 @@ Node :: struct {
 
 /*
 Prepares a node's event subjects and children list, and sets its defaults (scale 1, visible,
-white tint). `CreateNode` calls this; only call it yourself for a node you allocated another way.
+white tint). `CreateNode` calls this; inside the engine, call it only for a node allocated
+another way.
 
 Inputs:
 - node: The node to initialize
@@ -158,9 +173,16 @@ Node_Init :: proc(node: ^Node, allocator := context.allocator) {
 
 /*
 Whether a node updates now: its process mode (resolving Inherit through its parents; Pausable at
-the top) against whether its scene is paused.
+the top) against whether its scene is paused. The scene checks it before each update.
+
+Inputs:
+- node: The node
+
+Returns:
+- true if the node updates this frame
 
 Example:
+	// Given: pauseMenu: ^e.Node
 	pauseMenu.processMode = .WhenPaused
 	e.Scene_SetPaused(scene, true) // gameplay stops, the menu runs
 */
@@ -184,18 +206,28 @@ Node_CanProcess :: proc(node: ^Node) -> bool {
 
 /*
 Puts a node in a group (once): groups name sets of nodes to find or act on together, like
-"enemies" or "pickups".
+"enemies" or "pickups". Find them with `Scene_GetGroup`.
 
 Inputs:
 - node: The node
 - group: The group's name (copied into the node's arena)
+
+Example:
+	e.Node_AddToGroup(node, "enemies")
+	for enemy in e.Scene_GetGroup(scene, "enemies") do enemy.tint = {255, 80, 80, 255}
 */
 Node_AddToGroup :: proc(node: ^Node, group: string) {
 	if Node_IsInGroup(node, group) do return
 	append(&node.groups, strings.clone(group, Node_GetAllocator(node)))
 }
 
-// Takes a node out of a group (nothing if it isn't in it)
+/*
+Takes a node out of a group (nothing if it isn't in it).
+
+Inputs:
+- node: The node
+- group: The group's name
+*/
 Node_RemoveFromGroup :: proc(node: ^Node, group: string) {
 	for name, i in node.groups do if name == group {
 		ordered_remove(&node.groups, i)
@@ -203,7 +235,16 @@ Node_RemoveFromGroup :: proc(node: ^Node, group: string) {
 	}
 }
 
-// Whether a node is in a group
+/*
+Whether a node is in a group.
+
+Inputs:
+- node: The node
+- group: The group's name
+
+Returns:
+- true if it's in the group
+*/
 Node_IsInGroup :: proc(node: ^Node, group: string) -> bool {
 	for name in node.groups do if name == group do return true
 	return false
@@ -221,10 +262,23 @@ Returns:
 - The node's arena allocator
 
 Example:
-	enemy := e.CreateNode(scene, Enemy)
-	allocator := e.Node_GetAllocator(enemy)
-	e.AnimationPlayer_Init(&enemy.anim, allocator)
-	e.EventSubject_Init(&enemy.onHit, allocator)
+	package mygame
+
+	import e "../engine"
+
+	Enemy :: struct {
+		using node: e.Node,
+		anim: e.AnimationPlayer,
+		onHit: e.EventSubject,
+	}
+
+	CreateEnemy :: proc(scene: ^e.Scene) -> ^Enemy {
+		enemy := e.CreateNode(scene, Enemy)
+		allocator := e.Node_GetAllocator(enemy)
+		e.AnimationPlayer_Init(&enemy.anim, allocator)
+		e.EventSubject_Init(&enemy.onHit, allocator)
+		return enemy
+	}
 */
 Node_GetAllocator :: proc(node: ^Node) -> mem.Allocator {
 	return runtime.Allocator{procedure = runtime.arena_allocator_proc, data = &node.arena}
@@ -272,7 +326,14 @@ allocateNode :: proc($T: typeid) -> ^T {
 }
 
 /*
-Whether a node was created as type T (`CreateNode(scene, T)`).
+Whether a node was created as type T (`CreateNode(scene, T)`), so it can be cast to `^T`.
+
+Inputs:
+- node: The node (nil returns false)
+- T: The node type
+
+Returns:
+- true if the node's type is exactly T
 
 Example:
 	if e.Node_Is(node, e.DynamicBody) do e.DynamicBody_ApplyImpulse(cast(^e.DynamicBody)node, {0, -300})

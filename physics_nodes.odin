@@ -66,14 +66,17 @@ What every physics body node has. The body types embed it first (`using body: Ph
 any of them can be used as a `^PhysicsBody`.
 */
 PhysicsBody :: struct {
+	// The node part: transform, hierarchy, hooks
 	using node: Node,
+	// Which body type it is (set by its Create procedure)
 	kind: PhysicsBodyKind,
 	// Layers this body is on, one bit per layer (layer 1 is bit 0)
 	collisionLayer: u64,
 	// Layers it collides with (and, for an Area, detects)
 	collisionMask: u64,
-	// Surface: friction (0 = ice, 1 = rubber), restitution (bounciness, 0-1)
+	// Surface friction: 0 = ice, 1 = rubber (default 0.6)
 	friction: f32,
+	// Bounciness, 0 (none, the default) to 1 (bounces back as high)
 	restitution: f32,
 	// kg per square meter (100 x 100 px). Only dynamic bodies use it
 	density: f32,
@@ -81,21 +84,25 @@ PhysicsBody :: struct {
 	onCollisionEnter: EventSubject,
 	// They stopped touching
 	onCollisionExit: EventSubject,
-	// This body entered / left an Area (`Collision.other` is the Area)
+	// This body entered an Area (`Collision.other` is the Area)
 	onAreaEnter: EventSubject,
+	// This body left an Area (`Collision.other` is the Area)
 	onAreaExit: EventSubject,
-	// Bodies touching it (for an Area: inside it) and the Areas it's in, counted per shape pair
-	// (internal: use PhysicsBody_GetContacts / PhysicsBody_GetAreas, physics_events.odin)
+	// Bodies touching it (for an Area: inside it), counted per shape pair (internal: use
+	// `PhysicsBody_GetContacts`, physics_events.odin)
 	contacts: [dynamic]BodyContact,
+	// The Areas it's in, counted per shape pair (internal: use `PhysicsBody_GetAreas`)
 	areas: [dynamic]BodyContact,
-	// Its local pose before the last step, for smoothing (physics_debug.odin)
+	// Its local position before the last step, for smoothing (physics_debug.odin)
 	previousPosition: [2]f32,
+	// Its local rotation before the last step, in degrees
 	previousRotation: f32,
 
 	// The Box2D body (internal; valid once the body is in the world)
 	bodyId: b2.BodyId,
-	// The node's world pose when the physics world last saw it, to notice code moving the node
+	// The node's world position when the physics world last saw it, to notice code moving the node
 	syncedPosition: [2]f32,
+	// The node's world rotation then, in degrees
 	syncedRotation: f32,
 	// Rebuild the Box2D shapes before the next step
 	shapesDirty: bool,
@@ -103,16 +110,19 @@ PhysicsBody :: struct {
 
 // A body that doesn't move by itself: walls, floors, platforms
 StaticBody :: struct {
+	// The body part: node, layers, surface, collision events
 	using body: PhysicsBody,
 }
 
 // A body moved by the simulation: gravity, collisions, forces, impulses
 DynamicBody :: struct {
+	// The body part: node, layers, surface, collision events
 	using body: PhysicsBody,
 	// Multiplies the world's gravity (0 = floats)
 	gravityScale: f32,
-	// Slows it down over time (0 = no damping)
+	// Slows its movement down over time (0 = no damping)
 	linearDamping: f32,
+	// Slows its spin down over time (0 = no damping)
 	angularDamping: f32,
 	// It never rotates (characters, upright crates)
 	fixedRotation: bool,
@@ -131,15 +141,18 @@ bodies and Areas detect it, but forces don't move it.
 Its shape is its first Capsule or Circle CollisionShape (Box2D movers are capsules).
 */
 CharacterMover :: struct {
+	// The body part: node, layers, surface, collision events
 	using body: PhysicsBody,
 	// Pixels per second. `CharacterMover_Move` moves by it and removes the part that ran into
 	// something (landing stops the fall, a wall stops the run)
 	velocity: [2]f32,
 	// Steepest slope that counts as floor, in degrees (default 45)
 	floorMaxAngle: f32,
-	// After the last move: touching the floor, a wall, the ceiling
+	// The last move ended standing on a floor (a surface no steeper than floorMaxAngle)
 	onFloor: bool,
+	// The last move ended touching a wall
 	onWall: bool,
+	// The last move ended touching a ceiling
 	onCeiling: bool,
 	// The floor's normal (pointing up, away from the floor) while onFloor
 	floorNormal: [2]f32,
@@ -151,6 +164,7 @@ CharacterMover :: struct {
 
 // A region that reports bodies entering (`onCollisionEnter`) and leaving (`onCollisionExit`)
 Area :: struct {
+	// The body part: node, layers, collision events
 	using body: PhysicsBody,
 }
 
@@ -177,7 +191,9 @@ moves, rotates and scales with the node. After changing a shape in code, call
 `PhysicsBody_RebuildShapes` on its body.
 */
 CollisionShape :: struct {
+	// The node part: transform, hierarchy, hooks
 	using node: Node,
+	// Which shape it is; the fields below say which ones each uses
 	shape: CollisionShapeKind,
 	// Rectangle: width and height
 	size: [2]f32,
@@ -202,19 +218,25 @@ Casts a ray from the node toward `target` (in the node's space) after every phys
 reports the first thing it hits: `colliding`, `point`, `normal`, `collider`.
 */
 RayCast :: struct {
+	// The node part: transform, hierarchy, hooks
 	using node: Node,
 	// End of the ray, relative to the node
 	target: [2]f32,
 	// Layers it hits
 	collisionMask: u64,
+	// Casts after every step while set (the results keep their last values when not)
 	enabled: bool,
 	// Ignore the body the ray is under (a character's own body)
 	excludeParent: bool,
-	// Results of the last cast
+	// The last cast hit something
 	colliding: bool,
+	// Where, in world pixels
 	point: [2]f32,
+	// The surface normal there
 	normal: [2]f32,
+	// The body hit (nil when not colliding)
 	collider: ^PhysicsBody,
+	// Which of its shapes was hit
 	colliderShape: ^CollisionShape,
 }
 
@@ -227,24 +249,51 @@ Collision :: struct {
 	body: ^PhysicsBody,
 	// What it touched (for an Area: the body that entered or left)
 	other: ^PhysicsBody,
+	// `body`'s shape that touched (nil for a CharacterMover's contacts and for exits caused by a
+	// removed body)
 	shape: ^CollisionShape,
+	// `other`'s shape that touched (nil in the same cases)
 	otherShape: ^CollisionShape,
-	// Where they touch, in world pixels, and the contact normal from `body` toward `other`.
-	// Zero for exits and Areas
+	// Where they touch, in world pixels. Zero for exits, Areas and CharacterMover contacts
 	point: [2]f32,
+	// The contact normal, from `body` toward `other`. Zero like `point`
 	normal: [2]f32,
 }
 
-// The Collision an event carries
+/*
+The Collision a physics event carries, in an `onCollisionEnter` / `onCollisionExit` /
+`onAreaEnter` / `onAreaExit` listener.
+
+Inputs:
+- data: The event's data
+
+Returns:
+- The collision (valid during the event only), or nil if the data isn't one
+
+Example:
+	// Given: coin: ^e.Area
+	coin.onCollisionEnter->subscribe(proc(_: ^e.EventSubject, _: rawptr, data: e.EventData, _: rawptr) {
+		hit := e.Collision_FromEvent(data)
+		log.infof("%s picked up %s", hit.other.name, hit.body.name)
+	}, nil)
+*/
 Collision_FromEvent :: proc(data: EventData) -> ^Collision {
 	pointer, ok := data.(rawptr)
 	return ok ? cast(^Collision)pointer : nil
 }
 
 /*
-A collision layer set from layer numbers (1-64).
+A collision layer set from layer numbers (1-64), for `collisionLayer` and `collisionMask`.
+Numbers outside 1-64 are ignored.
+
+Inputs:
+- layers: Layer numbers
+
+Returns:
+- One bit per layer (layer 1 is bit 0)
 
 Example:
+	// Given: body: ^e.PhysicsBody
 	body.collisionLayer = e.PhysicsLayers(2)
 	body.collisionMask = e.PhysicsLayers(1, 3)
 */
@@ -254,14 +303,40 @@ PhysicsLayers :: proc(layers: ..PhysicsLayer) -> u64 {
 	return bits
 }
 
-// Creates a StaticBody (no shape yet: add CollisionShape children)
+/*
+Creates a StaticBody (no shape yet: add CollisionShape children). It's on layer 1 and collides
+with every layer; its Box2D body is made on the scene's first update after it's in the scene.
+
+Inputs:
+- scene: The scene
+
+Returns:
+- The body (owned by the scene, like every node)
+
+Example:
+	ground := e.CreateStaticBody(scene)
+	ground.position = {640, 700}
+	shape := e.CreateCollisionShape(scene, .Rectangle)
+	shape.size = {1280, 40}
+	e.Node_AddChild(ground, shape)
+*/
 CreateStaticBody :: proc(scene: ^Scene) -> ^StaticBody {
 	body := CreateNode(scene, StaticBody)
 	initBody(body, .Static)
 	return body
 }
 
-// Creates a DynamicBody (no shape yet: add CollisionShape children)
+/*
+Creates a DynamicBody (no shape yet: add CollisionShape children; see the example at the top of
+physics_nodes.odin). Gravity scale 1, density 1, friction 0.6, on layer 1, colliding with every
+layer.
+
+Inputs:
+- scene: The scene
+
+Returns:
+- The body
+*/
 CreateDynamicBody :: proc(scene: ^Scene) -> ^DynamicBody {
 	body := CreateNode(scene, DynamicBody)
 	initBody(body, .Dynamic)
@@ -269,7 +344,21 @@ CreateDynamicBody :: proc(scene: ^Scene) -> ^DynamicBody {
 	return body
 }
 
-// Creates a CharacterMover (give it a Capsule or Circle CollisionShape child)
+/*
+Creates a CharacterMover (give it a Capsule or Circle CollisionShape child). `floorMaxAngle` is
+45 degrees. Move it with `CharacterMover_Move`.
+
+Inputs:
+- scene: The scene
+
+Returns:
+- The mover
+
+Example:
+	hero := e.CreateCharacterMover(scene)
+	hero.position = {200, 300}
+	e.Node_AddChild(hero, e.CreateCollisionShape(scene, .Capsule)) // 64 tall, radius 16
+*/
 CreateCharacterMover :: proc(scene: ^Scene) -> ^CharacterMover {
 	mover := CreateNode(scene, CharacterMover)
 	initBody(mover, .Character)
@@ -278,7 +367,16 @@ CreateCharacterMover :: proc(scene: ^Scene) -> ^CharacterMover {
 	return mover
 }
 
-// Creates an Area (give it CollisionShape children: the region)
+/*
+Creates an Area (give it CollisionShape children: the region). It detects bodies on the layers in
+its `collisionMask` (all by default).
+
+Inputs:
+- scene: The scene
+
+Returns:
+- The Area
+*/
 CreateArea :: proc(scene: ^Scene) -> ^Area {
 	area := CreateNode(scene, Area)
 	initBody(area, .Area)
@@ -287,7 +385,15 @@ CreateArea :: proc(scene: ^Scene) -> ^Area {
 
 /*
 Creates a CollisionShape with default dimensions (a 32 x 32 rectangle, radius 16, a 64 tall
-capsule). Make it a child of a body node.
+capsule; Polygon and Segment need their `points`). Make it a child of a body node (or of a node
+under one): its body includes it from the next physics step after it enters the scene.
+
+Inputs:
+- scene: The scene
+- kind: The shape
+
+Returns:
+- The shape node
 */
 CreateCollisionShape :: proc(scene: ^Scene, kind: CollisionShapeKind) -> ^CollisionShape {
 	shape := CreateNode(scene, CollisionShape)
@@ -305,7 +411,24 @@ CreateCollisionShape :: proc(scene: ^Scene, kind: CollisionShapeKind) -> ^Collis
 	return shape
 }
 
-// Creates a RayCast pointing `target` away (relative to the node)
+/*
+Creates a RayCast, enabled, hitting every layer and ignoring the body it's under. Parent it to
+the node it casts from.
+
+Inputs:
+- scene: The scene
+- target: The ray's end, relative to the node (pixels; 50 down by default)
+
+Returns:
+- The RayCast
+
+Example:
+	// Given: hero: ^e.CharacterMover
+	feet := e.CreateRayCast(scene, {0, 40})
+	e.Node_AddChild(hero, feet)
+	// Later, in the hero's update:
+	if feet.colliding do log.infof("standing on %s", feet.collider.name)
+*/
 CreateRayCast :: proc(scene: ^Scene, target: [2]f32 = {0, 50}) -> ^RayCast {
 	ray := CreateNode(scene, RayCast)
 	ray.target = target
@@ -320,12 +443,28 @@ CreateRayCast :: proc(scene: ^Scene, target: [2]f32 = {0, 50}) -> ^RayCast {
 	return ray
 }
 
-// Whether a node is a physics body (any kind)
+/*
+Whether a node is a physics body of any kind (StaticBody, DynamicBody, CharacterMover, Area).
+
+Inputs:
+- node: The node (nil is no body)
+
+Returns:
+- true if it can be used as a `^PhysicsBody`
+*/
 Node_IsPhysicsBody :: proc(node: ^Node) -> bool {
 	return node != nil && (node.type == StaticBody || node.type == DynamicBody || node.type == CharacterMover || node.type == Area)
 }
 
-// The body a shape belongs to: its nearest body ancestor (nil if none)
+/*
+The body a shape belongs to: its nearest body ancestor.
+
+Inputs:
+- shape: The shape
+
+Returns:
+- The body, or nil if no body is above it
+*/
 CollisionShape_GetBody :: proc(shape: ^CollisionShape) -> ^PhysicsBody {
 	for n := shape.parent; n != nil; n = n.parent {
 		if Node_IsPhysicsBody(n) do return cast(^PhysicsBody)n
@@ -333,24 +472,56 @@ CollisionShape_GetBody :: proc(shape: ^CollisionShape) -> ^PhysicsBody {
 	return nil
 }
 
-// Rebuilds a body's Box2D shapes from its CollisionShape nodes before the next step (after shapes changed in code)
+/*
+Rebuilds a body's Box2D shapes from its CollisionShape nodes before the next step. Call it after
+changing a shape's size, points, position, `oneWay` or `disabled` in code, or the body's
+`friction`, `restitution` or `density`.
+
+Inputs:
+- body: The body
+*/
 PhysicsBody_RebuildShapes :: proc(body: ^PhysicsBody) {
 	body.shapesDirty = true
 }
 
-// Changes the layers a body is on and collides with
+/*
+Changes the layers a body is on and collides with (its shapes are rebuilt before the next step).
+
+Inputs:
+- body: The body
+- layer: Layers it's on (`PhysicsLayers`)
+- mask: Layers it collides with (for an Area: detects)
+*/
 PhysicsBody_SetLayers :: proc(body: ^PhysicsBody, layer, mask: u64) {
 	body.collisionLayer, body.collisionMask = layer, mask
 	if b2.Body_IsValid(body.bodyId) do body.shapesDirty = true
 }
 
-// A dynamic body's velocity, pixels per second
+/*
+A dynamic body's velocity.
+
+Inputs:
+- body: The body
+
+Returns:
+- Pixels per second (before its Box2D body exists: `initialVelocity`)
+*/
 DynamicBody_GetVelocity :: proc(body: ^DynamicBody) -> [2]f32 {
 	if !b2.Body_IsValid(body.bodyId) do return body.initialVelocity
 	return b2.Body_GetLinearVelocity(body.bodyId) * pixelsPerMeter(body.scene)
 }
 
-// Sets a dynamic body's velocity, pixels per second
+/*
+Sets a dynamic body's velocity (before its Box2D body exists: its `initialVelocity`).
+
+Inputs:
+- body: The body
+- velocity: Pixels per second
+
+Example:
+	// Given: ball: ^e.DynamicBody
+	e.DynamicBody_SetVelocity(ball, {300, -400})
+*/
 DynamicBody_SetVelocity :: proc(body: ^DynamicBody, velocity: [2]f32) {
 	if !b2.Body_IsValid(body.bodyId) {
 		body.initialVelocity = velocity
@@ -359,39 +530,86 @@ DynamicBody_SetVelocity :: proc(body: ^DynamicBody, velocity: [2]f32) {
 	b2.Body_SetLinearVelocity(body.bodyId, velocity / pixelsPerMeter(body.scene))
 }
 
-// Spin speed in degrees per second, clockwise
+/*
+A dynamic body's spin speed.
+
+Inputs:
+- body: The body
+
+Returns:
+- Degrees per second, clockwise (0 before its Box2D body exists)
+*/
 DynamicBody_GetAngularVelocity :: proc(body: ^DynamicBody) -> f32 {
 	if !b2.Body_IsValid(body.bodyId) do return 0
 	return math.to_degrees(b2.Body_GetAngularVelocity(body.bodyId))
 }
 
+/*
+Sets a dynamic body's spin speed. Does nothing before its Box2D body exists (the scene's first
+update after it entered).
+
+Inputs:
+- body: The body
+- degreesPerSecond: Clockwise
+*/
 DynamicBody_SetAngularVelocity :: proc(body: ^DynamicBody, degreesPerSecond: f32) {
 	if b2.Body_IsValid(body.bodyId) do b2.Body_SetAngularVelocity(body.bodyId, math.to_radians(degreesPerSecond))
 }
 
 /*
-Gives a dynamic body an instant push: its velocity changes by impulse / mass. In kg·px/s, so an
-impulse of mass × 300 changes the velocity by 300 px/s whatever the body weighs (see
-`DynamicBody_GetMass`).
+Gives a dynamic body an instant push at its center: its velocity changes by impulse / mass, and
+it wakes up. Does nothing before its Box2D body exists.
+
+Inputs:
+- body: The body
+- impulse: kg·px/s, so an impulse of mass × 300 changes the velocity by 300 px/s whatever the
+  body weighs (`DynamicBody_GetMass`)
+
+Example:
+	// Given: crate: ^e.DynamicBody
+	// Knock the crate up and right by 300 px/s
+	e.DynamicBody_ApplyImpulse(crate, e.DynamicBody_GetMass(crate) * [2]f32{150, -260})
 */
 DynamicBody_ApplyImpulse :: proc(body: ^DynamicBody, impulse: [2]f32) {
 	if b2.Body_IsValid(body.bodyId) do b2.Body_ApplyLinearImpulseToCenter(body.bodyId, impulse / pixelsPerMeter(body.scene), true)
 }
 
-// Pushes a dynamic body during the next steps (call every frame for a steady force), in kg·px/s²
+/*
+Pushes a dynamic body at its center during the next step, waking it (Box2D clears forces after
+each step: call it every frame for a steady force). Does nothing before its Box2D body exists.
+
+Inputs:
+- body: The body
+- force: kg·px/s² (mass × acceleration in px/s²)
+*/
 DynamicBody_ApplyForce :: proc(body: ^DynamicBody, force: [2]f32) {
 	if b2.Body_IsValid(body.bodyId) do b2.Body_ApplyForceToCenter(body.bodyId, force / pixelsPerMeter(body.scene), true)
 }
 
-// The body's mass in kg (its shapes' area in square meters × density)
+/*
+A dynamic body's mass, from its shapes.
+
+Inputs:
+- body: The body
+
+Returns:
+- kg: its shapes' area in square meters × `density` (0 before its Box2D body exists)
+*/
 DynamicBody_GetMass :: proc(body: ^DynamicBody) -> f32 {
 	if !b2.Body_IsValid(body.bodyId) do return 0
 	return b2.Body_GetMass(body.bodyId)
 }
 
 /*
-Bodies inside an Area right now (temp allocated). Areas see bodies whose layers are in their mask.
-Kept up to date by every physics step (physics_events.odin).
+The bodies inside an Area right now (the same as `PhysicsBody_GetContacts` on it). Areas see
+bodies whose layers are in their mask. Kept up to date by every physics step (physics_events.odin).
+
+Inputs:
+- area: The Area
+- allocator: For the result (the frame's temp allocator by default)
+
+Returns:
+- The bodies, in the order they entered
 */
 Area_GetOverlaps :: proc(area: ^Area, allocator := context.temp_allocator) -> []^PhysicsBody {
 	return PhysicsBody_GetContacts(area, allocator)

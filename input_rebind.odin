@@ -38,6 +38,7 @@ INPUT_CAPTURE_AXIS :: 0.5
 
 // Where a capture is (InputState.capture)
 InputCaptureState :: enum u8 {
+	// No capture
 	Off,
 	// Waiting for the next input
 	Waiting,
@@ -47,7 +48,9 @@ InputCaptureState :: enum u8 {
 
 // A capture of the next input (`Input_StartCapture`)
 InputCapture :: struct {
+	// Where it is
 	state: InputCaptureState,
+	// The input captured, once `state` is .Done
 	binding: InputBinding,
 	// Gamepad bindings for any gamepad (device -1), or the one used
 	anyDevice: bool,
@@ -56,11 +59,14 @@ InputCapture :: struct {
 }
 
 /*
-Starts waiting for the next input to bind (see above).
+Starts waiting for the next input to bind (see above). Replaces a capture already going.
 
 Inputs:
 - anyDevice: A gamepad binding works on any gamepad (else only on the one pressed)
 - game: The game (nil: the one playing)
+
+Example:
+	e.Input_StartCapture()
 */
 Input_StartCapture :: proc(anyDevice := true, game: ^Game = nil) {
 	input := inputOf(game)
@@ -69,12 +75,25 @@ Input_StartCapture :: proc(anyDevice := true, game: ^Game = nil) {
 	for pad, i in input.gamepads do if i < len(input.capture.baseline) do input.capture.baseline[i] = pad.axes
 }
 
-// Stops waiting for an input to bind (a captured one not taken yet is dropped)
+/*
+Stops waiting for an input to bind (a captured one not taken yet is dropped).
+
+Inputs:
+- game: The game (nil: the one playing)
+*/
 Input_CancelCapture :: proc(game: ^Game = nil) {
 	if input := inputOf(game); input != nil do input.capture = {}
 }
 
-// Whether a capture is waiting for its input
+/*
+Tells whether a capture is waiting for its input.
+
+Inputs:
+- game: The game (nil: the one playing)
+
+Returns:
+- true from `Input_StartCapture` until an input comes or the capture is cancelled
+*/
 Input_IsCapturing :: proc(game: ^Game = nil) -> bool {
 	input := inputOf(game)
 	return input != nil && input.capture.state == .Waiting
@@ -84,8 +103,16 @@ Input_IsCapturing :: proc(game: ^Game = nil) -> bool {
 The input a capture got, once: from the frame it came (Game_Update's Input_Update), then the
 capture is over.
 
+Inputs:
+- game: The game (nil: the one playing)
+
 Returns:
-- The binding, and whether there is one
+- The binding, and whether there is one (false while waiting or with no capture)
+
+Example:
+	if binding, ok := e.Input_GetCapturedBinding(); ok {
+		e.Input_SetBindings("jump", {binding})
+	}
 */
 Input_GetCapturedBinding :: proc(game: ^Game = nil) -> (InputBinding, bool) {
 	input := inputOf(game)
@@ -96,7 +123,11 @@ Input_GetCapturedBinding :: proc(game: ^Game = nil) -> (InputBinding, bool) {
 }
 
 /*
-An action's bindings.
+An action's bindings. An unknown name logs a warning once.
+
+Inputs:
+- name: The action's name
+- game: The game (nil: the one playing)
 
 Returns:
 - The game's list (don't keep it past a change), nil when there's no such action
@@ -107,10 +138,18 @@ Input_GetBindings :: proc(name: string, game: ^Game = nil) -> []InputBinding {
 }
 
 /*
-Replaces an action's bindings (copied).
+Replaces an action's bindings (copied). An unknown name logs a warning once.
+
+Inputs:
+- name: The action's name
+- bindings: Its new bindings (an empty slice unbinds it)
+- game: The game (nil: the one playing)
 
 Returns:
 - false when there's no such action
+
+Example:
+	e.Input_SetBindings("jump", {e.KeyBinding{.Space}, e.GamepadButtonBinding{.South, -1}})
 */
 Input_SetBindings :: proc(name: string, bindings: []InputBinding, game: ^Game = nil) -> bool {
 	a := findAction(game, name)
@@ -122,6 +161,11 @@ Input_SetBindings :: proc(name: string, bindings: []InputBinding, game: ^Game = 
 
 /*
 The actions a binding triggers (to warn about, or take it off, before binding it to another).
+Bindings match exactly: a gamepad binding for device -1 doesn't match one for device 0.
+
+Inputs:
+- binding: The binding
+- game: The game (nil: the one playing)
 
 Returns:
 - Their names (the game's strings; the list is temp allocated)
@@ -139,7 +183,13 @@ Input_ActionsUsing :: proc(binding: InputBinding, game: ^Game = nil) -> []string
 	return names[:]
 }
 
-// Puts every action's bindings back as the project (or `Input_AddAction`) made them
+/*
+Puts every action's bindings back as the project (or `Input_AddAction`) made them. Doesn't save:
+call `Input_SaveBindings` to keep it.
+
+Inputs:
+- game: The game (nil: the one playing)
+*/
 Input_ResetBindings :: proc(game: ^Game = nil) {
 	input := inputOf(game)
 	if input == nil do return
@@ -155,8 +205,12 @@ Every action's bindings as text, one line per action (what `Input_SaveBindings` 
 	jump = key key=Space | gamepad button=South
 	move_left = key key=A | axis axis=LeftX direction=-1
 
+Inputs:
+- game: The game (nil: the one playing)
+- allocator: Allocates the text
+
 Returns:
-- The text, allocated with `allocator`
+- The text, allocated with `allocator` ("" without a game)
 */
 Input_FormatBindings :: proc(game: ^Game = nil, allocator := context.allocator) -> string {
 	input := inputOf(game)
@@ -184,6 +238,10 @@ Input_FormatBindings :: proc(game: ^Game = nil, allocator := context.allocator) 
 /*
 Sets actions' bindings from `Input_FormatBindings` text. Actions the text doesn't list keep
 theirs; lines for actions the game doesn't have, and bindings that can't be read, are skipped.
+
+Inputs:
+- text: The text
+- game: The game (nil: the one playing)
 
 Returns:
 - How many actions it set
@@ -225,8 +283,15 @@ Input_ParseBindings :: proc(text: string, game: ^Game = nil) -> int {
 Keeps every action's bindings with the game's saves (save.odin's storage: a file in the player's
 data folder, the browser's localStorage).
 
+Inputs:
+- slot: The save slot name
+- game: The game (nil: the one playing)
+
 Returns:
 - Whether it was written (failures are logged)
+
+Example:
+	if !e.Input_SaveBindings() do log.warn("bindings not saved")
 */
 Input_SaveBindings :: proc(slot := INPUT_BINDINGS_SLOT, game: ^Game = nil) -> bool {
 	game := game != nil ? game : currentGame
@@ -240,10 +305,18 @@ Input_SaveBindings :: proc(slot := INPUT_BINDINGS_SLOT, game: ^Game = nil) -> bo
 }
 
 /*
-Loads bindings `Input_SaveBindings` kept (call it once the project is loaded).
+Loads bindings `Input_SaveBindings` kept (call it once the project is loaded), as
+`Input_ParseBindings`.
+
+Inputs:
+- slot: The save slot name
+- game: The game (nil: the one playing)
 
 Returns:
 - false when there's none
+
+Example:
+	e.Input_LoadBindings()
 */
 Input_LoadBindings :: proc(slot := INPUT_BINDINGS_SLOT, game: ^Game = nil) -> bool {
 	game := game != nil ? game : currentGame
@@ -258,7 +331,8 @@ Input_LoadBindings :: proc(slot := INPUT_BINDINGS_SLOT, game: ^Game = nil) -> bo
 Rumbles gamepads (those that can; others ignore it).
 
 Inputs:
-- low, high: The low- and high-frequency motors' strength, 0 to 1
+- low: The low-frequency motor's strength, 0 to 1
+- high: The high-frequency motor's strength, 0 to 1
 - seconds: How long (a new rumble replaces one still going)
 - device: Which gamepad (0 the first connected); -1 all of them
 - game: The game (nil: the one playing)

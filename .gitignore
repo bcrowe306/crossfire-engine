@@ -15,3 +15,4 @@ dist/
 # Static SDL, built by tools/build_sdl_static.sh
 sdl/lib/
 sdl/build/
+docs/build/

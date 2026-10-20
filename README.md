@@ -8,7 +8,10 @@ Crossfire (this repository: `odin_sdl_engine`) is a 2D game engine in [Odin](htt
 and animation, text and menus, a camera, Box2D physics (bodies, areas, ray casts, joints, a
 character mover), particle emitters (with color ramps), sound (sound, positional sound and streamed music nodes, mix
 buses), input actions (keys, mouse and gamepads, like Godot's
-input map), components (reusable node trees, instanced in scenes or from code), levels made in the
+input map, rebindable and saved, with rumble), components (reusable node trees, instanced in
+scenes or from code), tweens, pausing with per-node process modes, a time scale and hitstops,
+z-index and y-sort, blend modes, render targets, groups, localization (CSV tables), debug drawing
+and an overlay, physics queries and one-way platforms, levels made in the
 [LDtk](https://ldtk.io) level editor (tile layers, entities that become components or scripted
 nodes with their LDtk fields, IntGrid collision), scripts in Odin, global game state with JSON saves, data resources, and a player
 that runs projects made with [odin_sdl_editor](https://github.com/bcrowe306/odin_sdl_editor). It
@@ -42,5 +45,7 @@ publishes the player for each as a [release](https://github.com/bcrowe306/odin_s
 
 ## Documentation
 
-`CLAUDE.md` describes the architecture and the rules that keep the engine correct; every public
-procedure has an Odin doc comment (`odin doc .`).
+`doc.odin` is the package overview, and every public declaration and struct field has an Odin
+doc comment (`odin doc .`; the editor's code editor shows them through OLS). `CLAUDE.md`
+describes the architecture and the rules that keep the engine correct. `odin run bench -o:speed`
+measures the per-frame costs.

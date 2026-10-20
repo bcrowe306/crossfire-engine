@@ -36,21 +36,43 @@ Globals are also what `Save_Game` saves: their state (fields that aren't exporte
 
 // A global in project.xml: its script and field values
 GlobalData :: struct {
+	// The registered script's name
 	script: string,
+	// Its exported field values, as text
 	props: [dynamic]ScriptPropData,
 }
 
 // A running global (Game.globals)
 GlobalInstance :: struct {
+	// The global's registered script
 	info: ^ScriptInfo,
+	// The global's struct, in the game's arena
 	data: rawptr,
 }
 
 /*
-The game's global of type T (nil if the project has none).
+The game's global of type T.
+
+Inputs:
+- T: The global's script type
+- game: The game (default: the one playing)
+
+Returns:
+- The global (the game's, kept for its whole run), or nil if the project has none of that type
 
 Example:
-	if state := e.Global(GameState); state != nil do state.score += 10
+	package mygame
+
+	import e "../engine"
+
+	GameState :: struct {
+		using script: e.Script,
+		score: int,
+	}
+
+	AddPoints :: proc(points: int) {
+		if state := e.Global(GameState); state != nil do state.score += points
+	}
 */
 Global :: proc($T: typeid, game: ^Game = nil) -> ^T {
 	game := game != nil ? game : currentGame

@@ -24,7 +24,7 @@ Kinds (`JointKind`), and what their settings mean:
 	           Motor: speed in px/s along the line, maxMotor force in kg·px/s²
 	Prismatic  body B slides along the joint's X axis (rotate the joint to aim it), without
 	           turning. Limit: lower/upper translation (px). Motor: px/s and force
-	Weld       glues the bodies together. A spring (hertz > 0) makes it bendy
+	Weld       glues the bodies together. A spring (enableSpring, hertz > 0) makes it bendy
 	Wheel      body B slides along the joint's X axis on a spring (suspension) and turns freely:
 	           the motor spins it (degrees per second, torque)
 
@@ -40,46 +40,88 @@ Example:
 	hinge.enableLimit, hinge.lower, hinge.upper = true, -90, 0
 */
 
+// What a Joint does (see the top of physics_joints.odin for each kind's settings)
 JointKind :: enum {
+	// A hinge or pin at the anchor
 	Revolute,
+	// Keeps two points a distance apart: a rod, a rope (with limits) or a spring
 	Distance,
+	// Body B slides along the joint's X axis without turning
 	Prismatic,
+	// Glues the bodies together
 	Weld,
+	// Body B slides along the joint's X axis on a spring and turns freely: a wheel's suspension
 	Wheel,
 }
 
+/*
+A node that connects two bodies at its position (see the top of physics_joints.odin). The
+settings are read when the Box2D joint is made; after that only `Joint_SetMotorSpeed` changes
+one.
+*/
 Joint :: struct {
+	// The node part: transform (the anchor), hierarchy, hooks
 	using node: Node,
+	// What it does (set by `CreateJoint`)
 	kind: JointKind,
-	// Name or path of body A ("" = the body the joint is under, or the world) and of body B
+	// Name or path of body A ("": the body the joint is under, or the world)
 	bodyA: string,
+	// Name or path of body B (required)
 	bodyB: string,
 	// Distance: where body B's anchor is, relative to the joint (its length is the distance)
 	offset: [2]f32,
 	// Whether the two bodies still collide with each other
 	collideConnected: bool,
+	// Use `lower` and `upper`
 	enableLimit: bool,
-	// Revolute: degrees; Distance: lengths in px; Prismatic, Wheel: translations in px
+	// The low limit. Revolute: degrees; Distance: a length in px; Prismatic, Wheel: a translation
+	// in px
 	lower: f32,
+	// The high limit, in the same units (the two are swapped if upper < lower)
 	upper: f32,
+	// Drive it at `motorSpeed`, up to `maxMotor`
 	enableMotor: bool,
 	// Revolute, Wheel: degrees per second; Distance, Prismatic: px/s
 	motorSpeed: f32,
 	// Revolute, Wheel: max torque (kg·px²/s²); Distance, Prismatic: max force (kg·px/s²)
 	maxMotor: f32,
+	// Use the spring (`hertz`, `dampingRatio`)
 	enableSpring: bool,
+	// How stiff the spring is, in cycles per second (0 = off)
 	hertz: f32,
+	// How quickly the spring settles: 0 bounces forever, 1 doesn't bounce (default 0.5)
 	dampingRatio: f32,
 
-	// The Box2D joint (internal), and the bodies it connected
+	// The Box2D joint (internal)
 	jointId: b2.JointId,
+	// Body A it connected (nil: the world)
 	connectedA: ^PhysicsBody,
+	// Body B it connected
 	connectedB: ^PhysicsBody,
 	// Its bodies couldn't be found (reported once; not retried)
 	failed: bool,
 }
 
-// Creates a Joint (set `bodyB`, and `position`: the anchor)
+/*
+Creates a Joint. Set its `bodyB` and its `position` (the anchor), and parent it under body A (or
+set `bodyA`) before its scene's next update: the Box2D joint is made from that pose.
+
+Inputs:
+- scene: The scene
+- kind: What it does
+
+Returns:
+- The joint (`offset` is {0, 100}, `dampingRatio` 0.5)
+
+Example:
+	// Given: car: ^e.DynamicBody
+	wheel := e.CreateJoint(scene, .Wheel)
+	wheel.position = {-40, 30} // relative to the car, which is body A
+	wheel.bodyB = "Car/FrontWheel"
+	wheel.enableSpring, wheel.hertz = true, 4
+	wheel.enableMotor, wheel.maxMotor = true, 5e6
+	e.Node_AddChild(car, wheel)
+*/
 CreateJoint :: proc(scene: ^Scene, kind: JointKind) -> ^Joint {
 	joint := CreateNode(scene, Joint)
 	joint.kind = kind
@@ -96,14 +138,30 @@ CreateJoint :: proc(scene: ^Scene, kind: JointKind) -> ^Joint {
 	return joint
 }
 
-// Whether the joint exists in the physics world (both bodies were found and are still there)
+/*
+Whether the joint exists in the physics world (both bodies were found and are still there).
+
+Inputs:
+- joint: The joint
+
+Returns:
+- false before it's made, when its bodies weren't found, and after either body is removed
+*/
 Joint_IsActive :: proc(joint: ^Joint) -> bool {
 	return b2.Joint_IsValid(joint.jointId)
 }
 
 /*
-Changes a joint's motor speed while it runs (degrees per second for Revolute and Wheel, px/s for
-Distance and Prismatic). Turns the motor on.
+Changes a joint's motor speed, turning the motor on, and wakes its bodies. Works before the
+joint is made too (it starts with it). Weld joints have no motor.
+
+Inputs:
+- joint: The joint
+- speed: Degrees per second (clockwise) for Revolute and Wheel, px/s for Distance and Prismatic
+
+Example:
+	// Given: wheel: ^e.Joint
+	e.Joint_SetMotorSpeed(wheel, e.Input_GetAxis("left", "right") * 720)
 */
 Joint_SetMotorSpeed :: proc(joint: ^Joint, speed: f32) {
 	joint.motorSpeed, joint.enableMotor = speed, true
@@ -127,13 +185,30 @@ Joint_SetMotorSpeed :: proc(joint: ^Joint, speed: f32) {
 	b2.Joint_WakeBodies(joint.jointId)
 }
 
-// A Revolute joint's angle, degrees from where it started (clockwise)
+/*
+A Revolute joint's angle: how far body B has turned relative to body A since the joint was made.
+
+Inputs:
+- joint: The joint
+
+Returns:
+- Degrees, clockwise (0 for other kinds, or before the joint is made)
+*/
 Joint_GetAngle :: proc(joint: ^Joint) -> f32 {
 	if joint.kind != .Revolute || !b2.Joint_IsValid(joint.jointId) do return 0
 	return math.to_degrees(b2.RevoluteJoint_GetAngle(joint.jointId))
 }
 
-// A Prismatic joint's translation (px from the start), or a Distance joint's current length
+/*
+A Prismatic joint's translation, or a Distance joint's current length.
+
+Inputs:
+- joint: The joint
+
+Returns:
+- Pixels: along the axis from where it started, or the length (0 for other kinds, or before
+  the joint is made)
+*/
 Joint_GetTranslation :: proc(joint: ^Joint) -> f32 {
 	if !b2.Joint_IsValid(joint.jointId) do return 0
 	ppm := pixelsPerMeter(joint.scene)
@@ -145,15 +220,35 @@ Joint_GetTranslation :: proc(joint: ^Joint) -> f32 {
 }
 
 /*
-How hard the joint pulls on its bodies right now (kg·px/s²): compare it to a limit to make
-breakable joints (`scene->removeNode(joint.id)` breaks it).
+How hard the joint pulls on its bodies right now: compare its length to a limit to make
+breakable joints (`Scene_RemoveNode(scene, joint.id)` breaks it).
+
+Inputs:
+- joint: The joint
+
+Returns:
+- Box2D's constraint force, kg·px/s² (zero before the joint is made)
+
+Example:
+	// Given: rope: ^e.Joint
+	if linalg.length(e.Joint_GetForce(rope)) > 50000 do e.Scene_RemoveNode(scene, rope.id)
 */
 Joint_GetForce :: proc(joint: ^Joint) -> [2]f32 {
 	if !b2.Joint_IsValid(joint.jointId) do return {}
 	return b2.Joint_GetConstraintForce(joint.jointId) * pixelsPerMeter(joint.scene)
 }
 
-// The joint's anchors in world pixels (A at the joint, B on body B), for drawing
+/*
+The joint's anchors in world pixels, for drawing it (a rope's line, a spring).
+
+Inputs:
+- joint: The joint
+
+Returns:
+- a: Body A's anchor (where the joint was)
+- b: Body B's anchor (it starts at `a`, except a Distance joint's: `offset` away)
+- ok: false before the joint is made
+*/
 Joint_GetAnchors :: proc(joint: ^Joint) -> (a, b: [2]f32, ok: bool) {
 	if !b2.Joint_IsValid(joint.jointId) do return
 	ppm := pixelsPerMeter(joint.scene)

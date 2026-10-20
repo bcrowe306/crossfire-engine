@@ -82,9 +82,11 @@ MouseButton :: enum {
 	Left,
 	Middle,
 	Right,
-	// The side buttons (SDL's X1, X2)
+	// The back side button (SDL's X1)
 	Back,
+	// The forward side button (SDL's X2)
 	Forward,
+	// The wheel turned up (away from the player), for one frame
 	WheelUp,
 	WheelDown,
 	WheelLeft,
@@ -130,15 +132,21 @@ InputBinding :: union {
 	GamepadAxisBinding,
 }
 
+// A keyboard key triggers the action
 KeyBinding :: struct {
+	// The key
 	key: Key,
 }
 
+// A mouse button (or a wheel direction) triggers the action
 MouseBinding :: struct {
+	// The button
 	button: MouseButton,
 }
 
+// A gamepad button triggers the action
 GamepadButtonBinding :: struct {
+	// The button
 	button: GamepadButton,
 	// Which gamepad (0 the first connected); -1 any
 	device: int,
@@ -146,8 +154,11 @@ GamepadButtonBinding :: struct {
 
 // A stick or trigger pushed one way: `direction` +1 (right, down, pressed) or -1 (left, up)
 GamepadAxisBinding :: struct {
+	// The stick axis or trigger
 	axis: GamepadAxis,
+	// +1 (right, down, pressed) or -1 (left, up)
 	direction: f32,
+	// Which gamepad (0 the first connected); -1 any
 	device: int,
 }
 
@@ -156,9 +167,11 @@ DEFAULT_ACTION_DEADZONE :: 0.5
 
 // A named input and what triggers it: project.xml's `<action>` (format version 8)
 InputActionData :: struct {
+	// The action's name, as scripts ask for it ("jump")
 	name: string,
 	// Sticks and triggers below this count as not pressed
 	deadzone: f32,
+	// What triggers it: any one of them
 	bindings: [dynamic]InputBinding,
 }
 
@@ -183,14 +196,19 @@ ActionState :: struct {
 
 // The game's input: what's held, what changed this frame, and the actions (Game.input)
 InputState :: struct {
+	// Keys held, gone down this frame, and let go this frame
 	keys, keysPressed, keysReleased: #sparse[Key]bool,
+	// Mouse buttons held, gone down this frame, and let go this frame
 	mouse, mousePressed, mouseReleased: [MouseButton]bool,
-	// Game coordinates (the app converts window positions)
+	// Where the mouse is, in game coordinates (the app converts window positions)
 	mousePosition: [2]f32,
+	// How far it moved this frame, in game coordinates
 	mouseMotion: [2]f32,
 	// This frame's wheel turn (y up positive, x right positive)
 	wheel: [2]f32,
+	// The connected gamepads, in the order they connected (their index is the device number)
 	gamepads: [dynamic]GamepadState,
+	// The actions and their state this frame (`Input_SetActions`, `Input_AddAction`)
 	actions: [dynamic]ActionState,
 	// Unknown action names already reported, so a typo warns once (owned keys)
 	warned: map[string]bool,
@@ -200,7 +218,12 @@ InputState :: struct {
 
 /*
 Sets the game's actions (replacing any): Game_LoadProject does this with the project's. Names,
-bindings and the list are copied into the game's memory.
+bindings and the list are copied into the game's memory; the bindings also become each action's
+defaults (`Input_ResetBindings`).
+
+Inputs:
+- game: The game
+- actions: The actions
 */
 Input_SetActions :: proc(game: ^Game, actions: []InputActionData) {
 	input := &game.input
@@ -216,7 +239,14 @@ Input_SetActions :: proc(game: ^Game, actions: []InputActionData) {
 }
 
 /*
-Adds an action from code (or a binding to one that exists).
+Adds an action from code, or more bindings to one that exists (its deadzone then stays). The
+bindings also become part of its defaults (`Input_ResetBindings`).
+
+Inputs:
+- name: The action's name (copied)
+- bindings: What triggers it
+- deadzone: How far a stick or trigger must move to count (0 to 1), for a new action
+- game: The game (nil: the one playing)
 
 Example:
 	e.Input_AddAction("dash", e.KeyBinding{.LeftShift}, e.GamepadButtonBinding{.East, -1})
@@ -240,37 +270,99 @@ Input_AddAction :: proc(name: string, bindings: ..InputBinding, deadzone: f32 = 
 	append(&game.input.actions, ActionState{data = data, defaults = defaults})
 }
 
-// Whether the game has an action by that name
+/*
+Tells whether the game has an action by that name (without warning when it doesn't).
+
+Inputs:
+- name: The action's name
+- game: The game (nil: the one playing)
+
+Returns:
+- true if it exists
+*/
 Input_HasAction :: proc(name: string, game: ^Game = nil) -> bool {
 	return findAction(game, name, warn = false) != nil
 }
 
-// The action is held: any of its bindings is down (a stick past its deadzone)
+/*
+Tells whether an action is held: any of its bindings is down (a stick past its deadzone). An
+unknown name logs a warning once and counts as not pressed.
+
+Inputs:
+- name: The action's name
+- game: The game (nil: the one playing)
+
+Returns:
+- true while it's held
+
+Example:
+	if e.Input_IsActionPressed("fire") do log.info("firing")
+*/
 Input_IsActionPressed :: proc(name: string, game: ^Game = nil) -> bool {
 	a := findAction(game, name)
 	return a != nil && a.down
 }
 
-// The action went down this frame
+/*
+Tells whether an action went down this frame. Not while an input is being captured for
+rebinding (input_rebind.odin).
+
+Inputs:
+- name: The action's name
+- game: The game (nil: the one playing)
+
+Returns:
+- true on the frame it was pressed
+
+Example:
+	if e.Input_IsActionJustPressed("jump") do log.info("jump")
+*/
 Input_IsActionJustPressed :: proc(name: string, game: ^Game = nil) -> bool {
 	a := findAction(game, name)
 	return a != nil && a.pressed
 }
 
-// The action was let go this frame
+/*
+Tells whether an action was let go this frame. Not while an input is being captured for
+rebinding (input_rebind.odin).
+
+Inputs:
+- name: The action's name
+- game: The game (nil: the one playing)
+
+Returns:
+- true on the frame it was released
+*/
 Input_IsActionJustReleased :: proc(name: string, game: ^Game = nil) -> bool {
 	a := findAction(game, name)
 	return a != nil && a.released
 }
 
-// How hard the action is pressed, 0 to 1: 1 for keys and buttons, a stick's travel past the deadzone (rescaled)
+/*
+How hard an action is pressed: the strongest of its bindings.
+
+Inputs:
+- name: The action's name
+- game: The game (nil: the one playing)
+
+Returns:
+- 0 to 1: 1 for keys and buttons, a stick's or trigger's travel past the deadzone (rescaled so it starts at 0 there); 0 for an unknown action
+*/
 Input_GetActionStrength :: proc(name: string, game: ^Game = nil) -> f32 {
 	a := findAction(game, name)
 	return a != nil ? a.strength : 0
 }
 
 /*
-One axis from two actions: positive's strength minus negative's, -1 to 1.
+One axis from two actions: positive's strength minus negative's.
+
+Inputs:
+- negative: The action for -1 (left, up)
+- positive: The action for +1 (right, down)
+- game: The game (nil: the one playing)
+
+Returns:
+- -1 to 1
 
 Example:
 	steer := e.Input_GetAxis("turn_left", "turn_right")
@@ -282,8 +374,20 @@ Input_GetAxis :: proc(negative, positive: string, game: ^Game = nil) -> f32 {
 /*
 A direction from four actions (x right, y down), at most 1 long: diagonals aren't faster.
 
+Inputs:
+- negativeX: The action for left
+- positiveX: The action for right
+- negativeY: The action for up
+- positiveY: The action for down
+- game: The game (nil: the one playing)
+
+Returns:
+- The direction, each axis -1 to 1, length at most 1
+
 Example:
+	// Given: speed: f32
 	velocity := e.Input_GetVector("move_left", "move_right", "move_up", "move_down") * speed
+	node.position += velocity * f32(dt)
 */
 Input_GetVector :: proc(negativeX, positiveX, negativeY, positiveY: string, game: ^Game = nil) -> [2]f32 {
 	v := [2]f32{Input_GetAxis(negativeX, positiveX, game), Input_GetAxis(negativeY, positiveY, game)}
@@ -291,81 +395,227 @@ Input_GetVector :: proc(negativeX, positiveX, negativeY, positiveY: string, game
 	return length > 1 ? v / length : v
 }
 
-// A key is held
+/*
+Tells whether a key is held.
+
+Inputs:
+- key: The key
+- game: The game (nil: the one playing)
+
+Returns:
+- true while it's down
+
+Example:
+	if e.Input_IsKeyPressed(.LeftShift) do log.info("running")
+*/
 Input_IsKeyPressed :: proc(key: Key, game: ^Game = nil) -> bool {
 	input := inputOf(game)
 	return input != nil && input.keys[key]
 }
 
-// A key went down this frame (not its repeats)
+/*
+Tells whether a key went down this frame (its repeats don't count).
+
+Inputs:
+- key: The key
+- game: The game (nil: the one playing)
+
+Returns:
+- true on the frame it was pressed
+
+Example:
+	if e.Input_IsKeyJustPressed(.Escape) do log.info("pause")
+*/
 Input_IsKeyJustPressed :: proc(key: Key, game: ^Game = nil) -> bool {
 	input := inputOf(game)
 	return input != nil && input.keysPressed[key]
 }
 
-// A key was let go this frame
+/*
+Tells whether a key was let go this frame (or the window lost focus while it was held).
+
+Inputs:
+- key: The key
+- game: The game (nil: the one playing)
+
+Returns:
+- true on the frame it was released
+*/
 Input_IsKeyJustReleased :: proc(key: Key, game: ^Game = nil) -> bool {
 	input := inputOf(game)
 	return input != nil && input.keysReleased[key]
 }
 
-// A mouse button is held (wheel directions: turned this frame)
+/*
+Tells whether a mouse button is held. A wheel direction counts as held on the frame the wheel turns.
+
+Inputs:
+- button: The button
+- game: The game (nil: the one playing)
+
+Returns:
+- true while it's down
+*/
 Input_IsMouseButtonPressed :: proc(button: MouseButton, game: ^Game = nil) -> bool {
 	input := inputOf(game)
 	return input != nil && input.mouse[button]
 }
 
+/*
+Tells whether a mouse button went down this frame (a wheel direction: the wheel turned this frame).
+
+Inputs:
+- button: The button
+- game: The game (nil: the one playing)
+
+Returns:
+- true on the frame it was pressed
+
+Example:
+	if e.Input_IsMouseButtonJustPressed(.Left) do log.infof("click at %v", e.Input_GetMousePosition())
+*/
 Input_IsMouseButtonJustPressed :: proc(button: MouseButton, game: ^Game = nil) -> bool {
 	input := inputOf(game)
 	return input != nil && input.mousePressed[button]
 }
 
+/*
+Tells whether a mouse button was let go this frame (a wheel direction: the frame after it turned).
+
+Inputs:
+- button: The button
+- game: The game (nil: the one playing)
+
+Returns:
+- true on the frame it was released
+*/
 Input_IsMouseButtonJustReleased :: proc(button: MouseButton, game: ^Game = nil) -> bool {
 	input := inputOf(game)
 	return input != nil && input.mouseReleased[button]
 }
 
-// Where the mouse is, in game coordinates (see Scene_ScreenToWorld for the world under it)
+/*
+Where the mouse is, in game coordinates (`Scene_ScreenToWorld` gives the world point under it).
+
+Inputs:
+- game: The game (nil: the one playing)
+
+Returns:
+- The position in game coordinates (zero without a game)
+*/
 Input_GetMousePosition :: proc(game: ^Game = nil) -> [2]f32 {
 	input := inputOf(game)
 	return input != nil ? input.mousePosition : {}
 }
 
-// How far the mouse moved this frame, in game coordinates
+/*
+How far the mouse moved this frame.
+
+Inputs:
+- game: The game (nil: the one playing)
+
+Returns:
+- The movement in game coordinates
+*/
 Input_GetMouseMotion :: proc(game: ^Game = nil) -> [2]f32 {
 	input := inputOf(game)
 	return input != nil ? input.mouseMotion : {}
 }
 
-// The wheel's turn this frame: y positive up, x positive right
+/*
+How far the wheel turned this frame.
+
+Inputs:
+- game: The game (nil: the one playing)
+
+Returns:
+- The turn: y positive up, x positive right (SDL's wheel units)
+*/
 Input_GetMouseWheel :: proc(game: ^Game = nil) -> [2]f32 {
 	input := inputOf(game)
 	return input != nil ? input.wheel : {}
 }
 
-// How many gamepads are connected
+/*
+How many gamepads are connected (devices 0 to the count minus 1).
+
+Inputs:
+- game: The game (nil: the one playing)
+
+Returns:
+- The count
+*/
 Input_GamepadCount :: proc(game: ^Game = nil) -> int {
 	input := inputOf(game)
 	return input != nil ? len(input.gamepads) : 0
 }
 
-// A gamepad button is held (device -1: on any gamepad)
+/*
+Tells whether a gamepad button is held.
+
+Inputs:
+- button: The button
+- device: Which gamepad (0 the first connected); -1 any
+- game: The game (nil: the one playing)
+
+Returns:
+- true while it's down (false for a device that isn't connected)
+*/
 Input_IsGamepadButtonPressed :: proc(button: GamepadButton, device := -1, game: ^Game = nil) -> bool {
 	for &pad in gamepadsOf(game, device) do if pad.down[button] do return true
 	return false
 }
 
+/*
+Tells whether a gamepad button went down this frame.
+
+Inputs:
+- button: The button
+- device: Which gamepad (0 the first connected); -1 any
+- game: The game (nil: the one playing)
+
+Returns:
+- true on the frame it was pressed
+
+Example:
+	if e.Input_IsGamepadButtonJustPressed(.Start) do log.info("pause")
+*/
 Input_IsGamepadButtonJustPressed :: proc(button: GamepadButton, device := -1, game: ^Game = nil) -> bool {
 	for &pad in gamepadsOf(game, device) do if pad.pressed[button] do return true
 	return false
 }
 
+/*
+Tells whether a gamepad button was let go this frame.
+
+Inputs:
+- button: The button
+- device: Which gamepad (0 the first connected); -1 any
+- game: The game (nil: the one playing)
+
+Returns:
+- true on the frame it was released
+*/
 Input_IsGamepadButtonJustReleased :: proc(button: GamepadButton, device := -1, game: ^Game = nil) -> bool {
 	for &pad in gamepadsOf(game, device) do if pad.released[button] do return true
 	return false
 }
 
-// A stick (-1 to 1) or trigger (0 to 1) of a gamepad (device -1: the one pushed furthest)
+/*
+A gamepad's stick axis or trigger, raw (no deadzone).
+
+Inputs:
+- axis: The stick axis or trigger
+- device: Which gamepad (0 the first connected, the default); -1 the one pushed furthest
+- game: The game (nil: the one playing)
+
+Returns:
+- -1 to 1 for a stick (down and right positive), 0 to 1 for a trigger; 0 for a device that isn't connected
+
+Example:
+	aim := [2]f32{e.Input_GetGamepadAxis(.RightX), e.Input_GetGamepadAxis(.RightY)}
+	_ = aim
+*/
 Input_GetGamepadAxis :: proc(axis: GamepadAxis, device := 0, game: ^Game = nil) -> f32 {
 	value: f32
 	for &pad in gamepadsOf(game, device) do if abs(pad.axes[axis]) > abs(value) do value = pad.axes[axis]
@@ -375,6 +625,10 @@ Input_GetGamepadAxis :: proc(axis: GamepadAxis, device := 0, game: ^Game = nil) 
 /*
 Starts a frame: forgets last frame's presses and releases, applies this frame's events, and works
 out every action. Game_Update calls it; call it yourself only for input outside a game loop.
+
+Inputs:
+- input: The input state (usually `&game.input`)
+- events: This frame's SDL events
 */
 Input_Update :: proc(input: ^InputState, events: []sdl.Event) {
 	input.keysPressed, input.keysReleased = {}, {}
@@ -490,7 +744,14 @@ Input_Destroy :: proc(input: ^InputState) {
 
 /*
 A binding as project files store it: its element and attributes, e.g. `key key="Space"`,
-`axis axis="LeftX" direction="-1"`. Returns the element name and the attributes (temp allocated).
+`axis axis="LeftX" direction="-1"`. `ParseInputBinding` reads it back.
+
+Inputs:
+- binding: The binding
+
+Returns:
+- element: The element name ("key", "mouse", "gamepad", "axis")
+- attributes: Its attributes as name / value pairs (temp allocated); device is left out when it is -1
 */
 FormatInputBinding :: proc(binding: InputBinding) -> (element: string, attributes: []ScriptPropData) {
 	list := make([dynamic]ScriptPropData, context.temp_allocator)
@@ -517,7 +778,13 @@ FormatInputBinding :: proc(binding: InputBinding) -> (element: string, attribute
 }
 
 /*
-Reads a binding element (`FormatInputBinding`'s): `get` returns an attribute's value.
+Reads a binding element (`FormatInputBinding`'s). A missing device is -1 (any gamepad), a missing
+direction +1.
+
+Inputs:
+- element: The element name ("key", "mouse", "gamepad", "axis")
+- get: Returns an attribute's value by name, and whether it is there
+- user: Passed to `get` (e.g. the XML element being read)
 
 Returns:
 - The binding, and false for an unknown element or value
@@ -554,8 +821,14 @@ ParseInputBinding :: proc(element: string, get: proc(user: rawptr, key: string) 
 }
 
 /*
-A binding as a person reads it: "Space", "Mouse Left", "Gamepad South", "Gamepad LeftX −",
-"Gamepad 1 South" (one gamepad). Temp allocated.
+A binding as a person reads it, for a controls menu: "Space", "Mouse Left", "Gamepad South",
+"Gamepad LeftX −", "Gamepad 1 South" (one gamepad, numbered from 1).
+
+Inputs:
+- binding: The binding
+
+Returns:
+- The text (temp allocated, or a constant)
 */
 InputBinding_Describe :: proc(binding: InputBinding) -> string {
 	pad :: proc(device: int) -> string {

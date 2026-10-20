@@ -10,9 +10,11 @@ Direct3D 11 on Windows, Metal on macOS). One that this machine's SDL doesn't hav
 to start, falls back to SDL's choice with a warning. The browser always uses WebGL.
 
 Example:
+	// Given: window: ^sdl.Window
 	renderer := e.Application_CreateRenderer(window, .Vulkan)
 */
 RenderBackend :: enum {
+	// SDL's choice for the platform
 	Auto,
 	OpenGL,
 	OpenGLES2,
@@ -30,10 +32,13 @@ RenderBackend :: enum {
 RenderBackendInfo :: struct {
 	// For SDL_CreateRenderer (nil: SDL's choice)
 	driver: cstring,
+	// The name shown to people (the editor's Project Settings)
 	label: string,
+	// The platforms it exists on, as text for people
 	platforms: string,
 }
 
+// Each backend's SDL driver name, label and platforms
 RENDER_BACKENDS := [RenderBackend]RenderBackendInfo{
 	.Auto       = {nil, "Auto (SDL's choice)", "Every platform"},
 	.OpenGL     = {"opengl", "OpenGL", "Linux, Windows, macOS"},
@@ -49,6 +54,12 @@ RENDER_BACKENDS := [RenderBackend]RenderBackendInfo{
 /*
 Whether this machine's SDL has the backend's driver (Auto always). It doesn't say the driver
 starts: a missing GPU driver only shows when the renderer is created.
+
+Inputs:
+- backend: The backend
+
+Returns:
+- true if SDL was built with its driver
 */
 RenderBackend_Available :: proc(backend: RenderBackend) -> bool {
 	driver := RENDER_BACKENDS[backend].driver
@@ -57,7 +68,18 @@ RenderBackend_Available :: proc(backend: RenderBackend) -> bool {
 	return false
 }
 
-// The backend named by `name`: its enum name ("Vulkan") or SDL driver name ("vulkan"), any case
+/*
+The backend named by `name`: its enum name ("Vulkan") or SDL driver name ("vulkan"), any case.
+
+Inputs:
+- name: The name
+
+Returns:
+- The backend and true, or .Auto and false for an unknown name
+
+Example:
+	if backend, ok := e.RenderBackend_Parse("opengl"); ok do log.infof("using %v", backend)
+*/
 RenderBackend_Parse :: proc(name: string) -> (RenderBackend, bool) {
 	for info, backend in RENDER_BACKENDS {
 		if equalFold(name, enumName(backend)) || (info.driver != nil && equalFold(name, string(info.driver))) do return backend, true
@@ -67,7 +89,12 @@ RenderBackend_Parse :: proc(name: string) -> (RenderBackend, bool) {
 
 /*
 Creates the window's renderer with a backend, falling back to SDL's choice (with a warning) when
-it isn't there or doesn't start. Logs the renderer in use.
+it isn't there or doesn't start. Logs the renderer in use. In the browser the backend is
+ignored (WebGL).
+
+Inputs:
+- window: The window to draw in
+- backend: The backend to try first
 
 Returns:
 - The renderer, nil only if none at all could be created (SDL's error is logged)

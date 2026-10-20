@@ -8,35 +8,75 @@ import mix "vendor:sdl3/mixer"
 import ttf "vendor:sdl3/ttf"
 
 
-// Open Sans Regular, compiled into the binary. Pass DEFAULT_FONT as the path to loadFont
-// to get it at other sizes.
+// Open Sans Regular, compiled into the binary. Pass DEFAULT_FONT as the path to `loadFont`
+// to get it at other sizes
 DEFAULT_FONT :: "engine:default_font"
+// The point size of `ResourceManager.defaultFont`
 DEFAULT_FONT_SIZE :: 16
 @(private="file")
 DEFAULT_FONT_DATA := #load("Open_Sans/static/OpenSans-Regular.ttf")
 
-// Central cache for all game assets. Assets are keyed by file path (fonts by path + size),
-// so loading the same file twice returns the already loaded handle.
-// Everything still loaded is freed by destroy.
+/*
+The game's cache of textures, sounds and fonts (`Game.resourceManager`).
+
+Assets are keyed by file path (fonts by path and size), so loading the same file twice returns
+the handle already loaded. Paths are read as given (relative to the working directory, or
+looked up in the game's data pack). The manager owns what it loads: `unload*` frees one asset,
+`destroy` (called by `Game_Destroy`) frees everything still loaded. Call the procedures with
+`->`.
+
+Example:
+	rm := &game.resourceManager
+	ship := rm->loadTexture("assets/ship.png")
+	laser := rm->loadAudio("assets/laser.wav")
+	music := rm->loadAudio("assets/theme.ogg", predecode = false)
+	title := rm->loadFont(e.DEFAULT_FONT, 48)
+	_, _, _, _ = ship, laser, music, title
+*/
 ResourceManager :: struct {
+	// The renderer textures are made for
 	renderer: ^sdl.Renderer,
+	// The mixer sounds are loaded for
 	mixer: ^mix.Mixer,
+	// Loaded textures, by path (the keys are owned)
 	textures: map[string]^sdl.Texture,
+	// Loaded sounds, by path (the keys are owned)
 	audio: map[string]^mix.Audio,
+	// Loaded fonts, by "path@size" (the keys are owned)
 	fonts: map[string]^ttf.Font,
 	// The embedded font at DEFAULT_FONT_SIZE, loaded by ResourceManager_Init
 	defaultFont: ^ttf.Font,
 	// Draws text through the renderer, caching glyphs in a GPU atlas. Used by the text primitives
 	textEngine: ^ttf.TextEngine,
+	// Loads an image (any format SDL_image reads: png, jpg, bmp, webp...) as a texture, or
+	// returns the one already loaded. nil (logged) if it can't be read
 	loadTexture: proc(rm: ^ResourceManager, filePath: string) -> ^sdl.Texture,
+	// Loads a sound or music file, or returns the one already loaded. `predecode` decodes the
+	// whole file up front (best for short effects); pass false to stream long music. nil (logged)
+	// if it can't be read
 	loadAudio: proc(rm: ^ResourceManager, filePath: string, predecode: bool = true) -> ^mix.Audio,
+	// Loads a font at a point size (`DEFAULT_FONT` for the embedded one), or returns the one
+	// already loaded at that size. nil (logged) if it can't be read
 	loadFont: proc(rm: ^ResourceManager, filePath: string, size: f32) -> ^ttf.Font,
+	// Frees a loaded texture. Anything still drawing it must stop first
 	unloadTexture: proc(rm: ^ResourceManager, filePath: string),
+	// Frees a loaded sound. Anything still playing it must stop first
 	unloadAudio: proc(rm: ^ResourceManager, filePath: string),
+	// Frees a font loaded at that size. Anything still using it must stop first
 	unloadFont: proc(rm: ^ResourceManager, filePath: string, size: f32),
+	// Frees the text engine and everything still loaded (`Game_Destroy` calls it)
 	destroy: proc(rm: ^ResourceManager),
 }
 
+/*
+Sets up a resource manager: its maps and procedures, the text engine, and the default font
+(`DEFAULT_FONT` at `DEFAULT_FONT_SIZE`). `Game_Init` calls it for `Game.resourceManager`.
+
+Inputs:
+- rm: The resource manager
+- renderer: The renderer textures and text are made for
+- mixer: The mixer sounds are loaded for
+*/
 ResourceManager_Init :: proc(rm: ^ResourceManager, renderer: ^sdl.Renderer, mixer: ^mix.Mixer) {
 	rm.renderer = renderer
 	rm.mixer = mixer

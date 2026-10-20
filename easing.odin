@@ -7,7 +7,8 @@ Easing curves for animating a value over a fixed duration.
 
 "In" curves start slow, "Out" curves end slow, "InOut" do both. Back curves overshoot
 slightly past the ends, Elastic springs past the end and settles, Bounce bounces at the end.
-See https://easings.net for a visual reference of each curve.
+See https://easings.net for a visual reference of each curve. Used by `Ease`, tweens and
+camera pans.
 */
 EaseType :: enum {
 	Linear,
@@ -41,6 +42,7 @@ Returns:
 - Eased progress. 0 at t = 0 and 1 at t = 1; Back and Elastic curves briefly go outside 0..1
 
 Example:
+	// Given: elapsed: f32, duration: f32, from: [2]f32, to: [2]f32
 	t := elapsed / duration
 	pos := from + (to - from) * e.Ease(.InOutCubic, t)
 */

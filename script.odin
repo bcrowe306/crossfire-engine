@@ -29,6 +29,7 @@ from an `@(init)` procedure, so linking the package in is enough:
 
 	package scripts
 
+	import "core:log"
 	import e "engine:."
 	import sdl "vendor:sdl3"
 
@@ -53,9 +54,12 @@ from an `@(init)` procedure, so linking the package in is enough:
 	}
 
 Exported fields are the ones tagged `export:""`; they show in the editor's inspector and are
-saved in the scene. Supported types: f32, f64, int, i32, bool, string, [2]f32, enums, and
-sdl.Color (`#rrggbb`). Tag options, space-separated inside the quotes: `default=<value>` (else
-the type's zero value), `min=<n>`, `max=<n>`, and `kind=scene` for a string naming a scene.
+saved in the scene. Supported types: f32, f64, int, i32, bool, string, [2]f32, enums,
+sdl.Color (`#rrggbb`), and the asset handles of assets.odin (`TextureAsset`, `SoundAsset`,
+`FontAsset`, `DataAsset`, `ComponentAsset`, `MusicAsset`). Tag options, space-separated inside
+the quotes: `default=<value>` (else the type's zero value; white for colors, the first value for
+enums), `min=<n>`, `max=<n>`, and `kind=scene` for a string naming a scene (`kind=<DataType>` for a
+`DataAsset`).
 
 One script per node. The registry is global (scripts register before `main`).
 */
@@ -64,7 +68,9 @@ One script per node. The registry is global (scripts register before `main`).
 Script :: struct {
 	// The node it's attached to (nil for globals: globals.odin)
 	node: ^Node,
+	// The node's scene (a global's: nil, see globals.odin)
 	scene: ^Scene,
+	// The game it runs in
 	game: ^Game,
 	// Globals: skip `draw` while set
 	hidden: bool,
@@ -72,54 +78,82 @@ Script :: struct {
 
 // The procedures a script can have; all optional
 ScriptHooks :: struct($T: typeid) {
+	// Once, on the first update after the node entered the scene (every node of it exists then)
 	ready: proc(self: ^T),
+	// Every frame the node may process, after the node's own update (deltaTime in seconds)
 	update: proc(self: ^T, events: []sdl.Event, deltaTime: f64),
+	// After the node draws, in the node's local space
 	draw: proc(self: ^T, renderer: ^sdl.Renderer),
+	// When the node is freed (the struct's memory is freed with the node anyway)
 	destroy: proc(self: ^T),
 	// Physics body nodes only: another body started / stopped touching this one (or entered /
 	// left it, for an Area). `collision` is valid during the call
 	collisionEnter: proc(self: ^T, collision: ^Collision),
+	// Physics body nodes only: another body stopped touching this one (or left it, for an Area)
 	collisionExit: proc(self: ^T, collision: ^Collision),
 	// Physics body nodes only: this body entered / left an Area (`collision.other`)
 	areaEnter: proc(self: ^T, collision: ^Collision),
+	// Physics body nodes only: this body left an Area (`collision.other`)
 	areaExit: proc(self: ^T, collision: ^Collision),
 	// Globals only (globals.odin): the game switched to `scene`; Load_Game restored the fields
 	sceneChanged: proc(self: ^T, scene: ^Scene),
+	// Globals only (globals.odin): `Load_Game` restored the fields
 	loaded: proc(self: ^T),
 }
 
-// A registered script
+// A registered script (`Script_Register`): its type, its exported fields and its hooks, untyped
 ScriptInfo :: struct {
+	// The struct's type name without its package ("Player"): what scene files attach
 	name: string,
+	// The script struct's type
 	type: typeid,
 	// typeid_of(^T): what JSON loading needs (save.odin)
 	pointerType: typeid,
+	// size_of the struct, in bytes
 	size: int,
+	// align_of the struct
 	align: int,
 	// Where Script_Register was called, so the editor can open the file
 	file: string,
+	// The line of that call
 	line: int,
+	// Its exported fields, in declaration order
 	fields: []ScriptField,
+	// The hooks of `ScriptHooks`, taking the struct as a rawptr (nil: not given)
 	ready: proc(self: rawptr),
+	// ScriptHooks.update
 	update: proc(self: rawptr, events: []sdl.Event, deltaTime: f64),
+	// ScriptHooks.draw
 	draw: proc(self: rawptr, renderer: ^sdl.Renderer),
+	// ScriptHooks.destroy
 	destroy: proc(self: rawptr),
+	// ScriptHooks.collisionEnter
 	collisionEnter: proc(self: rawptr, collision: ^Collision),
+	// ScriptHooks.collisionExit
 	collisionExit: proc(self: rawptr, collision: ^Collision),
+	// ScriptHooks.areaEnter
 	areaEnter: proc(self: rawptr, collision: ^Collision),
+	// ScriptHooks.areaExit
 	areaExit: proc(self: rawptr, collision: ^Collision),
+	// ScriptHooks.sceneChanged
 	sceneChanged: proc(self: rawptr, scene: ^Scene),
+	// ScriptHooks.loaded
 	loaded: proc(self: rawptr),
 }
 
 // What an exported field holds, as the scene file and the editor see it
 ScriptFieldType :: enum {
+	// f32 or f64
 	Float,
+	// int or i32
 	Int,
 	Bool,
 	String,
+	// [2]f32, as "x, y"
 	Vector2,
+	// sdl.Color, as `#rrggbb` or `#rrggbbaa`
 	Color,
+	// Any enum, by value name
 	Enum,
 	// Asset handles (assets.odin): the value is the asset's path
 	Texture,
@@ -132,14 +166,19 @@ ScriptFieldType :: enum {
 
 // An exported field of a script
 ScriptField :: struct {
+	// The field's name in the struct (and in `<prop name="...">`)
 	name: string,
+	// What kind of value it holds
 	type: ScriptFieldType,
+	// Its byte offset in the script struct
 	offset: uintptr,
 	// The field's Odin type (f32 vs f64, int vs i32, which enum)
 	odinType: typeid,
 	// Text form of the value used when the scene file has none
 	defaultValue: string,
+	// The tag's `min=`: numbers below it are raised to it (nil: no minimum)
 	min: Maybe(f64),
+	// The tag's `max=`: numbers above it are lowered to it (nil: no maximum)
 	max: Maybe(f64),
 	// "scene" for a string naming a scene; for a Data field, the data type it holds (`kind=EnemyStats`)
 	hint: string,
@@ -161,11 +200,33 @@ registry: map[string]^ScriptInfo
 /*
 Registers a script type under its type name. Call it from an `@(init)` procedure in the script's
 file; Odin requires those to be `proc "contextless"`, and this procedure is too, so it can be
-called there directly. Registering the same name twice replaces the first.
+called there directly. Registering the same name twice replaces the first. A struct whose first
+field isn't `using script: Script` isn't registered (an error is printed to stderr).
 
 Inputs:
 - T: The script struct; its first field must be `using script: Script`
-- hooks: Its procedures
+- hooks: Its procedures (all optional)
+- loc: Where it's called from (kept so the editor can open the file)
+
+Example:
+	package scripts
+
+	import e "engine:."
+	import sdl "vendor:sdl3"
+
+	Spinner :: struct {
+		using script: e.Script,
+		speed: f32 `export:"default=90"`,
+	}
+
+	@(init)
+	register_Spinner :: proc "contextless" () {
+		e.Script_Register(Spinner, {
+			update = proc(self: ^Spinner, events: []sdl.Event, dt: f64) {
+				self.node.rotation += self.speed * f32(dt)
+			},
+		})
+	}
 */
 Script_Register :: proc "contextless" ($T: typeid, hooks: ScriptHooks(T), loc := #caller_location) {
 	// @(init) procedures run before main and must be contextless, so this sets up its own context
@@ -205,7 +266,15 @@ Script_Register :: proc "contextless" ($T: typeid, hooks: ScriptHooks(T), loc :=
 	registry[name] = info
 }
 
-// The script registered under a name, or nil
+/*
+The script registered under a name, or nil.
+
+Inputs:
+- name: The script's name ("Player")
+
+Returns:
+- Its info, or nil when no script has that name
+*/
 Script_Find :: proc(name: string) -> ^ScriptInfo {
 	return registry[name]
 }
@@ -254,6 +323,20 @@ Node_AttachScript :: proc(node: ^Node, info: ^ScriptInfo, values: []ScriptPropDa
 
 /*
 The script attached to a node, as its struct type, or nil if it has none or another script.
+
+Inputs:
+- node: The node (nil gives nil)
+- T: The script struct's type
+
+Returns:
+- The node's script struct, or nil
+
+Example:
+	Player :: struct {
+		using script: e.Script,
+		lives: int `export:"default=3"`,
+	}
+	if player := e.Node_GetScript(node, Player); player != nil do player.lives -= 1
 */
 Node_GetScript :: proc(node: ^Node, $T: typeid) -> ^T {
 	if node == nil || node.script.info == nil || node.script.info.type != T do return nil
@@ -333,6 +416,12 @@ A description of every registered script and data type, as JSON: what `player --
 prints so the editor can show exported fields in its inspector. `{"scripts": [...], "data": [...]}`,
 each with name, file, line, and for each field name, type, default, min/max (when set), hint, and
 enum names.
+
+Inputs:
+- allocator: Allocator for the string
+
+Returns:
+- The JSON text
 */
 Script_DescribeJSON :: proc(allocator := context.allocator) -> string {
 	b := strings.builder_make(allocator)

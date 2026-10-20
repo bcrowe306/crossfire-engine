@@ -38,6 +38,7 @@ PhysicsSettings :: struct {
 	smoothing: bool,
 }
 
+// The settings a world uses when the game has none: 100 px per meter, Earth's gravity, smoothing on
 DEFAULT_PHYSICS :: PhysicsSettings{pixelsPerMeter = 100, gravity = {0, 980}, smoothing = true}
 
 // Seconds per physics step (60 per second)
@@ -51,14 +52,19 @@ MOVER_SKIN :: 1.0
 
 // A scene's physics world (internal state; use the procedures)
 PhysicsWorld :: struct {
+	// The Box2D world
 	id: b2.WorldId,
+	// The settings it was made with (gravity and debugDraw change at run time)
 	settings: PhysicsSettings,
 	// Time not yet simulated
 	accumulator: f64,
 	// How far between the last two steps this frame is drawn (0-1), for smoothing
 	alpha: f32,
+	// Every body node made in the scene, in the scene or not yet
 	bodies: [dynamic]^PhysicsBody,
+	// Every RayCast node, cast after each step
 	rayCasts: [dynamic]^RayCast,
+	// Every Joint node, created in Box2D once both its bodies exist
 	joints: [dynamic]^Joint,
 	// Every Box2D shape's body and node (physics_events.odin)
 	shapes: map[b2.ShapeId]ShapeOwner,
@@ -66,15 +72,22 @@ PhysicsWorld :: struct {
 	ground: b2.BodyId,
 }
 
-/*
-The scene's physics world, created with the game's settings (`Game.physics`) the first time it's
-needed.
-*/
 // Box2D keeps its worlds in one global table, unlocked: creating and destroying them is serialized
 // (scenes on other threads, the tests running in parallel; a race crashed CI's tests)
 @(private="file")
 worldTableLock: sync.Mutex
 
+/*
+The scene's physics world, created the first time it's needed, with the game's settings
+(`Game.physics`; `DEFAULT_PHYSICS` when the game has none). Creating any physics node calls it.
+The scene owns the world and frees it with itself.
+
+Inputs:
+- scene: The scene
+
+Returns:
+- The world (internal state: use the `Physics_*` procedures on the scene)
+*/
 Scene_GetPhysics :: proc(scene: ^Scene) -> ^PhysicsWorld {
 	if scene.physics != nil do return scene.physics
 	world := new(PhysicsWorld)
@@ -93,7 +106,16 @@ Scene_GetPhysics :: proc(scene: ^Scene) -> ^PhysicsWorld {
 	return world
 }
 
-// Changes the scene's gravity, px/s²
+/*
+Changes the scene's gravity (creating its world if it has none).
+
+Inputs:
+- scene: The scene
+- gravity: px/s², y down (`{0, 980}` is Earth's at 100 px per meter)
+
+Example:
+	e.Physics_SetGravity(scene, {0, 490}) // a low-gravity level
+*/
 Physics_SetGravity :: proc(scene: ^Scene, gravity: [2]f32) {
 	world := Scene_GetPhysics(scene)
 	world.settings.gravity = gravity
@@ -166,23 +188,38 @@ Physics_Update :: proc(scene: ^Scene, deltaTime: f64) {
 
 // What a ray (or `Physics_RayCast`) hit
 RayHit :: struct {
+	// Whether it hit anything (the other fields are zero when not)
 	hit: bool,
-	// World pixels
+	// Where it hit, in world pixels
 	point: [2]f32,
+	// The surface's normal there (unit length, pointing out of the surface hit)
 	normal: [2]f32,
+	// The body hit
 	body: ^PhysicsBody,
+	// Which of its CollisionShapes was hit
 	shape: ^CollisionShape,
 	// How far along the ray, 0-1
 	fraction: f32,
 }
 
 /*
-Casts a ray through the scene's physics world and returns the first body it hits.
+Casts a ray through the scene's physics world and returns the first body it hits. Areas (sensors)
+are ignored. For a ray cast after every step, use a `RayCast` node.
 
 Inputs:
-- from, to: World pixels
-- mask: Layers to hit
+- scene: The scene
+- from, to: Where the ray starts and ends, in world pixels
+- mask: Layers to hit (`PhysicsLayers`; every layer by default)
 - exclude: A body to ignore (the caster's own)
+
+Returns:
+- The hit: `hit` is false when nothing is in the way
+
+Example:
+	// Given: hero: ^e.CharacterMover
+	// Is there ground within 40 px below the hero?
+	ground := e.Physics_RayCast(scene, hero.position, hero.position + {0, 40}, exclude = hero)
+	if ground.hit do log.infof("ground at %v", ground.point)
 */
 Physics_RayCast :: proc(scene: ^Scene, from, to: [2]f32, mask: u64 = PHYSICS_ALL_LAYERS, exclude: ^PhysicsBody = nil) -> RayHit {
 	world := Scene_GetPhysics(scene)
@@ -211,6 +248,7 @@ Physics_RayCast :: proc(scene: ^Scene, from, to: [2]f32, mask: u64 = PHYSICS_ALL
 The bodies with a shape under a point.
 
 Inputs:
+- scene: The scene
 - point: World pixels
 - mask: Layers to find
 - includeAreas: Areas count too (they're left out by default)
@@ -220,8 +258,9 @@ Returns:
 - Each body once, in no particular order
 
 Example:
-	// What did the player click on?
-	for body in e.Physics_QueryPoint(scene, e.Input_GetMousePosition(&scene.game.input)) {
+	// What did the player click on? (The mouse is in game coordinates, not the world's)
+	click := e.Scene_ScreenToWorld(scene, e.Input_GetMousePosition(scene.game))
+	for body in e.Physics_QueryPoint(scene, click) {
 		log.infof("clicked %s", body.name)
 	}
 */
@@ -235,6 +274,7 @@ Physics_QueryPoint :: proc(scene: ^Scene, point: [2]f32, mask: u64 = PHYSICS_ALL
 The bodies with a shape overlapping an axis-aligned rectangle.
 
 Inputs:
+- scene: The scene
 - rect: World pixels (x, y the top-left corner)
 - mask: Layers to find
 - includeAreas: Areas count too (they're left out by default)
@@ -244,8 +284,9 @@ Returns:
 - Each body once, in no particular order
 
 Example:
+	// Given: blast: [2]f32, hurt: proc(body: ^e.PhysicsBody)
 	// An explosion's square of damage
-	for body in e.Physics_QueryRect(scene, {x - 64, y - 64, 128, 128}) do hurt(body)
+	for body in e.Physics_QueryRect(scene, {blast.x - 64, blast.y - 64, 128, 128}) do hurt(body)
 */
 Physics_QueryRect :: proc(scene: ^Scene, rect: sdl.FRect, mask: u64 = PHYSICS_ALL_LAYERS, includeAreas := false, allocator := context.temp_allocator) -> []^PhysicsBody {
 	ppm := Scene_GetPhysics(scene).settings.pixelsPerMeter
@@ -258,6 +299,7 @@ Physics_QueryRect :: proc(scene: ^Scene, rect: sdl.FRect, mask: u64 = PHYSICS_AL
 The bodies with a shape overlapping a circle.
 
 Inputs:
+- scene: The scene
 - center: World pixels
 - radius: Pixels
 - mask: Layers to find
@@ -268,6 +310,7 @@ Returns:
 - Each body once, in no particular order
 
 Example:
+	// Given: hero: ^e.CharacterMover, ENEMY_LAYER: u64, hit: proc(body: ^e.PhysicsBody)
 	// Enemies within reach of the hero's sword
 	for body in e.Physics_QueryCircle(scene, hero.position, 48, ENEMY_LAYER) do hit(body)
 */
@@ -283,7 +326,8 @@ checking whether something of that size fits through (a bullet, a dash). Areas a
 circle starts in are ignored.
 
 Inputs:
-- radius: Pixels
+- scene: The scene
+- radius: The circle's, in pixels
 - from, to: World pixels (the circle's center)
 - mask: Layers to hit
 - exclude: A body to ignore (the caster's own)
@@ -292,8 +336,10 @@ Returns:
 - The hit: `point` and `normal` where the circle touches, `fraction` of the way along
 
 Example:
+	// Given: hero: ^e.CharacterMover
+	// How far right can the hero dash?
 	hit := e.Physics_ShapeCast(scene, 12, hero.position, hero.position + {200, 0}, exclude = hero)
-	dashTo := hero.position + {200, 0} * (hit.hit ? hit.fraction : 1)
+	dashTo := hero.position + [2]f32{200, 0} * (hit.hit ? hit.fraction : 1)
 */
 Physics_ShapeCast :: proc(scene: ^Scene, radius: f32, from, to: [2]f32, mask: u64 = PHYSICS_ALL_LAYERS, exclude: ^PhysicsBody = nil) -> RayHit {
 	world := Scene_GetPhysics(scene)
@@ -353,9 +399,18 @@ Uses Box2D's mover functions: collide the capsule with the world to get contact 
 the planes for the move, sweep the capsule along the result (up to 5 times), then clip the
 velocity against the planes.
 
+Nothing happens until the mover's body exists (from the scene's first update after it entered),
+or without a Capsule or Circle shape (a warning, once).
+
 Inputs:
-- mover: The mover; its body must exist (it's in the scene)
+- mover: The mover
 - deltaTime: Seconds to move for
+
+Example:
+	// Given: hero: ^e.CharacterMover
+	hero.velocity.y += 980 * f32(deltaTime) // gravity is the game's to add
+	if hero.onFloor && e.Input_IsKeyJustPressed(.Space) do hero.velocity.y = -500
+	e.CharacterMover_Move(hero, deltaTime)
 */
 CharacterMover_Move :: proc(mover: ^CharacterMover, deltaTime: f64) {
 	world := mover.scene.physics
@@ -738,7 +793,12 @@ updateRayCasts :: proc(world: ^PhysicsWorld) {
 }
 
 /*
-Casts a RayCast now (they cast after every physics step by themselves), updating its results.
+Casts a RayCast now, updating its results (`colliding`, `point`, `normal`, `collider`,
+`colliderShape`). RayCasts cast after every physics step by themselves; call this after moving
+one to see the result before the next step. It casts even when the ray isn't `enabled`.
+
+Inputs:
+- ray: The RayCast node
 */
 RayCast_ForceUpdate :: proc(ray: ^RayCast) {
 	xf := Node_GetWorldTransform(ray)

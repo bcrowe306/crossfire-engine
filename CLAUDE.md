@@ -519,28 +519,30 @@ Example:
 - **Coverage:** every public type, procedure, constant and enum, plus struct fields.
 - **Code blocks:** tab-indented under `Example:`, and they must compile. Check them by extracting them
   into a scratch package that imports the engine, then running `odin check`.
-- **Package docs:** the package overview goes in `doc.odin` (not created yet), as a `/* */` block
-  directly above `package engine`. Other file overviews (like the one at the top of `camera.odin`)
-  must have a blank line before `package`, so they don't become the package doc.
-- **Still to convert:** older files use short `//` comments: `app.odin`, `game.odin`, `event.odin`,
-  `resource_manager.odin`, `text_primitives.odin`, `primitives.odin` (except `DrawTexture`),
-  `ui_*.odin`, `timer.odin`, `ticker.odin`. Convert them when you touch them.
+- **Package docs:** the package overview is `doc.odin`'s `/* */` block directly above `package
+  engine`. **No other file may have a comment above its `package` line**: `odin doc` merges every
+  one into the package doc, blank line or not (camera.odin's overview showed up as the engine's).
+  File overviews go after `package` and the imports (tween.odin, camera.odin).
+- **Struct fields:** a comment on the line(s) directly above each field (OLS shows only that one;
+  a trailing comment shows nothing). One `Example:` per doc block (the site generator's limit).
+- **Checking:** every public declaration and field is documented and every example compiles.
+  The scripts used for the 2026-10-20 pass were throwaway (an audit and an example checker that
+  type-checks each `Example:` inside a procedure with `scene`, `game`, `node`, `renderer`, `dt`,
+  `events` in scope). An example's `// Given: hero: ^e.CharacterMover, ...` first line names what
+  it assumes; keep that convention so examples stay checkable.
 
 ### Generating the GitHub Pages site
 
-Use Odin's generator, the one behind pkg.odin-lang.org (github.com/odin-lang/pkg.odin-lang.org):
-
-1. Build the generator: `odin build . -out:odin-doc` in a checkout of that repo.
-2. `docs/all/all.odin` imports the engine package.
-3. Run `odin doc docs/all/all.odin -file -all-packages -doc-format -out:engine`.
-4. `docs/config.json` holds `hide_core`, `hide_base`, `url_prefix`, and a `collections` entry for the
-   engine: `name`, `source_url` (GitHub blob URL), `base_url`, `root_path`, `license`, and `home`
-   with `embed_readme`.
-5. Run `odin-doc engine.odin-doc docs/config.json` inside the output directory.
-6. Deploy with `.github/workflows/docs.yml` to GitHub Pages.
-
-The generator needs `vendor:commonmark` installed on Linux CI. `docs/`, the workflow and the README
-don't exist yet.
+`tools/build_docs.sh <generator>` builds the site into `docs/build/` (gitignored) with Odin's
+generator, the one behind pkg.odin-lang.org (github.com/odin-lang/pkg.odin-lang.org, built with
+`odin build . -out:odin-doc`; it links libcmark: `apt install libcmark-dev`, or build
+github.com/commonmark/cmark and pass `-extra-linker-flags:-L<cmark>/build/src`): `odin doc
+docs/all -all-packages -doc-format` (docs/all imports the engine), then the generator with
+`docs/config.json` (the `engine` collection; `url_prefix` /odin_sdl_engine for GitHub Pages).
+`.github/workflows/docs.yml` runs it on pushes to main and deploys to GitHub Pages (the
+repository's Pages source must be "GitHub Actions"; the generator is pinned by commit). Built and
+read locally; the workflow hasn't run yet. The engine has no LICENSE file: config.json's license
+says "See the repository" until it has one.
 
 ## Web build (js_wasm32 + Emscripten)
 

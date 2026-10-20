@@ -18,52 +18,83 @@ Handles resolve against the project folder (`Game.projectDir`) and are loaded on
 cached by the resource manager.
 
 Example:
-	e.Game_PlaySound(self.game, SOUND_LASER)
-	texture := e.Asset_Texture(self.game, TEXTURE_SHIP)
-	stats := e.Data(ShipStats, DATA_FAST_SHIP)
+	package mygame
+
+	import e "../engine"
+
+	// What the editor writes in scripts/assets.odin
+	SOUND_LASER :: e.SoundAsset{"assets/laser.wav"}
+	TEXTURE_SHIP :: e.TextureAsset{"assets/ship.png"}
+	DATA_FAST_SHIP :: e.DataAsset{"data/fast_ship.data.json"}
+
+	ShipStats :: struct {
+		speed: f32 `export:"default=300"`,
+	}
+
+	Fire :: proc(game: ^e.Game) {
+		e.Game_PlaySound(game, SOUND_LASER)
+		texture := e.Asset_Texture(game, TEXTURE_SHIP)
+		stats := e.Data(ShipStats, DATA_FAST_SHIP)
+		_, _ = texture, stats
+	}
 */
 
 // An image in the project (Sprite textures)
 TextureAsset :: struct {
+	// The image's path, relative to the project folder ("" for none)
 	path: string,
 }
 
 // A sound in the project
 SoundAsset :: struct {
+	// The sound's path, relative to the project folder ("" for none)
 	path: string,
 }
 
 // A font in the project
 FontAsset :: struct {
+	// The font's path, relative to the project folder ("" for none)
 	path: string,
 }
 
 // A data resource in the project (data.odin): a `.data.json` file holding a registered data type
 DataAsset :: struct {
+	// The data file's path, relative to the project folder ("" for none)
 	path: string,
 }
 
 // Music in the project: streamed by a MusicPlayer as it plays (not loaded whole like a sound)
 MusicAsset :: struct {
+	// The music file's path, relative to the project folder ("" for none)
 	path: string,
 }
 
 // A component in the project (a saved node tree, `.component.xml`): `Scene_Instantiate` adds one
 ComponentAsset :: struct {
+	// The component file's path, relative to the project folder ("" for none)
 	path: string,
 }
 
 // An LDtk project in the project (`.ldtk`: ldtk.odin): its levels go in scenes as LDtkLevel nodes
 LDtkAsset :: struct {
+	// The .ldtk file's path, relative to the project folder ("" for none)
 	path: string,
 }
 
 /*
 An LDtk asset's project, read the first time and kept for the game's life (nil, logged, if it
-can't be read): Game_LoadLDtk.
+can't be read): `Game_LoadLDtk`.
+
+Inputs:
+- game: The game that keeps it
+- asset: The LDtk asset
+
+Returns:
+- The project (the game's: don't free it), or nil for an empty asset or a file that can't be read
 
 Example:
-	world := e.Asset_LDtk(self.game, LDTK_WORLD)
+	// Given: LDTK_WORLD: e.LDtkAsset
+	world := e.Asset_LDtk(game, LDTK_WORLD)
 	for &level in world.worlds[0].levels do log.infof("%s: %v", level.identifier, level.size)
 */
 Asset_LDtk :: proc(game: ^Game, asset: LDtkAsset) -> ^LDtkProject {
@@ -71,25 +102,61 @@ Asset_LDtk :: proc(game: ^Game, asset: LDtkAsset) -> ^LDtkProject {
 	return Game_LoadLDtk(game, asset.path)
 }
 
-// A texture asset's texture, loaded the first time (nil, logged, if it can't be)
+/*
+A texture asset's texture, loaded the first time and cached by the resource manager.
+
+Inputs:
+- game: The game
+- asset: The texture asset
+
+Returns:
+- The texture (the resource manager's: don't destroy it), or nil for an empty asset or (logged)
+  a file that can't be loaded
+
+Example:
+	// Given: TEXTURE_SHIP: e.TextureAsset
+	ship := e.Asset_Texture(game, TEXTURE_SHIP)
+	e.DrawTexture(renderer, ship, {-32, -32, 64, 64})
+*/
 Asset_Texture :: proc(game: ^Game, asset: TextureAsset) -> ^sdl.Texture {
 	if asset.path == "" do return nil
 	return game.resourceManager->loadTexture(projectPath(game, asset.path))
 }
 
-// A sound asset's audio, loaded (decoded) the first time
+/*
+A sound asset's audio, loaded (decoded whole) the first time and cached by the resource manager.
+
+Inputs:
+- game: The game
+- asset: The sound asset
+
+Returns:
+- The audio (the resource manager's: don't destroy it), or nil for an empty asset or (logged) a
+  file that can't be loaded
+*/
 Asset_Sound :: proc(game: ^Game, asset: SoundAsset) -> ^mix.Audio {
 	if asset.path == "" do return nil
 	return game.resourceManager->loadAudio(projectPath(game, asset.path))
 }
 
-// A font asset at a size, loaded the first time
+/*
+A font asset at a point size, loaded the first time and cached by the resource manager.
+
+Inputs:
+- game: The game
+- asset: The font asset
+- size: The point size
+
+Returns:
+- The font (the resource manager's: don't close it), or nil for an empty asset or (logged) a
+  file that can't be loaded
+*/
 Asset_Font :: proc(game: ^Game, asset: FontAsset, size: f32) -> ^ttf.Font {
 	if asset.path == "" do return nil
 	return game.resourceManager->loadFont(projectPath(game, asset.path), size)
 }
 
-// Plays a sound asset once (see `Game_PlaySoundFile`)
+// `Game_PlaySound` for a `SoundAsset` (see `Game_PlaySoundFile`); false (logged) for an empty one
 Game_PlaySoundAsset :: proc(game: ^Game, asset: SoundAsset) -> bool {
 	if asset.path == "" {
 		log.warn("Game_PlaySound: an empty SoundAsset")
@@ -98,7 +165,21 @@ Game_PlaySoundAsset :: proc(game: ^Game, asset: SoundAsset) -> bool {
 	return Game_PlaySoundFile(game, asset.path)
 }
 
-// Plays a sound once: from a SoundAsset or a path relative to the project folder
+/*
+Plays a sound once, loading it the first time (cached by the resource manager).
+
+Inputs:
+- game: The game
+- asset or path: A `SoundAsset`, or a path relative to the project folder
+
+Returns:
+- false if there's no audio device, or (logged) the sound couldn't be loaded or played
+
+Example:
+	// Given: SOUND_LASER: e.SoundAsset
+	e.Game_PlaySound(game, SOUND_LASER)
+	e.Game_PlaySound(game, "assets/explosion.wav")
+*/
 Game_PlaySound :: proc{Game_PlaySoundAsset, Game_PlaySoundFile}
 
 // A path relative to the project folder as the player opens it

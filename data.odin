@@ -35,20 +35,29 @@ the same instance after that: everyone shares it, so treat it as read-only (copy
 it). It lives as long as the game.
 */
 
-// A registered data type
+// A registered data type (`Data_Register`)
 DataInfo :: struct {
+	// The struct's type name without its package ("EnemyStats"): what data files name
 	name: string,
+	// The struct's type
 	type: typeid,
+	// size_of the struct, in bytes
 	size: int,
+	// align_of the struct
 	align: int,
+	// Where Data_Register was called, so the editor can open the file
 	file: string,
+	// The line of that call
 	line: int,
+	// Its exported fields, in declaration order
 	fields: []ScriptField,
 }
 
 // What a data file holds (`ParseDataResource`): its type's name and its field values as text
 DataResourceData :: struct {
+	// The data type's name (`DataInfo.name`)
 	type: string,
+	// The field values as text, sorted by field name
 	values: [dynamic]ScriptPropData,
 }
 
@@ -57,7 +66,27 @@ DATA_FORMAT_VERSION :: 1
 
 /*
 Registers a data type, so data files can hold it and the editor can make and edit them. Call it
-from an `@(init) proc "contextless"` in the type's file, like `Script_Register`.
+from an `@(init) proc "contextless"` in the type's file, like `Script_Register`. Registering a
+name again replaces it.
+
+Inputs:
+- T: The data struct (exported fields: `export:""` tags)
+- loc: Where it's called from (filled in by the compiler)
+
+Example:
+	package mygame
+
+	import e "../engine"
+
+	EnemyStats :: struct {
+		health: int `export:"default=10 min=1"`,
+		speed: f32 `export:"default=100"`,
+	}
+
+	@(init)
+	register_EnemyStats :: proc "contextless" () {
+		e.Data_Register(EnemyStats)
+	}
 */
 Data_Register :: proc "contextless" ($T: typeid, loc := #caller_location) {
 	context = Platform_DefaultContext()
@@ -68,12 +97,25 @@ Data_Register :: proc "contextless" ($T: typeid, loc := #caller_location) {
 	dataRegistry[name] = info
 }
 
-// The data type registered under a name, or nil
+/*
+The data type registered under a name.
+
+Inputs:
+- name: The type's name without its package ("EnemyStats")
+
+Returns:
+- Its info, or nil if no data type has that name
+*/
 Data_Find :: proc(name: string) -> ^DataInfo {
 	return dataRegistry[name]
 }
 
-// Every registered data type, sorted by name (temp allocated)
+/*
+Every registered data type, sorted by name.
+
+Returns:
+- The types' info (the slice is temp allocated)
+*/
 Data_All :: proc() -> []^DataInfo {
 	all := make([dynamic]^DataInfo, context.temp_allocator)
 	for _, info in dataRegistry do append(&all, info)
@@ -91,7 +133,24 @@ Inputs:
 - game: The game (default: the one playing)
 
 Returns:
-- The instance, or nil (logged once) if the file is missing, isn't valid, or holds another type
+- The instance (shared and kept for the game's life: treat it as read-only), or nil (logged) if
+  the file is missing, isn't valid, or holds another type
+
+Example:
+	package mygame
+
+	import e "../engine"
+
+	EnemyStats :: struct {
+		health: int `export:"default=10 min=1"`,
+	}
+
+	DATA_GOBLIN :: e.DataAsset{"data/goblin.data.json"}
+
+	GoblinHealth :: proc() -> int {
+		stats := e.Data(EnemyStats, DATA_GOBLIN)
+		return stats != nil ? stats.health : 10
+	}
 */
 Data :: proc($T: typeid, asset: DataAsset, game: ^Game = nil) -> ^T {
 	game := game != nil ? game : currentGame
@@ -115,9 +174,14 @@ Data :: proc($T: typeid, asset: DataAsset, game: ^Game = nil) -> ^T {
 /*
 Parses a data file's text.
 
+Inputs:
+- text: The file's JSON
+- allocator: For the result
+
 Returns:
-- Its type name and values (allocated with `allocator`; free with `DataResourceData_Destroy`), and
-  .None or .Invalid_XML (the error for any unreadable file) / .Unsupported_Version
+- data: Its type name and values (allocated with `allocator`; free with `DataResourceData_Destroy`)
+- err: .None; .Invalid_XML when it isn't JSON (the error for any unreadable file); .Wrong_Root when
+  it isn't an object with a "type"; .Unsupported_Version when it's from a newer `DATA_FORMAT_VERSION`
 */
 ParseDataResource :: proc(text: string, allocator := context.allocator) -> (data: DataResourceData, err: ProjectError) {
 	value, parseErr := json.parse_string(text, allocator = context.temp_allocator)
@@ -149,7 +213,18 @@ ParseDataResource :: proc(text: string, allocator := context.allocator) -> (data
 	return data, .None
 }
 
-// The text of a data file (values in the given order; deterministic)
+/*
+Writes the text of a data file (what the editor saves; `ParseDataResource` reads it back).
+Values are written as JSON strings in the given order, so the output is deterministic.
+
+Inputs:
+- type: The data type's name
+- values: The field values as text
+- allocator: For the text
+
+Returns:
+- The file's JSON (allocated with `allocator`)
+*/
 FormatDataResource :: proc(type: string, values: []ScriptPropData, allocator := context.allocator) -> string {
 	b := strings.builder_make(allocator)
 	fmt.sbprintf(&b, "{{\n\t\"formatVersion\": %d,\n\t\"type\": %q,\n\t\"values\": {{", DATA_FORMAT_VERSION, type)
@@ -160,6 +235,13 @@ FormatDataResource :: proc(type: string, values: []ScriptPropData, allocator := 
 	return strings.to_string(b)
 }
 
+/*
+Frees what `ParseDataResource` allocated and zeroes the data.
+
+Inputs:
+- data: The parsed data
+- allocator: The allocator that was given to `ParseDataResource`
+*/
 DataResourceData_Destroy :: proc(data: ^DataResourceData, allocator := context.allocator) {
 	context.allocator = allocator
 	delete(data.type)

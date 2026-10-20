@@ -59,10 +59,11 @@ file, like a component's.
 - **Development runs reload** saved LDtk files (LDtk_WatchFiles).
 
 Example:
+	// Given: self: ^e.Script
 	// A coin in LDtk, with a "value" Int field, gets the Coin script with value set
 	Coin :: struct {
 		using script: e.Script,
-		value: int `export:"" default=1`,
+		value: int `export:"default=1"`,
 	}
 	// Elsewhere: the level's data
 	level := cast(^e.LDtkLevelNode)e.Scene_FindNode(self.scene, "Level")
@@ -82,6 +83,7 @@ LDtkLevelSettings :: struct {
 	// The IntGrid layer whose cells become collision ("" for none), and which values (none: every
 	// non-empty cell)
 	collisionLayer: string,
+	// `collisionValues="1 3"`: the IntGrid values that collide (empty: every non-empty cell)
 	collisionValues: [dynamic]int,
 	// Make nodes for entities
 	spawnEntities: bool,
@@ -95,7 +97,9 @@ LDtkLevelSettings :: struct {
 
 // An entity identifier and the component its entities become
 LDtkEntityComponent :: struct {
+	// The entity's identifier in LDtk ("Player")
 	entity: string,
+	// The component file, relative to the project folder
 	component: string,
 }
 
@@ -105,7 +109,13 @@ DEFAULT_LDTK_LEVEL_SETTINGS :: LDtkLevelSettings{
 	background = true,
 }
 
-// Frees what LDtkLevelSettings own (allocated with `allocator`)
+/*
+Frees what LDtkLevelSettings own and zeroes them. `SceneData_Destroy` calls it for every node.
+
+Inputs:
+- settings: The settings
+- allocator: The allocator their strings and lists were made with
+*/
 LDtkLevelSettings_Destroy :: proc(settings: ^LDtkLevelSettings, allocator := context.allocator) {
 	context.allocator = allocator
 	delete(settings.file)
@@ -124,6 +134,7 @@ LDtkLevelSettings_Destroy :: proc(settings: ^LDtkLevelSettings, allocator := con
 The LDtkLevel node: what it built, for code that looks at the level.
 */
 LDtkLevelNode :: struct {
+	// The node part: transform, hierarchy, hooks
 	using node: Node,
 	// The project (the game's: Game_LoadLDtk), nil when it couldn't be read
 	project: ^LDtkProject,
@@ -136,28 +147,37 @@ LDtkLevelNode :: struct {
 	parallax: bool,
 	// What it was built with (in its arena): for reloading when the file changes
 	settings: LDtkLevelSettings,
+	// The physics settings of the collision bodies it makes
 	collision: LDtkCollisionBody,
 }
 
 // The StaticBody an IntGrid layer becomes: the scene file node's physics attributes
 LDtkCollisionBody :: struct {
+	// The layers it's on and the layers it collides with (bits: layer n is bit n-1)
 	layer, mask: u64,
+	// Its surface: friction and bounciness
 	friction, restitution: f32,
 }
 
 // A level, as built: draws its background
 LDtkLevelView :: struct {
+	// The node part: transform, hierarchy, hooks
 	using node: Node,
+	// The level's data (the project's)
 	level: ^LDtkLevel,
+	// Its background image (nil for none)
 	background: ^sdl.Texture,
+	// Draw the background color and image (the scene file's `background`)
 	drawBackground: bool,
 }
 
 // A layer's tiles (or an IntGrid layer's colored cells, when it has no tiles), drawn in one batch
 LDtkTileLayer :: struct {
+	// The node part: transform, hierarchy, hooks
 	using node: Node,
 	// The layer's data (the project's)
 	data: ^LDtkLayer,
+	// The tileset's image (nil for an IntGrid layer drawn in colors)
 	texture: ^sdl.Texture,
 	// The tileset's tile size
 	tileSize: f32,
@@ -169,15 +189,21 @@ LDtkTileLayer :: struct {
 
 // An entity layer's group: moves with the camera when the layer has a parallax factor
 LDtkEntityLayer :: struct {
+	// The node part: transform, hierarchy, hooks
 	using node: Node,
+	// The layer's data (the project's)
 	data: ^LDtkLayer,
 }
 
 // An entity that no component or spawner took: its rectangle, and its tile if it has one
 LDtkEntityNode :: struct {
+	// The node part: transform, hierarchy, hooks
 	using node: Node,
+	// The entity's data (the project's)
 	entity: ^LDtkEntity,
+	// Its tile's tileset image (nil: no tile, or one from LDtk's internal icons without a copy)
 	texture: ^sdl.Texture,
+	// Its tile's rectangle in the image
 	src: sdl.FRect,
 	// Draw LDtk's shape when it has no tile (tools that build without scripts: the editor)
 	outline: bool,
@@ -185,8 +211,11 @@ LDtkEntityNode :: struct {
 
 // An entity's node and data
 LDtkSpawned :: struct {
+	// The node made for it (it leaves the list when the node is removed)
 	node: ^Node,
+	// The entity's data (the project's)
 	entity: ^LDtkEntity,
+	// The level it's in
 	level: ^LDtkLevel,
 }
 
@@ -198,9 +227,17 @@ LDtkEntitySpawner :: #type proc(scene: ^Scene, entity: ^LDtkEntity) -> ^Node
 
 /*
 Registers what an entity becomes in code, for entities no component is mapped to. Callable from
-`@(init)` (contextless, like Script_Register).
+`@(init)` (contextless, like Script_Register). Registering an identifier again replaces the first.
+
+Inputs:
+- identifier: The entity's identifier in LDtk ("Torch")
+- spawn: Makes its node
 
 Example:
+	package scripts
+
+	import e "engine:."
+
 	@(init)
 	registerSpawners :: proc "contextless" () {
 		e.LDtk_RegisterEntity("Torch", proc(scene: ^e.Scene, entity: ^e.LDtkEntity) -> ^e.Node {
@@ -265,9 +302,13 @@ A project, read the first time it's asked for and kept for the game's life (nil,
 can't be read; asked again, it stays nil until Game_ForgetLDtk).
 
 Inputs:
+- game: The game that keeps it
 - path: The .ldtk file, relative to the project folder
 - projectDir: The project folder ("" for the game's, `Game.projectDir`; tools that build scenes
   pass theirs to Scene_Build)
+
+Returns:
+- The project (the game's: don't free it), or nil
 */
 Game_LoadLDtk :: proc(game: ^Game, path: string, projectDir := "") -> ^LDtkProject {
 	if project, found := game.ldtk[path]; found do return project
@@ -283,7 +324,15 @@ Game_LoadLDtk :: proc(game: ^Game, path: string, projectDir := "") -> ^LDtkProje
 	return project
 }
 
-// Drops a project the game read ("" for all), so it's read again: after the file changed
+/*
+Drops a project the game read, so it's read again: after the file changed. Nodes still pointing
+into it must be gone first (rebuild their scenes).
+
+Inputs:
+- game: The game
+- path: The .ldtk file as given to `Game_LoadLDtk` ("" for all, the projects replaced by
+  reloads too)
+*/
 Game_ForgetLDtk :: proc(game: ^Game, path: string = "") {
 	for key, project in game.ldtk {
 		if path != "" && key != path do continue
@@ -307,6 +356,13 @@ Game_ForgetLDtk :: proc(game: ^Game, path: string = "") {
 
 /*
 The nodes made for an entity identifier, in level and layer order (temp allocated).
+
+Inputs:
+- root: The LDtkLevel node (nil gives none)
+- identifier: The entity's identifier ("Mob")
+
+Returns:
+- The nodes
 */
 LDtk_FindEntityNodes :: proc(root: ^LDtkLevelNode, identifier: string) -> []^Node {
 	nodes := make([dynamic]^Node, context.temp_allocator)
@@ -318,7 +374,14 @@ LDtk_FindEntityNodes :: proc(root: ^LDtkLevelNode, identifier: string) -> []^Nod
 /*
 The LDtk data of an entity's node (or of a node under it), or nil when it isn't one.
 
+Inputs:
+- node: The entity's node, or a node under it
+
+Returns:
+- The entity's data (the project's), or nil
+
 Example:
+	// Given: self: ^e.Script
 	entity := e.LDtk_EntityOf(self.node)
 	speed := e.LDtk_FieldValue(entity.fields, "speed", f64(100))
 */
@@ -337,7 +400,16 @@ LDtk_EntityOf :: proc(node: ^Node) -> ^LDtkEntity {
 An IntGrid layer's value under a world position: 0 when empty, outside the levels, or when no
 level has that layer.
 
+Inputs:
+- root: The LDtkLevel node (nil gives 0)
+- layer: The IntGrid layer's identifier
+- position: The world position, in game coordinates
+
+Returns:
+- The cell's value
+
 Example:
+	// Given: self: ^e.Script, level: ^e.LDtkLevelNode
 	onLadder := e.LDtk_IntGridAtPosition(level, "Collisions", e.Node_GetWorldPosition(self.node)) == 3
 */
 LDtk_IntGridAtPosition :: proc(root: ^LDtkLevelNode, layer: string, position: [2]f32) -> int {
@@ -860,11 +932,6 @@ ldtkTileLayerDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	}
 }
 
-/*
-The part of a layer the screen shows, in the layer's space (before parallax): the screen's
-corners through the inverse of the draw transform and the parallax. Everything when the output
-size isn't known.
-*/
 // Whether a renderer is SDL's software renderer
 @(private="file")
 isSoftwareRenderer :: proc(renderer: ^sdl.Renderer) -> bool {
@@ -872,6 +939,11 @@ isSoftwareRenderer :: proc(renderer: ^sdl.Renderer) -> bool {
 	return name != nil && string(name) == "software"
 }
 
+/*
+The part of a layer the screen shows, in the layer's space (before parallax): the screen's
+corners through the inverse of the draw transform and the parallax. Everything when the output
+size isn't known.
+*/
 @(private="file")
 visibleBox :: proc(renderer: ^sdl.Renderer, shift: [2]f32, scale: f32) -> (lo, hi: [2]f32) {
 	w, h: c.int
@@ -1007,7 +1079,15 @@ The node of the entity an EntityRef field points at (`field` on the entity whose
 under it, is `node`), when that entity was built under the same LDtkLevel node; nil otherwise (no
 such field, null, or an entity in a level that wasn't built).
 
+Inputs:
+- node: The entity's node, or a node under it
+- field: The EntityRef field's identifier
+
+Returns:
+- The referenced entity's node, or nil
+
 Example:
+	// Given: self: ^e.Script
 	// A lever whose "door" field points at a door
 	door := e.LDtk_EntityRefNode(self.node, "door")
 	if door != nil do door.visible = false
@@ -1022,8 +1102,17 @@ LDtk_EntityRefNode :: proc(node: ^Node, field: string) -> ^Node {
 	return LDtk_FindEntityByIid(ldtkRootOf(node), ref.entityIid)
 }
 
-// The nodes an `Array<EntityRef>` field points at (temp allocated; entities that weren't built
-// are left out)
+/*
+The nodes an `Array<EntityRef>` field points at (temp allocated; entities that weren't built
+are left out).
+
+Inputs:
+- node: The entity's node, or a node under it
+- field: The field's identifier
+
+Returns:
+- The nodes (none when the node isn't an entity's or the field isn't an EntityRef array)
+*/
 LDtk_EntityRefNodes :: proc(node: ^Node, field: string) -> []^Node {
 	nodes := make([dynamic]^Node, context.temp_allocator)
 	entity := LDtk_EntityOf(node)
@@ -1040,7 +1129,16 @@ LDtk_EntityRefNodes :: proc(node: ^Node, field: string) -> []^Node {
 	return nodes[:]
 }
 
-// An entity's node by its iid (what EntityRef fields hold), or nil
+/*
+An entity's node by its iid (what EntityRef fields hold).
+
+Inputs:
+- root: The LDtkLevel node (nil gives nil)
+- iid: The entity's iid
+
+Returns:
+- The node, or nil when no entity built under `root` has that iid
+*/
 LDtk_FindEntityByIid :: proc(root: ^LDtkLevelNode, iid: string) -> ^Node {
 	if root == nil || iid == "" do return nil
 	for s in root.spawned do if s.entity.iid == iid do return s.node

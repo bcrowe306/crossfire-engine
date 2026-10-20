@@ -22,17 +22,29 @@ Example:
 	db := e.AudioLevel_ToDecibels(max(left, right))
 */
 
-// A stage's peak levels since they were last read, and (final stage) its gains; f32 bits, atomic
+/*
+A level meter: a stage's peak levels since they were last read, and (a final stage) the gains it
+applies. Shared with the audio thread: read and set it through the procedures, never the fields.
+Zero-initialized is ready to attach.
+*/
 AudioMeter :: struct {
+	// The loudest sample per side since the last read: f32 bits, atomic
 	peakLeft, peakRight: u32,
+	// A final stage's gain per side: f32 bits, atomic
 	gainLeft, gainRight: u32,
 	// Whether the gains are applied (only a mixer's meter)
 	applyGains: bool,
 }
 
 /*
-The loudest samples (0 = silence, 1 = full scale) per side since the last read, then starts over.
-A meter shows the largest level it read and lets it fall; reading every frame suits that.
+The loudest samples per side since the last read, then starts over. A meter shows the largest
+level it read and lets it fall; reading every frame suits that.
+
+Inputs:
+- meter: The meter (nil reads silence)
+
+Returns:
+- left, right: 0 (silence) to 1 (full scale); more when the mix clips
 */
 AudioMeter_Read :: proc(meter: ^AudioMeter) -> (left, right: f32) {
 	if meter == nil do return 0, 0
@@ -41,20 +53,42 @@ AudioMeter_Read :: proc(meter: ^AudioMeter) -> (left, right: f32) {
 	return
 }
 
-// The gains a final stage applies to the mix (0 silences a side)
+/*
+Sets the gains a final stage (`AudioMeter_AttachMixer`) applies to the mix, from the next mixed
+block. A group's meter ignores them.
+
+Inputs:
+- meter: The meter (nil does nothing)
+- left, right: Gains per side (1 unchanged, 0 silences that side; negative is 0)
+*/
 AudioMeter_SetGains :: proc(meter: ^AudioMeter, left, right: f32) {
 	if meter == nil do return
 	sync.atomic_store(&meter.gainLeft, transmute(u32)max(left, 0))
 	sync.atomic_store(&meter.gainRight, transmute(u32)max(right, 0))
 }
 
-// Measures a group's mix
+/*
+Measures a group's mix: the meter becomes the group's post-mix callback (replacing any). The
+meter must outlive the attachment (until the group is destroyed).
+
+Inputs:
+- meter: The meter
+- group: The SDL3_mixer group (nil does nothing)
+*/
 AudioMeter_AttachGroup :: proc(meter: ^AudioMeter, group: ^mix.Group) {
 	if group == nil do return
 	_ = setGroupPostMixCallback(group, groupMixed, meter)
 }
 
-// Makes the meter a mixer's final stage: its gains applied to the whole mix, then measured
+/*
+Makes the meter a mixer's final stage (its post-mix callback, replacing any): its gains are
+applied to the whole mix, then it's measured. A meter whose gains are both 0 starts at 1, 1. The
+meter must outlive the attachment.
+
+Inputs:
+- meter: The meter
+- mixer: The SDL3_mixer mixer (nil does nothing)
+*/
 AudioMeter_AttachMixer :: proc(meter: ^AudioMeter, mixer: ^mix.Mixer) {
 	if mixer == nil do return
 	meter.applyGains = true
@@ -63,15 +97,37 @@ AudioMeter_AttachMixer :: proc(meter: ^AudioMeter, mixer: ^mix.Mixer) {
 }
 
 /*
-A bus's level since the last call (both sides, 0 to 1; Master: the final mix). Without an audio
-device, or for a bus that doesn't exist, 0.
+A bus's level since the last call (for Master: the final mix). Reading it starts the peaks over,
+so one reader per bus (a mixer view reading every frame).
+
+Inputs:
+- name: The bus's name ("" is Master)
+- game: The game (nil: the current game)
+
+Returns:
+- left, right: 0 to 1 (0 without an audio device, or for a bus that doesn't exist)
+
+Example:
+	left, right := e.Audio_GetBusLevel("Music")
+	db := e.AudioLevel_ToDecibels(max(left, right))
+	// A bar over the top 60 dB
+	bar := sdl.FRect{20, 20, 200 * max(1 + db / 60, 0), 8}
+	e.DrawRectangle(renderer, &bar, {80, 220, 120, 255})
 */
 Audio_GetBusLevel :: proc(name: string, game: ^Game = nil) -> (left, right: f32) {
 	if b := Audio_GetBus(name, game); b != nil do return AudioMeter_Read(b.meter)
 	return 0, 0
 }
 
-// A level (0 to 1+) in decibels relative to full scale; silence is `AUDIO_SILENCE_DB`
+/*
+A level in decibels relative to full scale.
+
+Inputs:
+- level: 0 to 1 (more when clipping)
+
+Returns:
+- dBFS: 0 at full scale, negative below it, never under `AUDIO_SILENCE_DB` (silence)
+*/
 AudioLevel_ToDecibels :: proc(level: f32) -> f32 {
 	if level <= 0.00001 do return AUDIO_SILENCE_DB
 	return max(20 * math.log10(level), AUDIO_SILENCE_DB)

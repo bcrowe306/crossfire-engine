@@ -12,11 +12,39 @@ import ttf "vendor:sdl3/ttf"
 // pos is the top-left corner of the text.
 // While a scene draws a node, text is positioned and scaled by its transform but not rotated.
 
+/*
+Draws a line of text (newlines break it), its top-left corner at `pos`.
+
+Inputs:
+- rm: The resource manager the font is loaded through (`&game.resourceManager`)
+- pos: The text's top-left corner, in local coordinates
+- text: The text (UTF-8)
+- font: A font file path, or `DEFAULT_FONT`
+- size: The point size (scaled by the draw transform, rounded to whole points)
+- color: The color (multiplied by the node's tint)
+
+Example:
+	e.DrawText(&game.resourceManager, {16, 16}, "Score: 100", e.DEFAULT_FONT, 24, {255, 255, 255, 255})
+*/
 DrawText :: proc(rm: ^ResourceManager, pos: sdl.FPoint, text: string, font: string, size: f32, color: sdl.Color) {
 	DrawTextWrapped(rm, pos, text, font, size, color, 0)
 }
 
-// Wraps lines to fit within wrapWidth pixels. A wrapWidth of 0 only breaks on newlines
+/*
+Draws text wrapped to fit a width, its top-left corner at `pos`.
+
+Inputs:
+- rm: The resource manager the font is loaded through (`&game.resourceManager`)
+- pos: The text's top-left corner, in local coordinates
+- text: The text (UTF-8)
+- font: A font file path, or `DEFAULT_FONT`
+- size: The point size (scaled by the draw transform, rounded to whole points)
+- color: The color (multiplied by the node's tint)
+- wrapWidth: The width to wrap lines at, in local units. 0 only breaks on newlines
+
+Example:
+	e.DrawTextWrapped(&game.resourceManager, {16, 16}, "A long line of dialogue...", e.DEFAULT_FONT, 18, {255, 255, 255, 255}, 300)
+*/
 DrawTextWrapped :: proc(rm: ^ResourceManager, pos: sdl.FPoint, text: string, font: string, size: f32, color: sdl.Color, wrapWidth: f32) {
 	if len(text) == 0 || rm.textEngine == nil do return
 
@@ -45,13 +73,39 @@ DrawTextWrapped :: proc(rm: ^ResourceManager, pos: sdl.FPoint, text: string, fon
 	ttf.DrawRendererText(ttfText, pos.x, pos.y)
 }
 
-// Draws text centered on pos, useful for titles and buttons
+/*
+Draws a line of text centered on `pos`, for titles and buttons.
+
+Inputs:
+- rm: The resource manager the font is loaded through (`&game.resourceManager`)
+- pos: The text's center, in local coordinates
+- text: The text (UTF-8)
+- font: A font file path, or `DEFAULT_FONT`
+- size: The point size
+- color: The color (multiplied by the node's tint)
+
+Example:
+	e.DrawTextCentered(&game.resourceManager, sdl.FPoint(game.size * 0.5), "PAUSED", e.DEFAULT_FONT, 48, {255, 255, 255, 255})
+*/
 DrawTextCentered :: proc(rm: ^ResourceManager, pos: sdl.FPoint, text: string, font: string, size: f32, color: sdl.Color) {
 	textSize := MeasureText(rm, text, font, size)
 	DrawText(rm, pos - textSize * 0.5, text, font, size, color)
 }
 
-// Returns the width and height in pixels that the text would take up when drawn
+/*
+Measures the text without drawing it.
+
+Inputs:
+- rm: The resource manager the font is loaded through (`&game.resourceManager`)
+- text: The text (UTF-8)
+- font: A font file path, or `DEFAULT_FONT`
+- size: The point size
+- wrapWidth: The width to wrap lines at, in pixels. 0 only breaks on newlines
+
+Returns:
+- The width and height, in pixels at that size (no draw transform applied); {0, 0} for empty
+  text or a font that can't be loaded
+*/
 MeasureText :: proc(rm: ^ResourceManager, text: string, font: string, size: f32, wrapWidth: f32 = 0) -> sdl.FPoint {
 	if len(text) == 0 do return {}
 
