@@ -356,9 +356,12 @@ ldtk_reloads_while_playing :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(Scene_FindNode(scene, "Level/Level_0/Collision").children), 2)
 
 	// Nothing changed: nothing reloaded
+	reloaded := 0
+	Event_Subscribe(&level.onReloaded, proc(_: ^EventSubject, _: rawptr, _: EventData, user: rawptr) { (cast(^int)user)^ += 1 }, &reloaded)
 	before := level.project
 	LDtk_WatchFiles(&game, 1)
 	testing.expect(t, level.project == before, "same file, same project")
+	testing.expect_value(t, reloaded, 0)
 
 	// Saved in LDtk: a cell of the wall block is empty now (the 2x3 block splits), and the
 	// background is another color. A later modification time, whatever the clock's resolution
@@ -369,6 +372,7 @@ ldtk_reloads_while_playing :: proc(t: ^testing.T) {
 	LDtk_WatchFiles(&game, 1)
 	Scene_ProcessQueues(scene)
 	testing.expect(t, level.project != before, "read again")
+	testing.expect_value(t, reloaded, 1)
 	testing.expect_value(t, level.views[0].level.bgColor, sdl.Color{0x40, 0x50, 0x60, 255})
 	walls := cast(^LDtkTileLayer)Scene_FindNode(scene, "Level/Level_0/Walls")
 	testing.expect_value(t, LDtk_IntGridAt(walls.data, 0, 1), 0)

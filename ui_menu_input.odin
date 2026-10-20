@@ -44,6 +44,7 @@ MenuCommand :: enum u8 {
 @(private)
 Menu_update :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 	menu := cast(^Menu)node
+	defer reportFocus(menu)
 	if !Node_IsVisibleInTree(menu) do return
 	// Item rects are relative to the menu's origin; mouse events are in screen coordinates
 	origin := Node_GetScreenPosition(menu)
@@ -128,9 +129,13 @@ Menu_Command :: proc(menu: ^Menu, command: MenuCommand, repeat := false) -> bool
 			return activate(menu, menu.focused)
 		}
 	case .Cancel:
-		if !repeat && menu.onBack != nil {
-			menu.onBack(menu, nil)
-			return true
+		if !repeat {
+			Event_Notify(&menu.onBackPressed, menu, nil)
+			if menu.onBack != nil {
+				menu.onBack(menu, nil)
+				return true
+			}
+			return len(menu.onBackPressed.listeners) > 0
 		}
 	}
 	return false
@@ -230,10 +235,12 @@ activate :: proc(menu: ^Menu, index: int) -> bool {
 	#partial switch item.kind {
 	case .Button:
 		if item.onChange != nil do item.onChange(menu, item)
+		Event_Notify(&menu.onButtonPressed, menu, index)
 		return true
 	case .Checkbox:
 		item.checked = !item.checked
 		if item.onChange != nil do item.onChange(menu, item)
+		Event_Notify(&menu.onValueChanged, menu, index)
 	case .Radio:
 		checkRadio(menu, index)
 	case .Select:
@@ -294,6 +301,7 @@ checkRadio :: proc(menu: ^Menu, index: int) {
 	}
 	item.checked = true
 	if item.onChange != nil do item.onChange(menu, item)
+	Event_Notify(&menu.onValueChanged, menu, index)
 }
 
 @(private="file")
@@ -301,6 +309,7 @@ selectOption :: proc(menu: ^Menu, item: ^MenuItem, option: int) {
 	if option == item.selectedOption do return
 	item.selectedOption = option
 	if item.onChange != nil do item.onChange(menu, item)
+	Event_Notify(&menu.onValueChanged, menu, itemIndex(menu, item))
 }
 
 @(private="file")
@@ -309,6 +318,23 @@ setSliderValue :: proc(menu: ^Menu, item: ^MenuItem, value: f32) {
 	if snapped == item.value do return
 	item.value = snapped
 	if item.onChange != nil do item.onChange(menu, item)
+	Event_Notify(&menu.onValueChanged, menu, itemIndex(menu, item))
+}
+
+// An item's index in its menu's items
+@(private="file")
+itemIndex :: proc(menu: ^Menu, item: ^MenuItem) -> int {
+	return int((uintptr(item) - uintptr(&menu.items[0])) / size_of(MenuItem))
+}
+
+// Notifies onFocusChanged when the focus moved since the last update (the first only records it)
+@(private="file")
+reportFocus :: proc(menu: ^Menu) {
+	if menu.focusReported && menu.focused != menu.reportedFocus && menu.focused >= 0 {
+		Event_Notify(&menu.onFocusChanged, menu, menu.focused)
+	}
+	menu.reportedFocus = menu.focused
+	menu.focusReported = true
 }
 
 @(private="file")

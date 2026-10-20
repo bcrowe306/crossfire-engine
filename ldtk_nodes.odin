@@ -150,6 +150,10 @@ LDtkLevelNode :: struct {
 	settings: LDtkLevelSettings,
 	// The physics settings of the collision bodies it makes
 	collision: LDtkCollisionBody,
+	// An entity's node was made (when the level is built, and for entities a reload added)
+	onEntitySpawned: EventSubject `event:"An entity's node was made (built, or added by a hot reload; data: the node)" data:"node := cast(^e.Node)data.(rawptr)"`,
+	// Its LDtk file was saved and the level updated (hot reload, dev runs)
+	onReloaded: EventSubject `event:"Its LDtk file changed and the level was updated (dev runs: Play from the editor)"`,
 }
 
 // The StaticBody an IntGrid layer becomes: the scene file node's physics attributes
@@ -521,6 +525,7 @@ reloadLevelNode :: proc(root: ^LDtkLevelNode, project: ^LDtkProject) {
 			}
 		}
 	}
+	Event_Notify(&root.onReloaded, root, nil)
 }
 
 /*
@@ -558,6 +563,8 @@ ldtkBuildNode :: proc(scene: ^Scene, data: ^SceneNodeData, projectDir: string, a
 	allocator := Node_GetAllocator(root)
 	root.views = make([dynamic]^LDtkLevelView, allocator)
 	root.spawned = make([dynamic]LDtkSpawned, allocator)
+	EventSubject_Init(&root.onEntitySpawned, allocator)
+	EventSubject_Init(&root.onReloaded, allocator)
 	root.getBounds = ldtkLevelNodeBounds
 	root.parallax = attachScripts
 	root.settings = cloneSettings(data.ldtk, allocator)
@@ -741,6 +748,8 @@ spawnEntity :: proc(root: ^LDtkLevelNode, group: ^Node, level: ^LDtkLevel, layer
 			return
 		}
 	}, root)
+	// Once its script and fields are set
+	defer Event_Notify(&root.onEntitySpawned, root, rawptr(n))
 
 	if !attachScripts do return
 	// A script named like the entity, its fields from the entity's

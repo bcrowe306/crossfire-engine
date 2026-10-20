@@ -481,6 +481,7 @@ CharacterMover_Move :: proc(mover: ^CharacterMover, deltaTime: f64) {
 
 	// Floor, walls and ceiling from the contact normals (they point from the surface to the mover)
 	floorLimit := math.cos(math.to_radians(mover.floorMaxAngle))
+	wasOnFloor, wasOnWall, wasOnCeiling := mover.onFloor, mover.onWall, mover.onCeiling
 	mover.onFloor, mover.onWall, mover.onCeiling = false, false, false
 	mover.floorNormal = {}
 	for plane in all.planes[:all.count] {
@@ -498,6 +499,11 @@ CharacterMover_Move :: proc(mover: ^CharacterMover, deltaTime: f64) {
 
 	Node_SetWorldPosition(mover, position * ppm)
 	moverContacts(mover, all.bodies[:all.count])
+	// What changed since the last move
+	if mover.onFloor && !wasOnFloor do Event_Notify(&mover.onLanded, mover, nil)
+	if !mover.onFloor && wasOnFloor do Event_Notify(&mover.onLeftFloor, mover, nil)
+	if mover.onWall && !wasOnWall do Event_Notify(&mover.onWallHit, mover, nil)
+	if mover.onCeiling && !wasOnCeiling do Event_Notify(&mover.onCeilingHit, mover, nil)
 	// Moved by code: drawn where it is, not smoothed
 	mover.previousPosition, mover.previousRotation = mover.position, mover.rotation
 }
@@ -811,5 +817,11 @@ RayCast_ForceUpdate :: proc(ray: ^RayCast) {
 		}
 	}
 	hit := Physics_RayCast(ray.scene, xf.origin, Transform2D_Apply(xf, ray.target), ray.collisionMask, exclude)
+	before := ray.colliding ? ray.collider : nil
 	ray.colliding, ray.point, ray.normal, ray.collider, ray.colliderShape = hit.hit, hit.point, hit.normal, hit.body, hit.shape
+	after := ray.colliding ? ray.collider : nil
+	if before != after {
+		if before != nil do Event_Notify(&ray.onHitExit, ray, rawptr(before))
+		if after != nil do Event_Notify(&ray.onHitEnter, ray, rawptr(after))
+	}
 }

@@ -225,6 +225,11 @@ an Area), get their exits now, and forget it.
 */
 @(private)
 physicsForgetBody :: proc(world: ^PhysicsWorld, body: ^PhysicsBody) {
+	// Rays hitting it stop now, while it's still there (they'd keep a freed pointer)
+	for ray in world.rayCasts do if ray.colliding && ray.collider == body {
+		ray.colliding, ray.collider, ray.colliderShape = false, nil, nil
+		Event_Notify(&ray.onHitExit, ray, rawptr(body))
+	}
 	for len(body.contacts) > 0 {
 		other := body.contacts[0].body
 		dropContact(&body.contacts, other)

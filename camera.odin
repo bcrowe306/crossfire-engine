@@ -154,6 +154,17 @@ Camera2D :: struct {
 	move: CameraMove,
 	// Active `Camera2D_Shake`
 	shake: CameraShake,
+	// A `Camera2D_MoveTo` pan reached its end (not when replaced or cancelled)
+	onPanFinished: EventSubject `event:"A timed pan (Camera2D_MoveTo) reached its end"`,
+	// A `Camera2D_Shake` settled
+	onShakeFinished: EventSubject `event:"A shake (Camera2D_Shake) settled"`,
+}
+
+// Prepares a camera's event subjects (cameras made by Scene_CreateCamera and scene files)
+@(private)
+initCameraEvents :: proc(camera: ^Camera2D) {
+	EventSubject_Init(&camera.onPanFinished, Node_GetAllocator(camera))
+	EventSubject_Init(&camera.onShakeFinished, Node_GetAllocator(camera))
 }
 
 // State of a `Camera2D_Shake`
@@ -196,6 +207,7 @@ Example:
 */
 Scene_CreateCamera :: proc(scene: ^Scene, parent: ^Node = nil) -> ^Camera2D {
 	camera := CreateNode(scene, Camera2D)
+	initCameraEvents(camera)
 	camera.zoom = 1
 	camera.follow = DEFAULT_CAMERA_FOLLOW
 	if scene.game != nil {
@@ -477,7 +489,10 @@ Camera2D_Update :: proc(camera: ^Camera2D, viewSize: [2]f32, deltaTime: f64) {
 		t := move.elapsed / move.duration
 		if t >= 0.9999 do t = 1
 		Camera2D_SetTarget(camera, move.from + (move.to - move.from) * Ease(move.ease, t))
-		if t >= 1 do move.active = false
+		if t >= 1 {
+			move.active = false
+			Event_Notify(&camera.onPanFinished, camera, nil)
+		}
 	}
 	Camera2D_ClampToBounds(camera, viewSize)
 }
@@ -518,6 +533,7 @@ Camera2D_UpdateShake :: proc(camera: ^Camera2D, deltaTime: f64) {
 		return
 	}
 	shake.left = max(shake.left - f32(deltaTime), 0)
+	if shake.left == 0 do Event_Notify(&camera.onShakeFinished, camera, nil)
 	fade := shake.left / shake.duration
 	amount := shake.strength * fade * fade
 	angle := rand.float32() * math.TAU

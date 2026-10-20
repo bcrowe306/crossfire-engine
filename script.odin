@@ -500,6 +500,8 @@ describeFields :: proc(b: ^strings.Builder, fields: []ScriptField) {
 // Runs scripts' `ready` for nodes that haven't had it yet. Called by Scene_Update before updates
 @(private)
 Scene_ReadyScripts :: proc(scene: ^Scene) {
+	// Listeners first, so a ready that sets something off is heard
+	for node in scene.nodes do if !node.listenersBound && len(node.listeners) > 0 do bindListeners(node)
 	for node in scene.nodes {
 		s := &node.script
 		if s.info == nil || s.ready do continue

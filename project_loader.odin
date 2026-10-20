@@ -393,6 +393,7 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 
 		case .Camera:
 			camera := CreateNode(scene, Camera2D)
+			initCameraEvents(camera)
 			camera.zoom = node.zoom
 			camera.follow = DEFAULT_CAMERA_FOLLOW
 			camera.offset = scene.game.size * 0.5
@@ -532,6 +533,8 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 		// A component instance keeps its root's settings unless the instance sets them
 		instance := node.kind == .Component
 		if instance do n.component = strings.clone(node.component, Node_GetAllocator(n))
+		// A component instance's listeners join its root's own
+		for l in node.listeners do Node_AddListener(n, l)
 		if !instance || node.processMode != .Inherit do n.processMode = node.processMode
 		if !instance || node.blendMode != .Blend do n.blendMode = node.blendMode
 		if !instance || node.zIndex != 0 do n.zIndex = node.zIndex

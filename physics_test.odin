@@ -55,6 +55,10 @@ count :: proc(body: ^PhysicsBody, counter: ^Counter) {
 	}, counter)
 }
 
+// Counts notifications (userData: ^int)
+@(private="file")
+bump :: proc(_: ^EventSubject, _: rawptr, _: EventData, user: rawptr) { (cast(^int)user)^ += 1 }
+
 @(private="file")
 near :: proc(a, b, tolerance: f32) -> bool {
 	return abs(a - b) <= tolerance
@@ -183,7 +187,11 @@ physics_raycast :: proc(t: ^testing.T) {
 	box(scene, owner, {10, 10})
 	ownRay := CreateRayCast(scene, {0, 200})
 	Node_AddChild(owner, ownRay)
+	entered, exited := 0, 0
+	Event_Subscribe(&ray.onHitEnter, bump, &entered)
+	Event_Subscribe(&ray.onHitExit, bump, &exited)
 	run(scene, 0.1)
+	testing.expect_value(t, entered, 1) // once, not every step
 
 	testing.expect(t, ray.colliding)
 	testing.expect(t, ray.collider == wall && ray.colliderShape == wallShape)
@@ -204,6 +212,13 @@ physics_raycast :: proc(t: ^testing.T) {
 	Node_AddChild(turner, turned)
 	run(scene, 0.1)
 	testing.expect(t, !turned.colliding)
+
+	// The wall removed: the ray stops hitting it at once (no freed pointer kept)
+	testing.expect_value(t, exited, 0)
+	Scene_RemoveNode(scene, wall.id)
+	run(scene, 0.1)
+	testing.expect(t, exited == 1 && !ray.colliding && ray.collider == nil, "onHitExit when the body goes")
+	testing.expect_value(t, entered, 1)
 }
 
 @(test)
@@ -227,6 +242,10 @@ physics_character_mover :: proc(t: ^testing.T) {
 	Node_AddChild(mover, capsule)
 	hits: Counter
 	count(mover, &hits)
+	landed, leftFloor, walled := 0, 0, 0
+	Event_Subscribe(&mover.onLanded, bump, &landed)
+	Event_Subscribe(&mover.onLeftFloor, bump, &leftFloor)
+	Event_Subscribe(&mover.onWallHit, bump, &walled)
 	groundHits: Counter
 	count(ground, &groundHits)
 	mover.update = proc(node: ^Node, _: []sdl.Event, dt: f64) {
@@ -238,6 +257,7 @@ physics_character_mover :: proc(t: ^testing.T) {
 
 	run(scene, 0.6)
 	testing.expect(t, mover.onFloor, "landed")
+	testing.expect(t, landed == 1 && leftFloor == 0 && walled == 0, "onLanded once")
 	// The capsule's bottom on the ground's top: 290 - 20
 	testing.expectf(t, near(mover.position.y, 270, 1.5), "standing at %v", mover.position.y)
 	testing.expectf(t, near(mover.velocity.y, 0, 1), "landing stopped the fall: %v", mover.velocity)
@@ -249,6 +269,7 @@ physics_character_mover :: proc(t: ^testing.T) {
 	// Stopped by the wall (its left side at 290, the capsule 10 wide on each side)
 	testing.expectf(t, near(mover.position.x, 280, 1.5), "stopped at %v", mover.position.x)
 	testing.expect(t, mover.onWall && mover.onFloor)
+	testing.expect(t, walled == 1 && landed == 1 && leftFloor == 0, "onWallHit once, still on the floor")
 	testing.expectf(t, near(mover.position.y, 270, 1.5), "still standing at %v", mover.position.y)
 
 	// It pushes a crate in its way (kinematic for the rest of the world)

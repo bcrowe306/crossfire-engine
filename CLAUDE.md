@@ -96,6 +96,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `animation.odin` | `Animation` base, `SpriteSheetAnimation`, `FrameAnimation` |
 | `animation_player.odin` | Plays animations by name or index, with events |
 | `event.odin` | `EventSubject`: subscribe / unsubscribe / notify |
+| `node_events.odin` | **Node events for tools and scene files**: `NodeType_Events` / `SceneNodeKind_Events` (a type's EventSubject fields tagged `event:"..."`, with `data:"..."` hints), `Node_FindEvent`, `Node_AddListener`, `Script_Listener` (a script's handlers by name), binding scene files' `<listener>`s before ready |
+| `node_events_test.odin` | Tests: each type's events, listeners from a scene file (bound before ready, bad ones skipped, a removed listener), camera and menu events |
 | `timer.odin`, `ticker.odin` | Time-based events |
 | `ui_menu*.odin`, `ui_style.odin`, `ui_label.odin` | In-game `Menu` (button, checkbox, radio, slider, select) and `Label` nodes; menus navigate by the game's `ui_*` input actions when it has them (keyboard and gamepad, held directions repeat), else by fixed keys; `Menu_Command` |
 | `ui_menu_test.odin` | Tests: menus by keys (every item kind, the dropdown, wrapping, onBack), by actions from a gamepad (repeats), by the mouse (hover, click, slider drags) |
@@ -448,6 +450,24 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
   (`LDtkLevelNode.settings`, `collision`) to do it. ldtk_reloads_while_playing tests it.
 - Checked against all 14 of LDtk's sample projects (parsed; the platformer rendered: the same
   picture as LDtk's), not committed: their art has its own licenses.
+
+**Node events** (node_events.odin): **every event worth listening to is an EventSubject field
+tagged `event:"<what it means>"`** (and `data:"<code reading its data>"` when it carries some),
+initialized with the node's allocator in its Create proc (`Event_Notify`, not `->notify`, where
+a subject may be uninitialized: cameras made in tests). Tools list them by reflection
+(`NodeType_Events`: the type's own, embedded types', struct fields' as "animation.x", Node's
+last). **A new node type, or a new event, needs only the tagged field and its notify call.**
+What each type has: Node onEnter/onExit; bodies onCollisionEnter/Exit, onAreaEnter/Exit;
+CharacterMover onLanded, onLeftFloor, onWallHit, onCeilingHit (transitions in
+CharacterMover_Move); RayCast onHitEnter/onHitExit (a removed body sends its exit at once:
+physicsForgetBody); AudioPlayer onFinished (a natural end, in its update); Menu
+onButtonPressed, onValueChanged, onFocusChanged (noticed in its update), onBackPressed (data:
+the item's index); Camera2D onPanFinished, onShakeFinished; LDtkLevelNode onEntitySpawned,
+onReloaded; ParticleEmitter onFinished; AnimatedSprite its player's animation.* events.
+Scene files' `<listener event target handler/>` (`NodeListenerData`) are bound by
+`Scene_ReadyScripts` before any ready: the handler (`Script_Listener(T, name, proc)`, a registry
+by type and name) is subscribed through a trampoline that finds the listening node by id on
+each call (a removed one is skipped). Component instances' listeners join their root's.
 
 **Particles** (particles.odin; its doc comment has the details):
 - A `ParticleEmitter`'s `settings` is a plain value (no pointers): scene files store it as a

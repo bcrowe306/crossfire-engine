@@ -134,6 +134,8 @@ AudioPlayer :: struct {
 	paused: bool,
 	// Autostart happened this time its scene is current
 	started: bool,
+	// What it played ended on its own (not looping, not stopped); noticed in its update
+	onFinished: EventSubject `event:"What it played ended on its own (not when stopped; a looping sound never ends)"`,
 }
 
 // A positional sound player; the same struct as AudioPlayer
@@ -167,6 +169,7 @@ CreateAudioPlayer :: proc(scene: ^Scene, kind := AudioPlayerKind.Sound, settings
 	player.settings = settings
 	player.update = audioPlayerUpdate
 	player.destroy = audioPlayerDestroyed
+	EventSubject_Init(&player.onFinished, Node_GetAllocator(player))
 	if game := scene.game; game != nil {
 		if game.audioPlayers == nil do game.audioPlayers = make([dynamic]^AudioPlayer)
 		append(&game.audioPlayers, player)
@@ -600,7 +603,10 @@ audioPlayerUpdate :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 		AudioPlayer_Play(player)
 	}
 	// A sound that ended on its own isn't playing any more
-	if player.playing && !player.paused && player.track != nil && !mix.TrackPlaying(player.track) do player.playing = false
+	if player.playing && !player.paused && player.track != nil && !mix.TrackPlaying(player.track) {
+		player.playing = false
+		Event_Notify(&player.onFinished, player, nil)
+	}
 	applyOutput(player)
 }
 

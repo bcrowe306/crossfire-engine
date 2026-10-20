@@ -271,6 +271,22 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 }
 
 /*
+A script listening to a node's event, from a scene file:
+`<listener event="onFinished" target="../Hero" handler="onBloodFinished"/>` inside the node.
+Before the scene's scripts get `ready`, the target node's script's handler (registered with
+`Script_Listener`) is subscribed to the event (node_events.odin).
+*/
+NodeListenerData :: struct {
+	// The event: an EventSubject field of the node's type (`NodeType_Events`), "onFinished" or
+	// through a field, "animation.onAnimationEnded"
+	event: string,
+	// The node whose script listens: a path from this node (`Node_FindPath`; "." for itself)
+	target: string,
+	// The handler's name (`Script_Listener`)
+	handler: string,
+}
+
+/*
 A button in a Menu node: `<item label="Play" action="scene:PlayScene"/>`.
 */
 MenuItemData :: struct {
@@ -354,6 +370,8 @@ SceneNodeData :: struct {
 	script: string,
 	// Any kind: the script's exported field values (its `<prop>` elements)
 	props: [dynamic]ScriptPropData,
+	// Any kind: scripts listening to its events (`<listener event target handler/>`, format 13)
+	listeners: [dynamic]NodeListenerData,
 
 	// StaticBody, DynamicBody, CharacterMover, Area: the layers it's on and collides with
 	// (`collisionLayer="1 3"`, `collisionMask="all"`), and its surface.
@@ -941,6 +959,8 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.script)
 		for prop in node.props { delete(prop.name); delete(prop.value) }
 		delete(node.props)
+		for l in node.listeners { delete(l.event); delete(l.target); delete(l.handler) }
+		delete(node.listeners)
 		delete(node.points)
 		delete(node.bodyA)
 		delete(node.bodyB)
@@ -1248,6 +1268,12 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 			append(&scene.nodes[index].items, MenuItemData{
 				cloneAttr(doc, child, "label", ""),
 				cloneAttr(doc, child, "action", ""),
+			})
+		case "listener":
+			append(&scene.nodes[index].listeners, NodeListenerData{
+				cloneAttr(doc, child, "event", ""),
+				cloneAttr(doc, child, "target", ""),
+				cloneAttr(doc, child, "handler", ""),
 			})
 		case "script":
 			// One per node; a second one is ignored

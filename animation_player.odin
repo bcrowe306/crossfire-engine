@@ -87,17 +87,17 @@ AnimationPlayer :: struct {
 	direction: int,
 
 	// data: int, the new relative frame. Also sent when an animation starts on its first frame
-	onFrameChanged: EventSubject,
+	onFrameChanged: EventSubject `event:"The animation's frame changed (data: the frame)" data:"frame := data.(int)"`,
 	// data: int, index of the new animation (the old one is in `previous`)
-	onAnimationChanged: EventSubject,
+	onAnimationChanged: EventSubject `event:"Another animation plays (data: its index)" data:"index := data.(int)"`,
 	// data: int, index of the animation that started (or restarted)
-	onAnimationStarted: EventSubject,
+	onAnimationStarted: EventSubject `event:"An animation started or restarted (data: its index)" data:"index := data.(int)"`,
 	// data: int, index of the animation. Sent when a non-looping animation finishes
-	onAnimationEnded: EventSubject,
+	onAnimationEnded: EventSubject `event:"A non-looping animation finished (data: its index)" data:"index := data.(int)"`,
 	// data: int, index of the animation. Sent each time a looping animation wraps around
-	onAnimationLooped: EventSubject,
+	onAnimationLooped: EventSubject `event:"A looping animation wrapped around (data: its index)" data:"index := data.(int)"`,
 	// data: int, index of the animation. Sent by AnimationPlayer_Stop
-	onAnimationStopped: EventSubject,
+	onAnimationStopped: EventSubject `event:"The animation was stopped (data: its index)" data:"index := data.(int)"`,
 
 	// Allocator of its lists and event listeners (`AnimationPlayer_Init`)
 	allocator: mem.Allocator,

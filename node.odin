@@ -143,13 +143,18 @@ Node :: struct {
 	queued: bool,
 	// The script attached to the node, if any (script.odin)
 	script: NodeScript,
+	// Scripts listening to its events, subscribed before the scene's scripts get `ready`
+	// (`Node_AddListener`, node_events.odin; in its arena)
+	listeners: [dynamic]NodeListenerData,
+	// Its listeners were subscribed (`listeners` added later aren't)
+	listenersBound: bool,
 
 	// Notified when the node joins its scene, at the start of the update after it was added
 	// (source: the node)
-	onEnter: EventSubject,
+	onEnter: EventSubject `event:"It joined the scene (the update after it was added)"`,
 	// Notified when the node leaves its scene (removed, or the scene destroyed), before it's
 	// freed (source: the node)
-	onExit: EventSubject,
+	onExit: EventSubject `event:"It's leaving the scene (removed, or the scene ended), before it's freed"`,
 	// Holds this node and everything allocated with Node_GetAllocator
 	arena: NodeArena,
 }

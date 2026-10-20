@@ -104,6 +104,20 @@ Menu :: struct {
 	held: MenuCommand,
 	// Seconds to its next repeat
 	repeatTimer: f32,
+	// The focus its update last reported (onFocusChanged), and whether it has reported one
+	reportedFocus: int,
+	focusReported: bool,
+
+	// Events (data: the item's index, `items[index]`)
+
+	// A button was pressed (Enter / ui_accept, or a click)
+	onButtonPressed: EventSubject `event:"A button was pressed (data: its index)" data:"index := data.(int)"`,
+	// A checkbox, radio, select or slider changed value
+	onValueChanged: EventSubject `event:"A checkbox, radio, select or slider changed (data: its index)" data:"index := data.(int)"`,
+	// The focus moved to another item (noticed in its update)
+	onFocusChanged: EventSubject `event:"The focus moved to another item (data: its index)" data:"index := data.(int)"`,
+	// Escape / ui_cancel with no dropdown open (as `onBack`)
+	onBackPressed: EventSubject `event:"Escape / ui_cancel was pressed (no dropdown open)"`,
 }
 
 /*
@@ -132,6 +146,7 @@ CreateMenu :: proc(scene: ^Scene, pos: [2]f32, style := DEFAULT_MENU_STYLE) -> ^
 	menu.style = style
 	menu.focused = -1
 	menu.dragging = -1
+	for subject in ([]^EventSubject{&menu.onButtonPressed, &menu.onValueChanged, &menu.onFocusChanged, &menu.onBackPressed}) do EventSubject_Init(subject, Node_GetAllocator(menu))
 	return menu
 }
 

@@ -431,7 +431,7 @@ ParticleEmitter :: struct {
 			e.Scene_RemoveNode(emitter.scene, emitter.id)
 		}, nil)
 	*/
-	onFinished: EventSubject,
+	onFinished: EventSubject `event:"A run ended: it stopped emitting and its last particle died"`,
 	// The run stopped and onFinished is still to come (when the last particle dies)
 	finishPending: bool,
 }

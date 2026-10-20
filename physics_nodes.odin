@@ -81,13 +81,13 @@ PhysicsBody :: struct {
 	// kg per square meter (100 x 100 px). Only dynamic bodies use it
 	density: f32,
 	// A body (or Area) started touching this one
-	onCollisionEnter: EventSubject,
+	onCollisionEnter: EventSubject `event:"A body started touching it (an Area: a body came in)" data:"collision := e.Collision_FromEvent(data)"`,
 	// They stopped touching
-	onCollisionExit: EventSubject,
+	onCollisionExit: EventSubject `event:"A body stopped touching it (an Area: a body went out)" data:"collision := e.Collision_FromEvent(data)"`,
 	// This body entered an Area (`Collision.other` is the Area)
-	onAreaEnter: EventSubject,
+	onAreaEnter: EventSubject `event:"It entered an Area (collision.other is the Area)" data:"collision := e.Collision_FromEvent(data)"`,
 	// This body left an Area (`Collision.other` is the Area)
-	onAreaExit: EventSubject,
+	onAreaExit: EventSubject `event:"It left an Area (collision.other is the Area)" data:"collision := e.Collision_FromEvent(data)"`,
 	// Bodies touching it (for an Area: inside it), counted per shape pair (internal: use
 	// `PhysicsBody_GetContacts`, physics_events.odin)
 	contacts: [dynamic]BodyContact,
@@ -160,6 +160,14 @@ CharacterMover :: struct {
 	dropThrough: bool,
 	// Bodies touched by the last move (internal; for collision events)
 	touching: [dynamic]^PhysicsBody,
+	// A move ended on a floor after one that didn't (`CharacterMover_Move`)
+	onLanded: EventSubject `event:"It landed on a floor (a move ended on one after one that didn't)"`,
+	// A move ended off the floor after one on it: it jumped, fell or walked off an edge
+	onLeftFloor: EventSubject `event:"It left the floor (jumped, fell or walked off an edge)"`,
+	// A move ended touching a wall after one that didn't
+	onWallHit: EventSubject `event:"It ran into a wall"`,
+	// A move ended touching a ceiling after one that didn't
+	onCeilingHit: EventSubject `event:"It hit a ceiling"`,
 }
 
 // A region that reports bodies entering (`onCollisionEnter`) and leaving (`onCollisionExit`)
@@ -238,6 +246,10 @@ RayCast :: struct {
 	collider: ^PhysicsBody,
 	// Which of its shapes was hit
 	colliderShape: ^CollisionShape,
+	// It started hitting something, or hits another body than before (data: the body)
+	onHitEnter: EventSubject `event:"It started hitting a body, or hits another one (data: the body)" data:"body := cast(^e.PhysicsBody)data.(rawptr)"`,
+	// It stopped hitting the body it hit (data: that body)
+	onHitExit: EventSubject `event:"It stopped hitting the body it hit (data: that body)" data:"body := cast(^e.PhysicsBody)data.(rawptr)"`,
 }
 
 /*
@@ -364,6 +376,7 @@ CreateCharacterMover :: proc(scene: ^Scene) -> ^CharacterMover {
 	initBody(mover, .Character)
 	mover.floorMaxAngle = 45
 	mover.touching = make([dynamic]^PhysicsBody, Node_GetAllocator(mover))
+	for subject in ([]^EventSubject{&mover.onLanded, &mover.onLeftFloor, &mover.onWallHit, &mover.onCeilingHit}) do EventSubject_Init(subject, Node_GetAllocator(mover))
 	return mover
 }
 
@@ -435,6 +448,8 @@ CreateRayCast :: proc(scene: ^Scene, target: [2]f32 = {0, 50}) -> ^RayCast {
 	ray.collisionMask = PHYSICS_ALL_LAYERS
 	ray.enabled = true
 	ray.excludeParent = true
+	EventSubject_Init(&ray.onHitEnter, Node_GetAllocator(ray))
+	EventSubject_Init(&ray.onHitExit, Node_GetAllocator(ray))
 	world := Scene_GetPhysics(scene)
 	append(&world.rayCasts, ray)
 	ray.destroy = proc(node: ^Node) {
