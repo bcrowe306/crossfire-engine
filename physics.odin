@@ -1,10 +1,12 @@
 package engine
 
+import "base:runtime"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:sync"
 import b2 "box2d"
+import sdl "vendor:sdl3"
 
 /*
 The physics world: Box2D 3.1 (the box2d/ package), one world per scene, created when the scene's
@@ -86,6 +88,7 @@ Scene_GetPhysics :: proc(scene: ^Scene) -> ^PhysicsWorld {
 	def.gravity = world.settings.gravity / world.settings.pixelsPerMeter
 	sync.guard(&worldTableLock)
 	world.id = b2.CreateWorld(def)
+	b2.World_SetPreSolveCallback(world.id, oneWayPreSolve, nil)
 	scene.physics = world
 	return world
 }
@@ -202,6 +205,142 @@ Physics_RayCast :: proc(scene: ^Scene, from, to: [2]f32, mask: u64 = PHYSICS_ALL
 }
 
 /*
+The bodies with a shape under a point.
+
+Inputs:
+- point: World pixels
+- mask: Layers to find
+- includeAreas: Areas count too (they're left out by default)
+- allocator: For the result (the frame's temp allocator by default)
+
+Returns:
+- Each body once, in no particular order
+
+Example:
+	// What did the player click on?
+	for body in e.Physics_QueryPoint(scene, e.Input_GetMousePosition(&scene.game.input)) {
+		log.infof("clicked %s", body.name)
+	}
+*/
+Physics_QueryPoint :: proc(scene: ^Scene, point: [2]f32, mask: u64 = PHYSICS_ALL_LAYERS, includeAreas := false, allocator := context.temp_allocator) -> []^PhysicsBody {
+	ppm := Scene_GetPhysics(scene).settings.pixelsPerMeter
+	points := [1]b2.Vec2{point / ppm}
+	return queryOverlap(scene, b2.MakeProxy(points[:], 0), mask, includeAreas, allocator)
+}
+
+/*
+The bodies with a shape overlapping an axis-aligned rectangle.
+
+Inputs:
+- rect: World pixels (x, y the top-left corner)
+- mask: Layers to find
+- includeAreas: Areas count too (they're left out by default)
+- allocator: For the result (the frame's temp allocator by default)
+
+Returns:
+- Each body once, in no particular order
+
+Example:
+	// An explosion's square of damage
+	for body in e.Physics_QueryRect(scene, {x - 64, y - 64, 128, 128}) do hurt(body)
+*/
+Physics_QueryRect :: proc(scene: ^Scene, rect: sdl.FRect, mask: u64 = PHYSICS_ALL_LAYERS, includeAreas := false, allocator := context.temp_allocator) -> []^PhysicsBody {
+	ppm := Scene_GetPhysics(scene).settings.pixelsPerMeter
+	points := [4]b2.Vec2{{rect.x, rect.y}, {rect.x + rect.w, rect.y}, {rect.x + rect.w, rect.y + rect.h}, {rect.x, rect.y + rect.h}}
+	for &p in points do p /= ppm
+	return queryOverlap(scene, b2.MakeProxy(points[:], 0), mask, includeAreas, allocator)
+}
+
+/*
+The bodies with a shape overlapping a circle.
+
+Inputs:
+- center: World pixels
+- radius: Pixels
+- mask: Layers to find
+- includeAreas: Areas count too (they're left out by default)
+- allocator: For the result (the frame's temp allocator by default)
+
+Returns:
+- Each body once, in no particular order
+
+Example:
+	// Enemies within reach of the hero's sword
+	for body in e.Physics_QueryCircle(scene, hero.position, 48, ENEMY_LAYER) do hit(body)
+*/
+Physics_QueryCircle :: proc(scene: ^Scene, center: [2]f32, radius: f32, mask: u64 = PHYSICS_ALL_LAYERS, includeAreas := false, allocator := context.temp_allocator) -> []^PhysicsBody {
+	ppm := Scene_GetPhysics(scene).settings.pixelsPerMeter
+	points := [1]b2.Vec2{center / ppm}
+	return queryOverlap(scene, b2.MakeProxy(points[:], max(radius, 0) / ppm), mask, includeAreas, allocator)
+}
+
+/*
+Sweeps a circle from `from` to `to` and returns the first body it would hit: a thick ray, for
+checking whether something of that size fits through (a bullet, a dash). Areas and shapes the
+circle starts in are ignored.
+
+Inputs:
+- radius: Pixels
+- from, to: World pixels (the circle's center)
+- mask: Layers to hit
+- exclude: A body to ignore (the caster's own)
+
+Returns:
+- The hit: `point` and `normal` where the circle touches, `fraction` of the way along
+
+Example:
+	hit := e.Physics_ShapeCast(scene, 12, hero.position, hero.position + {200, 0}, exclude = hero)
+	dashTo := hero.position + {200, 0} * (hit.hit ? hit.fraction : 1)
+*/
+Physics_ShapeCast :: proc(scene: ^Scene, radius: f32, from, to: [2]f32, mask: u64 = PHYSICS_ALL_LAYERS, exclude: ^PhysicsBody = nil) -> RayHit {
+	world := Scene_GetPhysics(scene)
+	ppm := world.settings.pixelsPerMeter
+	Context :: struct {
+		exclude: ^PhysicsBody,
+		hit: RayHit,
+	}
+	ctx := Context{exclude = exclude}
+	callback :: proc "c" (shapeId: b2.ShapeId, point, normal: b2.Vec2, fraction: f32, userData: rawptr) -> f32 {
+		ctx := cast(^Context)userData
+		body := cast(^PhysicsBody)b2.Body_GetUserData(b2.Shape_GetBody(shapeId))
+		if fraction <= 0 || body == nil || body == ctx.exclude || b2.Shape_IsSensor(shapeId) do return -1
+		ctx.hit = {hit = true, point = point, normal = normal, body = body,
+			shape = cast(^CollisionShape)b2.Shape_GetUserData(shapeId), fraction = fraction}
+		return fraction
+	}
+	points := [1]b2.Vec2{from / ppm}
+	proxy := b2.MakeProxy(points[:], max(radius, 0.01) / ppm)
+	filter := b2.QueryFilter{categoryBits = PHYSICS_ALL_LAYERS, maskBits = mask}
+	_ = b2.World_CastShape(world.id, proxy, (to - from) / ppm, filter, callback, &ctx)
+	ctx.hit.point *= ppm
+	return ctx.hit
+}
+
+@(private="file")
+queryOverlap :: proc(scene: ^Scene, proxy: b2.ShapeProxy, mask: u64, includeAreas: bool, allocator: runtime.Allocator) -> []^PhysicsBody {
+	world := Scene_GetPhysics(scene)
+	Context :: struct {
+		bodies: [dynamic]^PhysicsBody,
+		includeAreas: bool,
+		// The caller's context, for appending from Box2D's C callback
+		odin: runtime.Context,
+	}
+	ctx := Context{bodies = make([dynamic]^PhysicsBody, allocator), includeAreas = includeAreas, odin = context}
+	callback :: proc "c" (shapeId: b2.ShapeId, userData: rawptr) -> bool {
+		ctx := cast(^Context)userData
+		body := cast(^PhysicsBody)b2.Body_GetUserData(b2.Shape_GetBody(shapeId))
+		if body == nil || (!ctx.includeAreas && b2.Shape_IsSensor(shapeId)) do return true
+		for known in ctx.bodies do if known == body do return true
+		context = ctx.odin
+		append(&ctx.bodies, body)
+		return true
+	}
+	filter := b2.QueryFilter{categoryBits = PHYSICS_ALL_LAYERS, maskBits = mask}
+	_ = b2.World_OverlapShape(world.id, proxy, filter, callback, &ctx)
+	return ctx.bodies[:]
+}
+
+/*
 Moves a CharacterMover by its `velocity` for `deltaTime` seconds, sliding along what it hits, and
 updates `onFloor` / `onWall` / `onCeiling` and `floorNormal`. The part of the velocity that ran
 into something is removed (it stops falling when it lands). Call it from the mover's update or
@@ -224,6 +363,8 @@ CharacterMover_Move :: proc(mover: ^CharacterMover, deltaTime: f64) {
 
 	Planes :: struct {
 		self: ^PhysicsBody,
+		// One-way platforms count only under a mover coming down (or standing) on them
+		landing: bool,
 		planes: [16]b2.CollisionPlane,
 		bodies: [16]^PhysicsBody,
 		count: int,
@@ -232,6 +373,7 @@ CharacterMover_Move :: proc(mover: ^CharacterMover, deltaTime: f64) {
 		p := cast(^Planes)userData
 		body := cast(^PhysicsBody)b2.Body_GetUserData(b2.Shape_GetBody(shapeId))
 		if body == p.self || body == nil || !result.hit || b2.Shape_IsSensor(shapeId) do return true
+		if isOneWay(shapeId) && (!p.landing || result.plane.normal.y > -ONE_WAY_NORMAL) do return true
 		if p.count < len(p.planes) {
 			p.planes[p.count] = {plane = result.plane, pushLimit = max(f32), push = 0, clipVelocity = true}
 			p.bodies[p.count] = body
@@ -245,7 +387,8 @@ CharacterMover_Move :: proc(mover: ^CharacterMover, deltaTime: f64) {
 	rotation := b2.MakeRot(math.to_radians(Transform2D_Rotation(xf)))
 	target := position + mover.velocity * f32(deltaTime) / ppm
 	filter := b2.QueryFilter{categoryBits = mover.collisionLayer, maskBits = mover.collisionMask}
-	planes := Planes{self = mover}
+	landing := !mover.dropThrough && mover.velocity.y >= 0
+	planes := Planes{self = mover, landing = landing}
 	tolerance: f32 = 0.01 / ppm * 100 // a hundredth of a meter at the default scale
 	for _ in 0 ..< 5 {
 		planes.count = 0
@@ -256,7 +399,7 @@ CharacterMover_Move :: proc(mover: ^CharacterMover, deltaTime: f64) {
 		}
 		b2.World_CollideMover(world.id, world_capsule, filter, collect, &planes)
 		result := b2.SolvePlanes(target - position, planes.planes[:planes.count])
-		fraction := b2.World_CastMover(world.id, world_capsule, result.translation, filter)
+		fraction := castMover(world.id, world_capsule, result.translation, filter, mover, landing)
 		delta := fraction * result.translation
 		position += delta
 		if linalg.length2(delta) < tolerance * tolerance do break
@@ -264,7 +407,7 @@ CharacterMover_Move :: proc(mover: ^CharacterMover, deltaTime: f64) {
 
 	// The sweep stops just short of what it hits, and planes only count when the capsule
 	// touches: what the mover rests against comes from a capsule MOVER_SKIN pixels larger
-	all := Planes{self = mover}
+	all := Planes{self = mover, landing = landing}
 	contact := b2.Capsule{
 		center1 = position + b2.RotateVector(rotation, capsule.center1),
 		center2 = position + b2.RotateVector(rotation, capsule.center2),
@@ -301,6 +444,56 @@ CharacterMover_Move :: proc(mover: ^CharacterMover, deltaTime: f64) {
 }
 
 // INTERNAL
+
+// How far up a one-way platform's contact normal must point to stop something (cos 60°)
+@(private="file")
+ONE_WAY_NORMAL :: 0.5
+
+@(private="file")
+isOneWay :: proc "contextless" (shapeId: b2.ShapeId) -> bool {
+	shape := cast(^CollisionShape)b2.Shape_GetUserData(shapeId)
+	return shape != nil && shape.oneWay
+}
+
+/*
+Box2D's pre-solve for dynamic bodies: a contact with a one-way shape is kept only while the other
+body is on its top side (the normal, from A to B, points up from the platform). Only shapes with
+`enablePreSolveEvents` (one-way ones) get here.
+*/
+@(private="file")
+oneWayPreSolve :: proc "c" (shapeIdA, shapeIdB: b2.ShapeId, manifold: ^b2.Manifold, ctx: rawptr) -> bool {
+	// y grows downward: "up from A" is a negative y
+	if isOneWay(shapeIdA) && -manifold.normal.y < ONE_WAY_NORMAL do return false
+	if isOneWay(shapeIdB) && manifold.normal.y < ONE_WAY_NORMAL do return false
+	return true
+}
+
+/*
+World_CastMover with one-way platforms: the sweep of the mover's capsule, ignoring its own body,
+sensors, shapes it starts in (as World_CastMover does) and one-way shapes unless it's landing on
+their top. Returns the fraction of `translation` it can move.
+*/
+@(private="file")
+castMover :: proc(worldId: b2.WorldId, capsule: b2.Capsule, translation: b2.Vec2, filter: b2.QueryFilter, self: ^PhysicsBody, landing: bool) -> f32 {
+	Cast :: struct {
+		self: ^PhysicsBody,
+		landing: bool,
+		fraction: f32,
+	}
+	cast_ := Cast{self = self, landing = landing, fraction = 1}
+	callback :: proc "c" (shapeId: b2.ShapeId, point, normal: b2.Vec2, fraction: f32, userData: rawptr) -> f32 {
+		c := cast(^Cast)userData
+		body := cast(^PhysicsBody)b2.Body_GetUserData(b2.Shape_GetBody(shapeId))
+		if fraction <= 0 || body == nil || body == c.self || b2.Shape_IsSensor(shapeId) do return -1
+		if isOneWay(shapeId) && (!c.landing || normal.y > -ONE_WAY_NORMAL) do return -1
+		c.fraction = min(c.fraction, fraction)
+		return fraction
+	}
+	points := [2]b2.Vec2{capsule.center1, capsule.center2}
+	proxy := b2.MakeProxy(points[:], capsule.radius)
+	_ = b2.World_CastShape(worldId, proxy, translation, filter, callback, &cast_)
+	return cast_.fraction
+}
 
 @(private)
 pixelsPerMeter :: proc(scene: ^Scene) -> f32 {
@@ -387,6 +580,7 @@ buildShapes :: proc(world: ^PhysicsWorld, body: ^PhysicsBody) {
 @(private="file")
 createShape :: proc(body: ^PhysicsBody, shape: ^CollisionShape, local: Transform2D, ppm: f32, def: ^b2.ShapeDef) {
 	def.userData = shape
+	def.enablePreSolveEvents = shape.oneWay
 	point :: proc(local: Transform2D, p: [2]f32, ppm: f32) -> b2.Vec2 { return Transform2D_Apply(local, p) / ppm }
 	scale := Transform2D_UniformScale(local)
 	shape.shapeId = {}

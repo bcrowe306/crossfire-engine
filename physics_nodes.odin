@@ -143,6 +143,8 @@ CharacterMover :: struct {
 	onCeiling: bool,
 	// The floor's normal (pointing up, away from the floor) while onFloor
 	floorNormal: [2]f32,
+	// One-way platforms don't stop it while set (hold it to drop through one)
+	dropThrough: bool,
 	// Bodies touched by the last move (internal; for collision events)
 	touching: [dynamic]^PhysicsBody,
 }
@@ -187,6 +189,10 @@ CollisionShape :: struct {
 	points: [dynamic][2]f32,
 	// Left out of its body
 	disabled: bool,
+	// A one-way platform: only its top surface stops bodies and movers coming down onto it; from
+	// below or the side they pass through (`CharacterMover.dropThrough` falls through it).
+	// Change it in code with `PhysicsBody_RebuildShapes`
+	oneWay: bool,
 	// The Box2D shape (internal)
 	shapeId: b2.ShapeId,
 }

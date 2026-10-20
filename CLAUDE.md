@@ -102,13 +102,14 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `save.odin` | **Saves**: `Save_Game` / `Load_Game` / `Save_Exists` / `Save_Delete`: every global's fields as JSON (`save:"-"` skips one); desktop files in SDL's pref path, web localStorage; `--dev` runs save apart |
 | `assets.odin` | **Typed asset handles**: `TextureAsset`, `SoundAsset`, `FontAsset`, `DataAsset`, `ComponentAsset`; `Asset_Texture` / `Asset_Sound` / `Asset_Font`, `Game_PlaySound` (handle or path) |
 | `globals_test.odin` | Tests: globals' lifecycle and reset per run, data resources, saves (nested structs, arrays, maps, enums, `save:"-"`, older saves) |
-| `physics.odin` | **Physics world** (Box2D, one per scene): settings and units, `Physics_Sync` / `Physics_Update` (fixed steps, pose sync, ray casts), `Physics_RayCast`, `CharacterMover_Move` |
+| `physics.odin` | **Physics world** (Box2D, one per scene): settings and units, `Physics_Sync` / `Physics_Update` (fixed steps, pose sync, ray casts), `Physics_RayCast`, queries (`Physics_QueryPoint` / `QueryRect` / `QueryCircle`, `Physics_ShapeCast`), one-way platforms, `CharacterMover_Move` |
 | `physics_events.odin` | Contact and Area events per body pair (counted over shape pairs), `PhysicsBody_GetAreas` / `IsInArea` / `GetContacts` / `IsTouching`, exits when a body is removed, the world's shape table |
 | `physics_joints.odin` | `Joint` nodes: Revolute, Distance, Prismatic, Weld, Wheel (anchor = the node; body A = its body or the world; body B by name), limits, motors, springs |
 | `physics_debug.odin` | **Smoothing** (`Node_GetRenderLocalTransform` / `Node_GetRenderWorldTransform`) and debug drawing (`Physics_DrawDebug`, `Physics_SetDebugDraw`) |
 | `physics_nodes.odin` | Physics nodes: `PhysicsBody` (layers, surface, `onCollisionEnter/Exit`), `StaticBody`, `DynamicBody` (+ velocity, impulse, force), `CharacterMover`, `Area` (+ `Area_GetOverlaps`), `CollisionShape`, `RayCast`, `Collision` |
 | `box2d/` | Box2D 3.1.1 bindings: a copy of Odin's `vendor:box2d` linking our own `box2d/lib/` (why: its doc comment). `lib/` is built, not committed |
 | `third_party/box2d`, `tools/build_box2d.sh` | Box2D's sources (submodule) and the script that compiles them (no CMake) |
+| `physics3_test.odin` | Tests: point / rect / circle queries (masks, Areas), shape casts; one-way platforms with movers (up through, landing, dropping through, from the side) and dynamic bodies; `oneWay` in scene files |
 | `physics_test.odin`, `physics2_test.odin` | Tests: falling and landing, events, layers, Areas, ray casts, the mover (landing, walls, pushing), shapes with baked transforms, removal, scene files, debug drawing; smoothing at 144 fps, areas seen from bodies, one event per body pair, exits on removal, every joint kind |
 | `lifecycle_test.odin` | Tests: nodes made, added (twice, late, during onEnter), found, removed (queued, parent and child together, twice, unknown, by exit handlers); scene destroy order and ownership; the camera's removal; cross-scene parenting refused; Scene_Clear; listeners changing during notify; Timer, Ticker; game switch and teardown |
 | `core_test.odin` | Tests: visibility in the tree, screen positions (camera, screen layers), drawing through a view (layer order, screen layers, position-only nodes, draw state reset), game scaling and window-to-game coordinates on a software renderer, the application's game swap |
@@ -295,6 +296,12 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
   hits only when touching, while the sweep stops just short. So the contacts (floor flags,
   velocity clipping, events) come from one more `CollideMover` with the capsule `MOVER_SKIN` px
   bigger, and the velocity is clipped by hand: `b2ClipVector` skips planes with `push == 0`.
+- **One-way platforms** (`CollisionShape.oneWay`): dynamic bodies through Box2D's pre-solve
+  (the shape has `enablePreSolveEvents`; the contact is dropped unless its normal points up from
+  the platform); movers in `CharacterMover_Move`: their planes ignore one-way shapes unless the
+  mover is coming down (`velocity.y >= 0`, not `dropThrough`) onto their top, and the sweep is
+  our own `World_CastShape` (`castMover`), since `World_CastMover` takes no callback to skip
+  them. It ignores shapes it starts in, like `World_CastMover`, but can't encroach.
 - Box2D makes no contacts between kinematic and static bodies: mover collision events come from
   its move's contact planes (`moverContacts`).
 - **Events are per body pair**: each body counts its contacts per other body (`contacts`, and

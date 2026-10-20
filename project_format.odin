@@ -111,9 +111,9 @@ Current limits:
   sound nodes (and from code on first use); Font assets are listed but not used.
 
 Version history:
-- 13: every node's `processMode`, `blendMode`, `zIndex`, `ySort` and `groups`; the project's
-  window: `fullscreen`, `vsync` (default true), `highDPI`. Version 12 files are valid version 13
-  files.
+- 13: every node's `processMode`, `blendMode`, `zIndex`, `ySort` and `groups`; CollisionShape
+  `oneWay`; the project's window: `fullscreen`, `vsync` (default true), `highDPI`. Version 12
+  files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
 - 11: the project's `renderer`. Version 10 files are valid version 11 files.
@@ -313,12 +313,14 @@ SceneNodeData :: struct {
 	// CharacterMover: the steepest floor, degrees
 	floorMaxAngle: f32,
 	// CollisionShape: `shape`; Rectangle `width` and `height`; Circle `radius`; Capsule `radius`
-	// and `height` (overall); Polygon and Segment `points="x,y x,y ..."`; `disabled`
+	// and `height` (overall); Polygon and Segment `points="x,y x,y ..."`; `disabled`; `oneWay`
+	// (format 13: only its top stops what comes down on it)
 	shape: CollisionShapeKind,
 	shapeSize: [2]f32,
 	radius: f32,
 	points: [dynamic][2]f32,
 	disabled: bool,
+	oneWay: bool,
 	// RayCast: `targetX`, `targetY` (relative to the node), `enabled`, `excludeParent`
 	// (collisionMask is the layers it hits)
 	target: [2]f32,
@@ -891,6 +893,7 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		append(&node.points, ..points)
 	}
 	node.disabled = attrBool(doc, element, "disabled", false)
+	node.oneWay = attrBool(doc, element, "oneWay", false)
 	node.target = {attrF32(doc, element, "targetX", DEFAULT_SCENE_NODE.target.x), attrF32(doc, element, "targetY", DEFAULT_SCENE_NODE.target.y)}
 	node.enabled = attrBool(doc, element, "enabled", true)
 	node.excludeParent = attrBool(doc, element, "excludeParent", true)

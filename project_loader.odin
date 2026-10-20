@@ -292,6 +292,7 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			shape.radius = node.radius
 			shape.height = node.shapeSize.y
 			shape.disabled = node.disabled
+			shape.oneWay = node.oneWay
 			append(&shape.points, ..node.points[:])
 			n = shape
 		case .RayCast:
