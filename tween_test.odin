@@ -39,8 +39,8 @@ tweens_animate_in_sequence_and_in_parallel :: proc(t: ^testing.T) {
 	testing.expect_value(t, calls, 1)
 	testing.expect_value(t, node.tint.a, u8(255 - 16))
 	step(scene, 1)
-	testing.expect(t, node.tint.a == 0 && !Tween_IsRunning(tween), "faded, finished")
-	testing.expect_value(t, len(scene.tweens), 0) // freed
+	// Finished, so freed by that update: `tween` can't be asked any more
+	testing.expect(t, node.tint.a == 0 && len(scene.tweens) == 0, "faded, finished")
 	free_all(context.temp_allocator)
 }
 
@@ -58,7 +58,8 @@ tweens_loop_start_from_given_values_and_carry_time :: proc(t: ^testing.T) {
 	// Time past the end carries into the next play
 	testing.expect(t, near(node.position.y, 5), "half way through the second play")
 	Scene_UpdateTweens(scene, 1)
-	testing.expect(t, !Tween_IsRunning(tween) && near(node.position.y, 10), "done after two")
+	// Finished, so freed by that update: `tween` can't be asked any more
+	testing.expect(t, len(scene.tweens) == 0 && near(node.position.y, 10), "done after two")
 	// Forever, until killed
 	forever := Tween_Create(node)
 	Tween_FromTo(forever, &node.rotation, 0, 10, 0.1)

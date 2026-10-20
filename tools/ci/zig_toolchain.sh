@@ -7,7 +7,7 @@
 # Installs zig (ZIG_VERSION) and writes three wrappers into <folder>/bin, calling `zig cc` /
 # `zig c++` with -target x86_64-linux-gnu.$GLIBC:
 #   clang    what Odin links with (it calls clang from PATH); archives given as -l:<path> are
-#            passed as files, which zig wants
+#            passed as files, which zig wants; the system's library folders searched last
 #   zcc, zc++ C and C++ compilers for CMake (tools/build_sdl_static.sh: CC, CXX)
 # On GitHub Actions the folder goes first in PATH and CC / CXX are set for the following steps;
 # elsewhere it prints what to set. Build the static SDL and Box2D after it (with it), then games.
@@ -30,6 +30,8 @@ if [[ ! -x "$zig" ]]; then
 	rm "$root/zig.tar.xz"
 fi
 target="$arch-linux-gnu.$GLIBC"
+syslib=""
+for d in /usr/lib/$arch-linux-gnu /usr/lib64 /usr/lib; do [[ -d "$d" ]] && syslib+=" -L$d"; done
 mkdir -p "$root/bin"
 cat > "$root/bin/clang" <<WRAP
 #!/usr/bin/env bash
@@ -41,7 +43,9 @@ for a in "\$@"; do
 	*) args+=("\$a") ;;
 	esac
 done
-exec "$zig" cc -target $target "\${args[@]}"
+# The system's libraries last (zig searches none for a glibc target): X11 and the like are
+# linked by name only, so their glibc doesn't matter
+exec "$zig" cc -target $target "\${args[@]}" $syslib
 WRAP
 printf '#!/bin/sh\nexec "%s" cc -target %s "$@"\n' "$zig" "$target" > "$root/bin/zcc"
 printf '#!/bin/sh\nexec "%s" c++ -target %s "$@"\n' "$zig" "$target" > "$root/bin/zc++"
