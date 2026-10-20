@@ -2,7 +2,9 @@ package crossfire
 
 import "core:fmt"
 import "core:log"
+import "core:strconv"
 import "core:strings"
+import sdl "vendor:sdl3"
 
 /*
 The game player: runs a project saved by the editor.
@@ -15,6 +17,7 @@ The game player: runs a project saved by the editor.
 	player ... --dev                          developer keys (the editor's Play): F9 shows / hides shapes, F10 the debug overlay
 	player ... --renderer <name>              draw with this renderer (vulkan, opengl, software, ...),
 	                                          whatever the project says
+	player ... --quit-after <seconds>         quit after that long (smoke tests of exported games)
 	player --describe-scripts                 print the registered scripts as JSON, and exit
 
 `Player_Run` is the whole program. The engine's own `player/` package calls it with no game code;
@@ -110,9 +113,22 @@ Player_Setup :: proc(options: PlayerOptions, app: ^Application) -> bool {
 	game.scaleMode = playerProject.scaleMode
 	if options.physicsDebug do playerProject.physics.debugDraw = true
 	game.devKeys = options.dev
+	quitAfter = options.quitAfter
 	game.build = proc(game: ^Game) {
 		if !Game_LoadProject(game, &playerProject, projectDir) {
 			log.warn("Some scenes failed to load")
+		}
+		// --quit-after: the game's frames count down to a normal quit (set here: Game_Init, which
+		// runs build, sets `update` first)
+		if quitAfter > 0 {
+			game.update = proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
+				Game_Update(game, events, deltaTime)
+				quitAfter -= deltaTime
+				if quitAfter <= 0 {
+					log.info("Quitting (--quit-after)")
+					game.shouldQuit = true
+				}
+			}
 		}
 	}
 	App_SetGame(app, game)
@@ -124,6 +140,9 @@ Player_Setup :: proc(options: PlayerOptions, app: ^Application) -> bool {
 playerProject: ProjectData
 @(private="file")
 projectDir: string
+// Seconds left before --quit-after quits (0: no limit)
+@(private="file")
+quitAfter: f64
 
 
 // What the player was asked to do (`Player_ParseArgs`)
@@ -142,12 +161,16 @@ PlayerOptions :: struct {
 	folderGiven: bool,
 	// `--renderer <name>`: draw with this one, whatever the project says ("" for the project's)
 	renderer: string,
+	// `--quit-after <seconds>`: quit once the game has run that long (0: run until it quits);
+	// CI starts exported games with it to check they start and stop cleanly
+	quitAfter: f64,
 }
 
 /*
 Where an exported game's project is: the data pack at the end of the program (a single-file
 export: `PACK_ROOT`), else the `data` folder next to the program (how the editor's
-desktop exports lay a game out), or the program's own folder, or else the current folder. Asset
+desktop exports lay a game out), or the program's own folder, or a macOS app's
+`Contents/Resources/data` (the program is in `Contents/MacOS`), or else the current folder. Asset
 paths are relative to it, so the game runs from wherever it's started.
 
 Returns:
@@ -158,7 +181,8 @@ Player_FindExportedProject :: proc() -> string {
 	if Pack_Open() && Pack_Has(JoinPath(PACK_ROOT, "project.xml")) do return PACK_ROOT
 	exeDir, ok := Platform_ExecutableDir()
 	if ok {
-		for candidate in ([]string{"data", "."}) {
+		// data/ beside it (desktop exports), its own folder, or a macOS app's Contents/Resources/data
+		for candidate in ([]string{"data", ".", "../Resources/data"}) {
 			dir := JoinPath(exeDir, candidate)
 			if Platform_FileExists(JoinPath(dir, "project.xml")) do return dir
 		}
@@ -199,6 +223,12 @@ Player_ParseArgs :: proc(args: []string) -> (PlayerOptions, bool) {
 		case "--renderer":
 			if i + 1 >= len(args) do return options, false
 			options.renderer = args[i + 1]
+			i += 1
+		case "--quit-after":
+			if i + 1 >= len(args) do return options, false
+			seconds, ok := strconv.parse_f64(args[i + 1])
+			if !ok || seconds <= 0 do return options, false
+			options.quitAfter = seconds
 			i += 1
 		case:
 			if options.folderGiven do return options, false
