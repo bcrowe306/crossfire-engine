@@ -4,6 +4,7 @@ import "core:c"
 import "core:log"
 import "core:math"
 import "core:mem"
+import "core:slice"
 import "core:strings"
 import sdl "vendor:sdl3"
 
@@ -451,10 +452,12 @@ cloneSettings :: proc(settings: LDtkLevelSettings, allocator: mem.Allocator) -> 
 }
 
 /*
-Points a built LDtkLevel node at a reloaded project (LDtk_WatchFiles): each level view at its
-level (by iid), each tile layer and entity group at its layer (by identifier), new tilesets and
-backgrounds loaded, the collision body made again. Layers and levels the new file doesn't have
-keep the old data (alive in the retired project).
+Points a built LDtkLevel node at a reloaded project (LDtk_WatchFiles), in place: each level view
+at its level (by iid), its layers matched by identifier (updated; layers the file gained are
+made and those it lost removed, in LDtk's order again), new tilesets and backgrounds loaded, the
+collision body made again. Entities are matched by iid: new ones are spawned, deleted ones
+removed, and the others keep running where they are (scripts keep their nodes). Levels the new
+file doesn't have keep the old data (alive in the retired project).
 */
 @(private="file")
 reloadLevelNode :: proc(root: ^LDtkLevelNode, project: ^LDtkProject) {
@@ -467,39 +470,73 @@ reloadLevelNode :: proc(root: ^LDtkLevelNode, project: ^LDtkProject) {
 		view.level = level
 		view.background = nil
 		if root.settings.background && level.background.path != "" do view.background = rm->loadTexture(level.background.path)
-		for child in view.children {
-			if child.name == "Collision" && Node_Is(child, StaticBody) {
-				Scene_RemoveNode(scene, child.id)
-				continue
-			}
-			if Node_Is(child, LDtkEntityLayer) {
-				group := cast(^LDtkEntityLayer)child
-				if l := LDtk_FindLayer(level, group.data.identifier); l != nil do group.data = l
-				continue
-			}
-			if !Node_Is(child, LDtkTileLayer) do continue
-			tiles := cast(^LDtkTileLayer)child
-			l := LDtk_FindLayer(level, tiles.data.identifier)
-			if l == nil do continue
-			tiles.data = l
-			tiles.position = l.offset
-			tiles.visible = l.visible
-			if len(l.tiles) > 0 && l.tilesetPath != "" {
-				tiles.texture = rm->loadTexture(l.tilesetPath)
-				if tiles.texture != nil do sdl.SetTextureScaleMode(tiles.texture, root.settings.smoothTiles ? .LINEAR : .NEAREST)
-				if tileset := LDtk_FindTileset(project, l.tileset); tileset != nil && tileset.gridSize > 0 do tiles.tileSize = f32(tileset.gridSize)
-			}
-			if tiles.colors != nil {
-				clear(&tiles.colors)
-				if def := LDtk_FindLayerDef(project, l.identifier); def != nil do for v in def.intGridValues do tiles.colors[v.value] = v.color
+		for &s in root.spawned do if s.level != nil && s.level.iid == level.iid do s.level = level
+
+		// The layers in LDtk's order (back to front), reusing the nodes there are
+		ordered := make([dynamic]^Node, context.temp_allocator)
+		#reverse for &l in level.layers {
+			switch l.type {
+			case .Entities:
+				group: ^LDtkEntityLayer
+				for child in view.children do if Node_Is(child, LDtkEntityLayer) && (cast(^LDtkEntityLayer)child).data.identifier == l.identifier do group = cast(^LDtkEntityLayer)child
+				if group == nil {
+					group = makeEntityLayer(root, view, &l)
+				} else {
+					group.data = &l
+					group.position = l.offset
+					group.visible = l.visible
+				}
+				if root.settings.spawnEntities do reloadEntities(root, group, level, &l)
+				append(&ordered, group)
+			case .IntGrid, .Tiles, .AutoLayer:
+				if len(l.tiles) == 0 && len(l.intGrid) == 0 do continue
+				tiles: ^LDtkTileLayer
+				for child in view.children do if Node_Is(child, LDtkTileLayer) && (cast(^LDtkTileLayer)child).data.identifier == l.identifier do tiles = cast(^LDtkTileLayer)child
+				if tiles == nil do tiles = makeTileLayer(root, view, &l)
+				else do updateTileLayer(root, tiles, &l)
+				append(&ordered, tiles)
 			}
 		}
+		// Layers the file doesn't have any more go; the collision body is made again
+		others := make([dynamic]^Node, context.temp_allocator)
+		for child in view.children {
+			isLayer := Node_Is(child, LDtkTileLayer) || Node_Is(child, LDtkEntityLayer)
+			if isLayer && !slice.contains(ordered[:], child) do Scene_RemoveNode(scene, child.id)
+			if child.name == "Collision" && Node_Is(child, StaticBody) do Scene_RemoveNode(scene, child.id)
+			if !isLayer || !slice.contains(ordered[:], child) do append(&others, child)
+		}
+		// Draw order is child order: the layers as LDtk has them, then the rest (going ones too:
+		// their removal takes them out)
+		clear(&view.children)
+		append(&view.children, ..ordered[:])
+		append(&view.children, ..others[:])
 		if root.settings.collisionLayer != "" {
 			if l := LDtk_FindLayer(level, root.settings.collisionLayer); l != nil && len(l.intGrid) > 0 {
 				buildCollision(view, l, root.settings.collisionValues[:], root.collision)
 			}
 		}
 	}
+}
+
+/*
+A reloaded entity layer's entities, matched by iid against what was spawned in it: new ones
+spawned, deleted ones removed, the rest pointed at their new data (their nodes keep running).
+*/
+@(private="file")
+reloadEntities :: proc(root: ^LDtkLevelNode, group: ^LDtkEntityLayer, level: ^LDtkLevel, layer: ^LDtkLayer) {
+	spawnedHere := make(map[string]int, context.temp_allocator)
+	for s, i in root.spawned do if s.node.parent == group && s.entity != nil do spawnedHere[s.entity.iid] = i
+	kept := make(map[string]bool, context.temp_allocator)
+	for &entity in layer.entities {
+		kept[entity.iid] = true
+		if i, found := spawnedHere[entity.iid]; found {
+			root.spawned[i].entity = &entity
+			continue
+		}
+		// Scripts attach as when the level was built (`parallax` is set exactly when they did)
+		spawnEntity(root, group, level, layer, &entity, &root.settings, root.scene.game.projectDir, root.parallax, 1)
+	}
+	for iid, i in spawnedHere do if !kept[iid] do Scene_RemoveNode(root.scene, root.spawned[i].node.id)
 }
 
 // Entity spawners by identifier (LDtk_RegisterEntity)
@@ -582,40 +619,13 @@ buildLevel :: proc(root: ^LDtkLevelNode, level: ^LDtkLevel, position: [2]f32, da
 	#reverse for &l in level.layers {
 		switch l.type {
 		case .Entities:
-			group := CreateNode(scene, LDtkEntityLayer)
-			group.name = strings.clone(l.identifier, Node_GetAllocator(group))
-			group.position = l.offset
-			group.layer = layer
-			group.visible = l.visible
-			group.data = &l
-			if root.parallax && l.parallax != {} do group.update = ldtkEntityLayerUpdate
-			Node_AddChild(view, group)
+			group := makeEntityLayer(root, view, &l)
 			if settings.spawnEntities {
 				for &entity in l.entities do spawnEntity(root, group, level, &l, &entity, settings, projectDir, attachScripts, depth)
 			}
 		case .IntGrid, .Tiles, .AutoLayer:
 			if len(l.tiles) == 0 && len(l.intGrid) == 0 do continue
-			tiles := CreateNode(scene, LDtkTileLayer)
-			tiles.name = strings.clone(l.identifier, Node_GetAllocator(tiles))
-			tiles.position = l.offset
-			tiles.layer = layer
-			tiles.visible = l.visible
-			tiles.data = &l
-			tiles.draw = ldtkTileLayerDraw
-			tiles.getBounds = ldtkTileLayerBounds
-			tiles.tileSize = f32(l.gridSize)
-			tiles.parallax = root.parallax && l.parallax != {}
-			if len(l.tiles) > 0 && l.tilesetPath != "" {
-				tiles.texture = rm->loadTexture(l.tilesetPath)
-				if tiles.texture != nil do sdl.SetTextureScaleMode(tiles.texture, settings.smoothTiles ? .LINEAR : .NEAREST)
-				if tileset := LDtk_FindTileset(root.project, l.tileset); tileset != nil && tileset.gridSize > 0 do tiles.tileSize = f32(tileset.gridSize)
-			} else if len(l.intGrid) > 0 {
-				tiles.colors = make(map[int]sdl.Color, Node_GetAllocator(tiles))
-				if def := LDtk_FindLayerDef(root.project, l.identifier); def != nil {
-					for v in def.intGridValues do tiles.colors[v.value] = v.color
-				}
-			}
-			Node_AddChild(view, tiles)
+			makeTileLayer(root, view, &l)
 		}
 	}
 
@@ -625,6 +635,54 @@ buildLevel :: proc(root: ^LDtkLevelNode, level: ^LDtkLevel, position: [2]f32, da
 		} else if l == nil {
 			log.warnf("LDtk: level %s has no layer '%s' for collision", level.identifier, settings.collisionLayer)
 		}
+	}
+}
+
+// An entity layer's group node under a level view (buildLevel, reloadLevelNode)
+@(private="file")
+makeEntityLayer :: proc(root: ^LDtkLevelNode, view: ^LDtkLevelView, l: ^LDtkLayer) -> ^LDtkEntityLayer {
+	group := CreateNode(root.scene, LDtkEntityLayer)
+	group.name = strings.clone(l.identifier, Node_GetAllocator(group))
+	group.position = l.offset
+	group.layer = view.layer
+	group.visible = l.visible
+	group.data = l
+	if root.parallax && l.parallax != {} do group.update = ldtkEntityLayerUpdate
+	Node_AddChild(view, group)
+	return group
+}
+
+// A tile (or IntGrid) layer's node under a level view (buildLevel, reloadLevelNode)
+@(private="file")
+makeTileLayer :: proc(root: ^LDtkLevelNode, view: ^LDtkLevelView, l: ^LDtkLayer) -> ^LDtkTileLayer {
+	tiles := CreateNode(root.scene, LDtkTileLayer)
+	tiles.name = strings.clone(l.identifier, Node_GetAllocator(tiles))
+	tiles.layer = view.layer
+	tiles.draw = ldtkTileLayerDraw
+	tiles.getBounds = ldtkTileLayerBounds
+	tiles.parallax = root.parallax && l.parallax != {}
+	if len(l.intGrid) > 0 && (len(l.tiles) == 0 || l.tilesetPath == "") do tiles.colors = make(map[int]sdl.Color, Node_GetAllocator(tiles))
+	updateTileLayer(root, tiles, l)
+	Node_AddChild(view, tiles)
+	return tiles
+}
+
+// Points a tile layer node at its layer's data: position, visibility, tileset, colors
+@(private="file")
+updateTileLayer :: proc(root: ^LDtkLevelNode, tiles: ^LDtkTileLayer, l: ^LDtkLayer) {
+	rm := &root.scene.game.resourceManager
+	tiles.data = l
+	tiles.position = l.offset
+	tiles.visible = l.visible
+	tiles.tileSize = f32(l.gridSize)
+	if len(l.tiles) > 0 && l.tilesetPath != "" {
+		tiles.texture = rm->loadTexture(l.tilesetPath)
+		if tiles.texture != nil do sdl.SetTextureScaleMode(tiles.texture, root.settings.smoothTiles ? .LINEAR : .NEAREST)
+		if tileset := LDtk_FindTileset(root.project, l.tileset); tileset != nil && tileset.gridSize > 0 do tiles.tileSize = f32(tileset.gridSize)
+	}
+	if tiles.colors != nil {
+		clear(&tiles.colors)
+		if def := LDtk_FindLayerDef(root.project, l.identifier); def != nil do for v in def.intGridValues do tiles.colors[v.value] = v.color
 	}
 }
 

@@ -381,5 +381,35 @@ ldtk_reloads_while_playing :: proc(t: ^testing.T) {
 	after := LDtk_FindEntityNodes(level, "Coin")
 	testing.expect(t, len(after) == 1 && after[0] == coin, "the coin is the same node")
 	testing.expect(t, LDtk_EntityOf(coin) != nil && LDtk_EntityOf(coin).iid == "c1", "its data (the replaced project's) still there")
+	lever := LDtk_FindEntityNodes(level, "Lever")
+	testing.expect_value(t, len(lever), 1)
+
+	// Saved again: the lever is deleted and another placed (a new iid), and a layer is added at
+	// the back. The coin keeps running; the lever's node goes, a new one comes; the new layer is
+	// drawn first (LDtk's order: last listed, at the back)
+	time.sleep(20 * time.Millisecond)
+	BACK :: `{"__identifier": "Back", "__type": "IntGrid", "__cWid": 4, "__cHei": 3, "__gridSize": 16, "__opacity": 1, "__pxTotalOffsetX": 0, "__pxTotalOffsetY": 0, "__tilesetDefUid": null, "__tilesetRelPath": null, "iid": "l9", "visible": true, "intGridCsv": [1,0,0,0, 0,0,0,0, 0,0,0,0], "gridTiles": [], "autoLayerTiles": [], "entityInstances": []}`
+	again, _ := strings.replace(changed, `"iid": "lever1"`, `"iid": "lever2"`, 1, context.temp_allocator)
+	walled := `"intGridCsv": [1,1,0,0, 0,1,0,2, 1,1,1,1], "gridTiles": [], "autoLayerTiles": [], "entityInstances": []}`
+	again, _ = strings.replace(again, walled, strings.concatenate({walled, ", ", BACK}, context.temp_allocator), 1, context.temp_allocator)
+	_ = os.write_entire_file(filepath.join({dir, "game.ldtk"}, context.temp_allocator) or_else "", again)
+	LDtk_WatchFiles(&game, 1)
+	Scene_ProcessQueues(scene)
+	levers := LDtk_FindEntityNodes(level, "Lever")
+	testing.expect(t, len(levers) == 1 && levers[0] != lever[0] && LDtk_EntityOf(levers[0]).iid == "lever2", "the lever's node replaced")
+	testing.expect(t, len(LDtk_FindEntityNodes(level, "Coin")) == 1 && LDtk_FindEntityNodes(level, "Coin")[0] == coin, "the coin kept")
+	view := level.views[0]
+	names := make([dynamic]string, context.temp_allocator)
+	for child in view.children do append(&names, child.name)
+	testing.expectf(t, len(names) >= 3 && names[0] == "Back" && names[1] == "Walls" && names[2] == "Things", "layers in LDtk's order: %v", names[:])
+	testing.expect(t, Scene_FindNode(scene, "Level/Level_0/Collision") != nil, "collision still there")
+
+	// The layer deleted again: its node goes
+	time.sleep(20 * time.Millisecond)
+	_ = os.write_entire_file(filepath.join({dir, "game.ldtk"}, context.temp_allocator) or_else "", changed)
+	LDtk_WatchFiles(&game, 1)
+	Scene_ProcessQueues(scene)
+	testing.expect(t, Scene_FindNode(scene, "Level/Level_0/Back") == nil, "the removed layer's node is gone")
+	testing.expect(t, Scene_FindNode(scene, "Level/Level_0/Walls") != nil && len(LDtk_FindEntityNodes(level, "Lever")) == 1, "the rest stays")
 	free_all(context.temp_allocator)
 }

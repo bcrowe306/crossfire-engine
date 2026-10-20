@@ -425,8 +425,12 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
 - **Hot reload** (`LDtk_WatchFiles`, dev runs only, from Game_Update): reloaded projects replace
   the game's; the old ones are kept to the end (`Game.ldtkRetired`: entity nodes point into
   them). Built nodes are updated in place, not rebuilt: tile layers, colors, backgrounds and the
-  collision body; entities keep running, so scripts' pointers stay valid. A node keeps its
-  settings (`LDtkLevelNode.settings`, `collision`) to do it.
+  collision body. **Layers** are matched by identifier: new ones are made (`makeTileLayer`,
+  `makeEntityLayer`, shared with `buildLevel`), lost ones removed, and the view's children put
+  back in LDtk's order (draw order). **Entities** are matched by iid (`reloadEntities`): new ones
+  spawn (with scripts in games), deleted ones are removed (scripts drop pointers in `destroy`),
+  the rest keep running where they are, pointed at their new data. A node keeps its settings
+  (`LDtkLevelNode.settings`, `collision`) to do it. ldtk_reloads_while_playing tests it.
 - Checked against all 14 of LDtk's sample projects (parsed; the platformer rendered: the same
   picture as LDtk's), not committed: their art has its own licenses.
 
