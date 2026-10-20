@@ -7,6 +7,21 @@
 #
 # Usage: tools/ci/package_player.sh <platform> <version>   (after tools/ci/setup.sh)
 set -euo pipefail
+
+# Built with zig for an old glibc (tools/ci/zig_toolchain.sh sets GLIBC_MAX): no program may need
+# a newer one
+glibc_check() { # <program>...
+	[[ -n "${GLIBC_MAX:-}" ]] || return 0
+	for program in "$@"; do
+		newest=$(objdump -T "$program" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)
+		if [[ -n "$newest" ]] && [[ "$(printf '%s\n%s\n' "$newest" "$GLIBC_MAX" | sort -V | tail -1)" != "$GLIBC_MAX" ]]; then
+			echo "$program needs GLIBC $newest, newer than $GLIBC_MAX" >&2
+			exit 1
+		fi
+		echo "$program: GLIBC $newest at most"
+	done
+}
+
 platform=$1
 version=$2
 engine=$(cd "$(dirname "$0")/../.." && pwd)
@@ -66,11 +81,12 @@ elif $static && command -v ldd > /dev/null; then
 	echo "The player has SDL inside it:"
 	ldd "$program"
 fi
+[[ "$(uname -s)" == Linux ]] && glibc_check "$stage/player"
 
 cat > "$stage/README.txt" <<TXT
 Crossfire Engine player $version ($platform)
 
-Runs a project saved by odin_sdl_editor:
+Runs a project saved by the Crossfire Editor:
 
     player <project folder>                 from its start scene
     player <project folder> --scene <name>  from another scene

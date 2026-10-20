@@ -44,6 +44,11 @@ jobs:
       - name: Set up Odin and SDL3
         run: tools/ci/setup.sh
 
+      # Linux: built against glibc 2.31 with zig, so releases run on older distributions too
+      - name: zig, for an old glibc
+        if: runner.os == 'Linux'
+        run: tools/ci/zig_toolchain.sh
+
       - name: Build Box2D
         run: tools/build_box2d.sh
 
@@ -51,7 +56,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: sdl/lib
-          key: sdl-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/build_sdl_static.sh', '.gitmodules') }}-3.4.16-3.4.6-3.2.2-3.2.4
+          key: sdl-static-zig-glibc2.31-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/build_sdl_static.sh', '.gitmodules') }}-3.4.16-3.4.6-3.2.2-3.2.4
 
       - name: Build static SDL (games and the editor link it)
         run: |
