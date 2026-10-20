@@ -1,7 +1,9 @@
 package crossfire
 
+import "base:runtime"
 import "core:log"
 import "core:mem"
+import "core:reflect"
 import "core:strings"
 import sdl "vendor:sdl3"
 
@@ -154,7 +156,82 @@ Returns:
   nodes in sync with their own data; the caller owns the slice
 */
 Scene_Build :: proc(scene: ^Scene, data: ^SceneData, projectDir: string, allocator := context.temp_allocator, attachScripts := true) -> []^Node {
+	Scene_ApplySettings(scene, data.settings)
 	return buildNodes(scene, data.nodes[:], projectDir, allocator, attachScripts, 0)
+}
+
+/*
+The engine type a scene file's node kind is built as (`Node2D` is a plain `Node`; a Component
+instance is its component's root, so it has no type of its own: `Node` here).
+*/
+SCENE_NODE_TYPES := [SceneNodeKind]typeid{
+	.Node2D          = Node,
+	.Sprite          = Sprite,
+	.AnimatedSprite  = AnimatedSprite,
+	.Camera          = Camera2D,
+	.Label           = Label,
+	.Menu            = Menu,
+	.StaticBody      = StaticBody,
+	.DynamicBody     = DynamicBody,
+	.CharacterMover  = CharacterMover,
+	.Area            = Area,
+	.CollisionShape  = CollisionShape,
+	.RayCast         = RayCast,
+	.Joint           = Joint,
+	.ParticleEmitter = ParticleEmitter,
+	.Component       = Node,
+	.AudioPlayer     = AudioPlayer,
+	.AudioPlayer2D   = AudioPlayer,
+	.MusicPlayer     = AudioPlayer,
+	.LDtkLevel       = LDtkLevelNode,
+}
+
+/*
+Whether nodes of a kind can go in a script's node field pointing to `typeName` (a node type's
+name without its package, as `ScriptField.hint` gives it): the kind's type is that type, or
+embeds it (`DynamicBody` embeds `PhysicsBody`, every node type embeds `Node`). Editors use it to
+offer the nodes that fit a field.
+
+Inputs:
+- kind: The node kind
+- typeName: The type's name ("Node", "Sprite", "PhysicsBody"...)
+
+Returns:
+- Whether the field accepts the kind's nodes
+
+Example:
+	assert(e.SceneNodeKind_IsType(.DynamicBody, "PhysicsBody"))
+*/
+SceneNodeKind_IsType :: proc(kind: SceneNodeKind, typeName: string) -> bool {
+	id := SCENE_NODE_TYPES[kind]
+	for id != nil {
+		if named, ok := type_info_of(id).variant.(runtime.Type_Info_Named); ok && named.name == typeName do return true
+		if !reflect.is_struct(type_info_of(id)) || len(reflect.struct_field_names(id)) == 0 do return false
+		first := reflect.struct_field_at(id, 0)
+		if !first.is_using do return false
+		id = first.type.id
+	}
+	return false
+}
+
+/*
+Applies a scene file's settings to a scene: its screen layers, and its background color and
+gravity (none: the project's). `Scene_Build` does it.
+
+Inputs:
+- scene: The scene
+- settings: The settings
+*/
+Scene_ApplySettings :: proc(scene: ^Scene, settings: SceneSettings) {
+	scene.screenLayers = settings.screenLayers
+	scene.background = nil
+	if settings.hasBackground do scene.background = settings.background
+	scene.gravity = nil
+	if settings.hasGravity {
+		scene.gravity = settings.gravity
+		// A world made before (by code) changes too
+		if scene.physics != nil do Physics_SetGravity(scene, settings.gravity)
+	}
 }
 
 /*

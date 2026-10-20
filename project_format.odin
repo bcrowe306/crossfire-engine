@@ -113,9 +113,13 @@ Missing attributes use the defaults in `DEFAULT_SCENE_NODE`. Paths are relative 
 folder and use `/`. Colors are `#rrggbb` or `#rrggbbaa`. Booleans are `true` or `1`; any other
 value is false. A number or color that can't be read keeps the default.
 
+A scene's root element can carry its own settings (`SceneSettings`, format 13): `screenLayers`
+(layers drawn without the camera: HUDs, menus), `background` (instead of the project's) and
+`gravityX` / `gravityY` (instead of the project's).
+
 Current limits:
-- A scene's Camera applies to every node in it, including Labels and Menus (scene files can't
-  set `scene.screenLayers` yet).
+- A scene's Camera applies to every node on a layer that isn't one of its `screenLayers`,
+  Labels and Menus included.
 - Labels and Menus follow their position only; their rotation and scale are ignored.
 - Assets aren't preloaded: images load with the nodes that use them, sounds and music with their
   sound nodes (and from code on first use); Font assets are listed but not used.
@@ -125,7 +129,8 @@ Version history:
   `oneWay`; the project's window: `fullscreen`, `vsync` (default true), `highDPI`; assets of
   kind "Translation" (CSV tables: localization.odin), the project's `locale` and `icon`, and the
   editor's `<grid width height majorEvery opacity majorOpacity/>` (`GridSettings`; games ignore
-  it). Version 12 files are valid version 13 files.
+  it); scenes' own settings (`SceneSettings`: `screenLayers`, `background`, `gravityX` /
+  `gravityY` on the root element). Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
 - 11: the project's `renderer`. Version 10 files are valid version 11 files.
@@ -516,6 +521,71 @@ SceneData :: struct {
 	name: string,
 	// Every node, depth-first: a node's children follow it directly (`SceneNodeData.parent`)
 	nodes: [dynamic]SceneNodeData,
+	// The root element's scene-wide settings (format 13)
+	settings: SceneSettings,
+}
+
+/*
+A scene's own settings, from its file's root element (format 13):
+`<scene name="Level" screenLayers="8" background="#203040" gravityX="0" gravityY="490">`.
+`Scene_Build` applies them to the scene. The zero value is a scene without any.
+*/
+SceneSettings :: struct {
+	// Layers drawn in screen space, ignoring the camera (`Scene.screenLayers`): HUDs and menus.
+	// `screenLayers="7 8"` (layer numbers 1-8)
+	screenLayers: bit_set[RenderLayer],
+	// Clear the screen with `background` instead of the project's color (`background="#rrggbb"`)
+	hasBackground: bool,
+	// The scene's background color, when `hasBackground`
+	background: sdl.Color,
+	// Use `gravity` instead of the project's (`gravityX`, `gravityY`)
+	hasGravity: bool,
+	// The scene's gravity in px/s², y down, when `hasGravity`
+	gravity: [2]f32,
+}
+
+/*
+Formats screen layers as scene files store them: layer numbers 1-8 separated by spaces ("" for
+none).
+
+Inputs:
+- layers: The layers
+- allocator: For the text
+
+Returns:
+- The text, e.g. "7 8"
+*/
+FormatScreenLayers :: proc(layers: bit_set[RenderLayer], allocator := context.allocator) -> string {
+	b := strings.builder_make(allocator)
+	for layer in RenderLayer do if layer in layers {
+		if strings.builder_len(b) > 0 do strings.write_byte(&b, ' ')
+		strings.write_int(&b, int(layer) + 1)
+	}
+	return strings.to_string(b)
+}
+
+/*
+Parses screen layers: layer numbers 1-8 separated by spaces or commas ("" = none).
+
+Inputs:
+- text: The text
+
+Returns:
+- The layers, and false if a part wasn't a layer number (the valid ones are kept)
+*/
+ParseScreenLayers :: proc(text: string) -> (bit_set[RenderLayer], bool) {
+	layers: bit_set[RenderLayer]
+	ok := true
+	for part in strings.split_multi(strings.trim_space(text), {" ", ","}, context.temp_allocator) {
+		if part == "" do continue
+		n, valid := strconv.parse_int(part)
+		if !valid || n < 1 || n > len(RenderLayer) {
+			ok = false
+			continue
+		}
+		layers += {RenderLayer(n - 1)}
+	}
+	return layers, ok
 }
 
 // A scene of a project: `<scene name="MenuScene" path="scenes/MenuScene.scene.xml"/>`
@@ -759,6 +829,17 @@ ParseScene :: proc(text: string, allocator := context.allocator) -> (scene: Scen
 	context.allocator = allocator
 	scene.name = cloneAttr(doc, 0, "name", "")
 	scene.nodes = make([dynamic]SceneNodeData)
+	if text, found := xml.find_attribute_val_by_key(doc, 0, "screenLayers"); found do scene.settings.screenLayers, _ = ParseScreenLayers(text)
+	if _, found := xml.find_attribute_val_by_key(doc, 0, "background"); found {
+		scene.settings.hasBackground = true
+		scene.settings.background = attrColor(doc, 0, "background", {0, 0, 0, 255})
+	}
+	_, hasX := xml.find_attribute_val_by_key(doc, 0, "gravityX")
+	_, hasY := xml.find_attribute_val_by_key(doc, 0, "gravityY")
+	if hasX || hasY {
+		scene.settings.hasGravity = true
+		scene.settings.gravity = {attrF32(doc, 0, "gravityX", DEFAULT_PHYSICS.gravity.x), attrF32(doc, 0, "gravityY", DEFAULT_PHYSICS.gravity.y)}
+	}
 	for child in childElements(doc, 0) {
 		if doc.elements[child].ident == "node" do parseNode(doc, child, -1, &scene)
 	}

@@ -163,3 +163,36 @@ parse_project_grid :: proc(t: ^testing.T) {
 	defer ProjectData_Destroy(&plain)
 	testing.expect_value(t, plain.grid, DEFAULT_GRID_SETTINGS)
 }
+
+@(test)
+scene_settings_are_parsed_and_applied :: proc(t: ^testing.T) {
+	data, err := ParseScene(`<scene formatVersion="13" name="Level" screenLayers="7, 8" background="#203040" gravityY="490"/>`)
+	defer SceneData_Destroy(&data)
+	testing.expect_value(t, err, ProjectError.None)
+	testing.expect_value(t, data.settings, SceneSettings{
+		screenLayers = {.Layer7, .Layer8},
+		hasBackground = true, background = {0x20, 0x30, 0x40, 255},
+		hasGravity = true, gravity = {DEFAULT_PHYSICS.gravity.x, 490},
+	})
+	testing.expect_value(t, FormatScreenLayers({.Layer1, .Layer8}, context.temp_allocator), "1 8")
+	layers, ok := ParseScreenLayers("2 nine 3")
+	testing.expect(t, !ok && layers == {.Layer2, .Layer3}, "bad parts are reported, good ones kept")
+
+	// Applied by Scene_Build: screen layers, background, gravity for the world made later
+	scene := new(Scene)
+	Scene_Init(scene)
+	defer { Scene_Destroy(scene); free(scene) }
+	_ = Scene_Build(scene, &data, "")
+	testing.expect_value(t, scene.screenLayers, bit_set[RenderLayer]{.Layer7, .Layer8})
+	testing.expect_value(t, scene.background.?, sdl.Color{0x20, 0x30, 0x40, 255})
+	testing.expect_value(t, Scene_GetPhysics(scene).settings.gravity, [2]f32{0, 490})
+
+	// Without settings: none (the project's)
+	plain, _ := ParseScene(`<scene formatVersion="13" name="Plain"/>`)
+	defer SceneData_Destroy(&plain)
+	testing.expect_value(t, plain.settings, SceneSettings{})
+	Scene_ApplySettings(scene, plain.settings)
+	_, hasBackground := scene.background.?
+	testing.expect(t, !hasBackground && scene.screenLayers == {}, "cleared")
+	free_all(context.temp_allocator)
+}

@@ -173,7 +173,10 @@ Application_Frame :: proc(app: ^Application) {
 		}
 
 		if game := app.game; game != nil {
-			sdl.SetRenderDrawColor(app.renderer, game.backgroundColor.r, game.backgroundColor.g, game.backgroundColor.b, game.backgroundColor.a)
+			// The playing scene's own background, else the game's
+			clear := game.backgroundColor
+			if game.currentScene != nil do if color, set := game.currentScene.background.?; set do clear = color
+			sdl.SetRenderDrawColor(app.renderer, clear.r, clear.g, clear.b, clear.a)
 			sdl.RenderClear(app.renderer)
 			if game.update != nil {
 				game->update(events[:eventCount], deltaTime)

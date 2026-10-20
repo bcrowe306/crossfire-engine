@@ -259,6 +259,10 @@ after they finish. Time past a group's end carries into the next group and loop.
 - **Camera shake** (`Camera2D_Shake`) is a screen-space offset in `Camera2D_ViewTransform` only:
   the camera node, following and bounds don't see it. Game_Update advances it with the real
   frame time, so it runs through a hitstop.
+- **A scene file's own settings** (`SceneSettings`, its root element's `screenLayers`,
+  `background`, `gravityX` / `gravityY`): `Scene_Build` applies them (`Scene_ApplySettings`) to
+  `Scene.screenLayers`, `Scene.background` (the frame is cleared with it: app.odin) and
+  `Scene.gravity` (used when its physics world is made, or set on one that exists).
 - **Scenes start fresh on every visit:** Game_LoadProject keeps each scene's file
   (`Game.sceneFiles`); entering a scene that has been played before (`Scene.played`) rebuilds it
   from its file (`Game_RebuildScene`: `Scene_Clear`, then `Scene_Build`), and switching to the
@@ -476,8 +480,15 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
   its draw in the same local space, `destroy` in `Node_Destroy`.
 - Exported fields: tagged `export:""`, options `default=`, `min=`, `max=`, `kind=scene` (each runs to
   the next key, so values may contain spaces/commas). Types: f32, f64, int, i32, bool, string,
-  [2]f32, enums, sdl.Color. Values are text in scene files (`Script_SetField`); bad ones fall back
-  to the default with a warning.
+  [2]f32, enums, sdl.Color, asset handles, and pointers to nodes. Values are text in scene files
+  (`Script_SetField`); bad ones fall back to the default with a warning.
+- **Node fields** (`ScriptFieldType.Node`: `^Node` or any type embedding it through its first
+  field, `typeEmbeds`): the value is a path, kept by `Node_AttachScript` (`NodeScript.nodePaths`,
+  node arena) and resolved by `Scene_ReadyScripts` just before `ready` (`Node_FindPath`: relative
+  to the script's node, `..` up, a leading `/` from the top level), checked against the field's
+  type (a `^PhysicsBody` field takes a DynamicBody); missing or wrong: nil and a warning. The
+  catalog's `hint` is the type's name. `SCENE_NODE_TYPES` (each kind's built type) and
+  `SceneNodeKind_IsType` let editors offer the nodes that fit. script_nodes_test.odin.
 - Hooks are stored type-erased (`transmute` of `proc(^T)` to `proc(rawptr)`).
 - One script per node. `Scene_Build(..., attachScripts = false)` is for the editor viewport, where
   scripts don't run.

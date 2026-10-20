@@ -45,6 +45,11 @@ Scene :: struct {
 	camera: ^Camera2D,
 	// Layers drawn in screen space, ignoring `camera`. Put HUDs and menus on these layers
 	screenLayers: bit_set[RenderLayer],
+	// The color the screen is cleared with while it plays (nil: the game's `backgroundColor`)
+	background: Maybe(sdl.Color),
+	// Its physics world's gravity, px/s² (nil: the game's `physics.gravity`). Set before the world
+	// is made; afterwards use `Physics_SetGravity`
+	gravity: Maybe([2]f32),
 	// The physics world (physics.odin), nil until the scene's first physics node is created
 	physics: ^PhysicsWorld,
 	// Don't step the physics (bodies still exist and can be queried). Editors set it: their
@@ -128,6 +133,7 @@ Scene_Clear :: proc(scene: ^Scene) {
 	scene^ = {}
 	Scene_Init(scene)
 	scene.name, scene.game, scene.screenLayers, scene.physicsPaused, scene.played = kept.name, kept.game, kept.screenLayers, kept.physicsPaused, kept.played
+	scene.background, scene.gravity = kept.background, kept.gravity
 	// Procedures a game replaced stay replaced
 	scene.addNode, scene.removeNode, scene.getNode = kept.addNode, kept.removeNode, kept.getNode
 	scene.processQueues, scene.update, scene.draw = kept.processQueues, kept.update, kept.draw
@@ -619,6 +625,67 @@ Scene_FindNode :: proc(scene: ^Scene, path: string) -> ^Node {
 	first, _, rest := strings.partition(path, "/")
 	for list in lists do for node in list do if node.parent == nil && node.name == first do return Node_FindChild(node, rest)
 	return nil
+}
+
+/*
+Finds a node by a path from another, like a file path: child names separated by "/" ("Gun",
+"Arm/Hand"), ".." for the parent and "." for the node itself ("../Camera": a sibling). From a
+top-level node ".." leads to the scene's top level. A path starting with "/" starts at the
+scene's top level instead ("/World/Ship"). Script node fields use it.
+
+Inputs:
+- from: The node the path starts at
+- path: The path ("" gives nil)
+
+Returns:
+- The node, or nil when no node is there
+
+Example:
+	// Given: self: ^e.Script
+	camera := e.Node_FindPath(self.node, "../Camera")
+*/
+Node_FindPath :: proc(from: ^Node, path: string) -> ^Node {
+	path := strings.trim_space(path)
+	if from == nil || path == "" do return nil
+	scene := from.scene
+	// nil with atRoot: the scene's top level, above every top-level node
+	at := from
+	atRoot := false
+	if path[0] == '/' {
+		at, atRoot = nil, true
+		path = path[1:]
+	}
+	rest := path
+	for part in strings.split_iterator(&rest, "/") {
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			if atRoot do return nil
+			at = at.parent
+			atRoot = at == nil
+		case:
+			next: ^Node
+			if atRoot {
+				if scene == nil do return nil
+				for list in ([2][]^Node{scene.nodes[:], scene.addQueue[:]}) {
+					for node in list do if node.parent == nil && node.name == part {
+						next = node
+						break
+					}
+					if next != nil do break
+				}
+			} else {
+				for child in at.children do if child.name == part {
+					next = child
+					break
+				}
+			}
+			if next == nil do return nil
+			at, atRoot = next, false
+		}
+	}
+	return atRoot ? nil : at
 }
 
 /*

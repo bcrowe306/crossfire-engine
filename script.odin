@@ -56,10 +56,23 @@ from an `@(init)` procedure, so linking the package in is enough:
 Exported fields are the ones tagged `export:""`; they show in the editor's inspector and are
 saved in the scene. Supported types: f32, f64, int, i32, bool, string, [2]f32, enums,
 sdl.Color (`#rrggbb`), and the asset handles of assets.odin (`TextureAsset`, `SoundAsset`,
-`FontAsset`, `DataAsset`, `ComponentAsset`, `MusicAsset`). Tag options, space-separated inside
-the quotes: `default=<value>` (else the type's zero value; white for colors, the first value for
-enums), `min=<n>`, `max=<n>`, and `kind=scene` for a string naming a scene (`kind=<DataType>` for a
+`FontAsset`, `DataAsset`, `ComponentAsset`, `MusicAsset`), and pointers to nodes (`^e.Node`,
+`^e.Sprite`, `^e.CharacterMover`...). Tag options, space-separated inside the quotes:
+`default=<value>` (else the type's zero value; white for colors, the first value for enums),
+`min=<n>`, `max=<n>`, and `kind=scene` for a string naming a scene (`kind=<DataType>` for a
 `DataAsset`).
+
+**Node fields** hold a path to another node (`Node_FindPath`: relative to the script's node, as
+`Sword` or `../Camera`; from the scene's root with a leading `/`). Just before `ready` they're
+set to that node, if it's there and of the field's type (or a type that embeds it: a
+`^e.PhysicsBody` field takes a DynamicBody); otherwise they stay nil, with a warning. An empty
+path leaves the field nil. Only node scripts get them (globals and data resources have no node).
+
+	Hero :: struct {
+		using script: e.Script,
+		sword: ^e.Area `export:"default=Sword"`,
+		camera: ^e.Camera2D `export:"default=../Camera"`,
+	}
 
 One script per node. The registry is global (scripts register before `main`).
 */
@@ -162,6 +175,9 @@ ScriptFieldType :: enum {
 	Data,
 	Component,
 	Music,
+	// A pointer to a node (`^e.Sprite`...): the value is a path (`Node_FindPath`), resolved
+	// before `ready`
+	Node,
 }
 
 // An exported field of a script
@@ -180,8 +196,11 @@ ScriptField :: struct {
 	min: Maybe(f64),
 	// The tag's `max=`: numbers above it are lowered to it (nil: no maximum)
 	max: Maybe(f64),
-	// "scene" for a string naming a scene; for a Data field, the data type it holds (`kind=EnemyStats`)
+	// "scene" for a string naming a scene; for a Data field, the data type it holds (`kind=EnemyStats`);
+	// for a Node field, the node type it points to, without its package ("CharacterMover")
 	hint: string,
+	// Node fields: the node type the pointer points to (`Node`, `Sprite`...)
+	nodeType: typeid,
 	// Enum fields: the names, in order
 	enumNames: []string,
 }
@@ -192,6 +211,9 @@ NodeScript :: struct {
 	info: ^ScriptInfo,
 	data: rawptr,
 	ready: bool,
+	// Node fields' paths, by field index ("" for other fields and empty paths), resolved before
+	// `ready`; nil without node fields. In the node's arena
+	nodePaths: []string,
 }
 
 @(private="file")
@@ -309,15 +331,22 @@ Node_AttachScript :: proc(node: ^Node, info: ^ScriptInfo, values: []ScriptPropDa
 	script.node = node
 	script.scene = node.scene
 	script.game = node.scene != nil ? node.scene.game : nil
-	for field in info.fields {
+	nodePaths: []string
+	for field, i in info.fields {
 		value := field.defaultValue
 		for v in values do if v.name == field.name do value = v.value
+		if field.type == .Node {
+			// Resolved before ready (Scene_ReadyScripts): the other nodes may not exist yet
+			if nodePaths == nil do nodePaths = make([]string, len(info.fields), allocator)
+			nodePaths[i] = strings.clone(strings.trim_space(value), allocator)
+			continue
+		}
 		if !Script_SetField(self, field, value, allocator) {
 			log.warnf("%s.%s: can't use '%s'; using the default", info.name, field.name, value)
 			_ = Script_SetField(self, field, field.defaultValue, allocator)
 		}
 	}
-	node.script = {info = info, data = self}
+	node.script = {info = info, data = self, nodePaths = nodePaths}
 	return self
 }
 
@@ -380,6 +409,9 @@ Script_SetField :: proc(self: rawptr, field: ScriptField, text: string, allocato
 	case .String, .Texture, .Sound, .Font, .Data, .Component, .Music:
 		// The handles are a struct holding a path: laid out like a string
 		(cast(^string)at)^ = strings.clone(text, allocator)
+	case .Node:
+		// A path, found when the scene is ready (Node_AttachScript keeps it): nothing to set here
+		(cast(^rawptr)at)^ = nil
 	case .Vector2:
 		v, ok := parseVector2(text)
 		if !ok do return false
@@ -472,8 +504,47 @@ Scene_ReadyScripts :: proc(scene: ^Scene) {
 		s := &node.script
 		if s.info == nil || s.ready do continue
 		s.ready = true
+		if s.nodePaths != nil do resolveNodeFields(node)
 		if s.info.ready != nil do s.info.ready(s.data)
 	}
+}
+
+// Sets a script's node fields to the nodes their paths name (Node_AttachScript kept the paths)
+@(private="file")
+resolveNodeFields :: proc(node: ^Node) {
+	s := &node.script
+	for field, i in s.info.fields {
+		path := s.nodePaths[i]
+		if field.type != .Node || path == "" do continue
+		target := Node_FindPath(node, path)
+		at := cast(^rawptr)(uintptr(s.data) + field.offset)
+		switch {
+		case target == nil:
+			log.warnf("%s.%s: no node at '%s' from %s", s.info.name, field.name, path, node.name)
+		case !typeEmbeds(target.type, field.nodeType):
+			log.warnf("%s.%s: '%s' is a %v, not a %s", s.info.name, field.name, path, target.type, field.hint)
+		case:
+			at^ = target
+		}
+	}
+}
+
+// Whether a node type is `want`, or embeds it through its first field (`using node: Node`...)
+@(private)
+typeEmbeds :: proc(have, want: typeid) -> bool {
+	if have == want do return true
+	if have == nil || !reflect.is_struct(type_info_of(have)) || len(reflect.struct_field_names(have)) == 0 do return false
+	first := reflect.struct_field_at(have, 0)
+	return first.is_using && typeEmbeds(first.type.id, want)
+}
+
+// The node type a pointer field points to, or nil when it isn't a pointer to a node type
+@(private="file")
+pointedNodeType :: proc(id: typeid) -> typeid {
+	pointer, ok := runtime.type_info_base(type_info_of(id)).variant.(runtime.Type_Info_Pointer)
+	if !ok || pointer.elem == nil do return nil
+	elem := pointer.elem.id
+	return typeEmbeds(elem, Node) ? elem : nil
 }
 
 // The exported fields of a script or data type
@@ -501,8 +572,13 @@ exportedFields :: proc(T: typeid) -> []ScriptField {
 		case reflect.is_enum(base):
 			field.type = .Enum
 			field.enumNames = reflect.enum_field_names(f.type.id)
+		case pointedNodeType(f.type.id) != nil:
+			field.type = .Node
+			field.nodeType = pointedNodeType(f.type.id)
+			field.hint = "Node"
+			if named, isNamed := type_info_of(field.nodeType).variant.(runtime.Type_Info_Named); isNamed do field.hint = named.name
 		case:
-			log.warnf("%v.%s: %v can't be exported (use f32, f64, int, i32, bool, string, [2]f32, an enum, sdl.Color or an asset handle)", T, f.name, f.type.id)
+			log.warnf("%v.%s: %v can't be exported (use f32, f64, int, i32, bool, string, [2]f32, an enum, sdl.Color, an asset handle or a node pointer)", T, f.name, f.type.id)
 			continue
 		}
 		for option in tagOptions(options) {
@@ -510,7 +586,7 @@ exportedFields :: proc(T: typeid) -> []ScriptField {
 			case "default": field.defaultValue = option.value
 			case "min": if v, ok := strconv.parse_f64(option.value); ok do field.min = v
 			case "max": if v, ok := strconv.parse_f64(option.value); ok do field.max = v
-			case "kind": field.hint = option.value
+			case "kind": if field.type != .Node do field.hint = option.value
 			}
 		}
 		if field.defaultValue == "" {

@@ -93,6 +93,7 @@ Scene_GetPhysics :: proc(scene: ^Scene) -> ^PhysicsWorld {
 	world := new(PhysicsWorld)
 	world.settings = DEFAULT_PHYSICS
 	if scene.game != nil && scene.game.physics.pixelsPerMeter > 0 do world.settings = scene.game.physics
+	if gravity, set := scene.gravity.?; set do world.settings.gravity = gravity
 	world.bodies = make([dynamic]^PhysicsBody)
 	world.rayCasts = make([dynamic]^RayCast)
 	world.joints = make([dynamic]^Joint)
