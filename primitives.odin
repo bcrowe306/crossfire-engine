@@ -330,11 +330,44 @@ DrawTexture :: proc(
 	sdl.SetTextureColorMod(texture, tint[0], tint[1], tint[2])
 	sdl.SetTextureAlphaMod(texture, tint[3])
 	sdl.SetTextureBlendMode(texture, SDLBlendMode(drawState().blend))
+	// Unturned and unflipped: a plain copy. SDL's software renderer clips it to the screen, while
+	// its rotated copy scales the whole image first (a level background at 3x zoom, about
+	// 9600 x 1440 px, took most of 100 ms a frame)
+	if angle == 0 && flip == .NONE {
+		// And only the part on screen: SDL's software renderer scales the whole source first
+		source := hasSrc ? srcRect : sdl.FRect{0, 0, f32(texture.w), f32(texture.h)}
+		if !clipToScreen(renderer, &source, &dst) do return
+		sdl.RenderTexture(renderer, texture, &source, &dst)
+		return
+	}
 	sdl.RenderTextureRotated(renderer, texture, hasSrc ? &srcRect : nil, &dst, f64(angle), nil, flip)
 }
 
 
 // INTERNAL HELPERS
+
+/*
+Clips a copy (source and destination rectangles) to the renderer's screen (the logical size when
+it has one), keeping the mapping between them. Returns false when nothing of it shows.
+*/
+@(private="file")
+clipToScreen :: proc(renderer: ^sdl.Renderer, src, dst: ^sdl.FRect) -> bool {
+	w, h: i32
+	mode: sdl.RendererLogicalPresentation
+	if !sdl.GetRenderLogicalPresentation(renderer, &w, &h, &mode) || w <= 0 || h <= 0 {
+		if !sdl.GetCurrentRenderOutputSize(renderer, &w, &h) || w <= 0 || h <= 0 do return true
+	}
+	if dst.w <= 0 || dst.h <= 0 do return false
+	x0, y0 := max(dst.x, 0), max(dst.y, 0)
+	x1, y1 := min(dst.x + dst.w, f32(w)), min(dst.y + dst.h, f32(h))
+	if x1 <= x0 || y1 <= y0 do return false
+	if x0 == dst.x && y0 == dst.y && x1 == dst.x + dst.w && y1 == dst.y + dst.h do return true
+	// Source per destination pixel
+	sx, sy := src.w / dst.w, src.h / dst.h
+	src^ = {src.x + (x0 - dst.x) * sx, src.y + (y0 - dst.y) * sy, (x1 - x0) * sx, (y1 - y0) * sy}
+	dst^ = {x0, y0, x1 - x0, y1 - y0}
+	return true
+}
 
 @(private="file")
 ColorToFColor :: proc(color: sdl.Color) -> sdl.FColor {

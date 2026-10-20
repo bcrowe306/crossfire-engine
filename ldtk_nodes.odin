@@ -186,6 +186,11 @@ LDtkTileLayer :: struct {
 	colors: map[int]sdl.Color,
 	// Move with the camera by the layer's parallax factor
 	parallax: bool,
+	// SDL's software renderer: the whole layer drawn once into a texture of its size, then copied
+	// each frame (`ldtkTileLayerDraw`); nil until then, and again after a reload
+	cache: ^sdl.Texture,
+	// The renderer it was made with
+	cacheRenderer: ^sdl.Renderer,
 }
 
 // An entity layer's group: moves with the camera when the layer has a parallax factor
@@ -660,6 +665,7 @@ makeTileLayer :: proc(root: ^LDtkLevelNode, view: ^LDtkLevelView, l: ^LDtkLayer)
 	tiles.layer = view.layer
 	tiles.draw = ldtkTileLayerDraw
 	tiles.getBounds = ldtkTileLayerBounds
+	tiles.destroy = ldtkTileLayerDestroy
 	tiles.parallax = root.parallax && l.parallax != {}
 	if len(l.intGrid) > 0 && (len(l.tiles) == 0 || l.tilesetPath == "") do tiles.colors = make(map[int]sdl.Color, Node_GetAllocator(tiles))
 	updateTileLayer(root, tiles, l)
@@ -671,6 +677,8 @@ makeTileLayer :: proc(root: ^LDtkLevelNode, view: ^LDtkLevelView, l: ^LDtkLayer)
 @(private="file")
 updateTileLayer :: proc(root: ^LDtkLevelNode, tiles: ^LDtkTileLayer, l: ^LDtkLayer) {
 	rm := &root.scene.game.resourceManager
+	// Drawn again from the new data
+	dropTileCache(tiles)
 	tiles.data = l
 	tiles.position = l.offset
 	tiles.visible = l.visible
@@ -924,6 +932,9 @@ ldtkTileLayerDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	lo, hi := visibleBox(renderer, shift, scale)
 
 	cell := tiles.tileSize
+	// SDL's software renderer: the layer drawn once into a texture, then the part that shows
+	// copied each frame (far cheaper than rasterizing every tile's triangles; see below)
+	if tiles.texture != nil && len(l.tiles) > 0 && isSoftwareRenderer(renderer) && drawCachedTiles(tiles, renderer, shift, scale, lo, hi, base) do return
 	if tiles.texture != nil && len(l.tiles) > 0 {
 		// SDL's software renderer (the editor's viewport) turns two triangles sharing an edge into
 		// a scaled rectangle copy of the (RLE-encoded) tileset. After zooming at a corner of the
@@ -988,6 +999,84 @@ ldtkTileLayerDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	if len(vertices) > 0 {
 		sdl.RenderGeometry(renderer, nil, raw_data(vertices), c.int(len(vertices)), raw_data(indices), c.int(len(indices)))
 	}
+}
+
+// The largest layer, in pixels across, drawn through a cache texture (bigger ones draw tile by tile)
+@(private="file")
+LDTK_CACHE_MAX_SIZE :: 8192
+
+/*
+Draws a tile layer from its cache (made the first time): the visible part of the layer, as one
+copy. Only for SDL's software renderer, and only through an unrotated, unmirrored view.
+
+Returns:
+- false when it can't (a rotated or mirrored view, a layer too big, no texture): the caller
+  draws the tiles one by one
+*/
+@(private="file")
+drawCachedTiles :: proc(tiles: ^LDtkTileLayer, renderer: ^sdl.Renderer, shift: [2]f32, scale: f32, lo, hi: [2]f32, color: sdl.FColor) -> bool {
+	t := drawState().transform
+	if !Transform2D_IsAxisAligned(t) || t.x.x <= 0 || t.y.y <= 0 do return false
+	l := tiles.data
+	size := [2]f32{f32(l.cells.x * l.gridSize), f32(l.cells.y * l.gridSize)}
+	if size.x <= 0 || size.y <= 0 || size.x > LDTK_CACHE_MAX_SIZE || size.y > LDTK_CACHE_MAX_SIZE do return false
+	if tiles.cache == nil || tiles.cacheRenderer != renderer {
+		dropTileCache(tiles)
+		tiles.cache = buildTileCache(tiles, renderer, size)
+		tiles.cacheRenderer = renderer
+		if tiles.cache == nil do return false
+	}
+	// The part that shows, in the layer's pixels: copied to where the draw transform puts it
+	from := [2]f32{max(math.floor(lo.x), 0), max(math.floor(lo.y), 0)}
+	to := [2]f32{min(math.ceil(hi.x), size.x), min(math.ceil(hi.y), size.y)}
+	if to.x <= from.x || to.y <= from.y do return true
+	a := toScreen(shift + from * scale)
+	b := toScreen(shift + to * scale)
+	src := sdl.FRect{from.x, from.y, to.x - from.x, to.y - from.y}
+	// On whole pixels, as the tiles are
+	dst := sdl.FRect{math.round(a.x), math.round(a.y), math.round(b.x) - math.round(a.x), math.round(b.y) - math.round(a.y)}
+	sdl.SetTextureColorModFloat(tiles.cache, color.r, color.g, color.b)
+	sdl.SetTextureAlphaModFloat(tiles.cache, color.a)
+	sdl.SetTextureBlendMode(tiles.cache, GetDrawBlend())
+	sdl.RenderTexture(renderer, tiles.cache, &src, &dst)
+	return true
+}
+
+// The layer's tiles at 1:1 into a new target texture (transparent elsewhere), or nil
+@(private="file")
+buildTileCache :: proc(tiles: ^LDtkTileLayer, renderer: ^sdl.Renderer, size: [2]f32) -> ^sdl.Texture {
+	texture := sdl.CreateTexture(renderer, .RGBA32, .TARGET, i32(size.x), i32(size.y))
+	if texture == nil do return nil
+	sdl.SetTextureScaleMode(texture, .NEAREST)
+	target := RenderTarget{texture = texture, size = size}
+	RenderTarget_Begin(renderer, &target, clear = true)
+	defer RenderTarget_End(renderer, &target)
+	// The tiles unscaled, so SDL copies rectangles 1:1 (the scaled copies were what broke)
+	sdl.SetTextureBlendMode(tiles.texture, sdl.BLENDMODE_BLEND)
+	sdl.SetTextureColorMod(tiles.texture, 255, 255, 255)
+	cell := tiles.tileSize
+	for tile in tiles.data.tiles {
+		src := sdl.FRect{tile.src.x, tile.src.y, cell, cell}
+		dst := sdl.FRect{tile.px.x, tile.px.y, cell, cell}
+		sdl.SetTextureAlphaModFloat(tiles.texture, tile.alpha)
+		flip := sdl.FlipMode(c.int(tile.flipX ? 1 : 0) | c.int(tile.flipY ? 2 : 0))
+		if flip == .NONE do sdl.RenderTexture(renderer, tiles.texture, &src, &dst)
+		else do sdl.RenderTextureRotated(renderer, tiles.texture, &src, &dst, 0, nil, flip)
+	}
+	sdl.SetTextureAlphaModFloat(tiles.texture, 1)
+	return texture
+}
+
+// Frees a tile layer's cache texture (it's made again when next drawn)
+@(private="file")
+dropTileCache :: proc(tiles: ^LDtkTileLayer) {
+	if tiles.cache != nil do sdl.DestroyTexture(tiles.cache)
+	tiles.cache, tiles.cacheRenderer = nil, nil
+}
+
+@(private="file")
+ldtkTileLayerDestroy :: proc(node: ^Node) {
+	dropTileCache(cast(^LDtkTileLayer)node)
 }
 
 // Whether a renderer is SDL's software renderer
