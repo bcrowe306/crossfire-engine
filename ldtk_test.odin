@@ -302,6 +302,14 @@ ldtk_level_is_built :: proc(t: ^testing.T) {
 	testing.expect_value(t, LDtk_IntGridAtPosition(level, "Walls", {100 + 40, 200 + 5}), 0)
 	testing.expect_value(t, LDtk_IntGridAtPosition(level, "Walls", {0, 0}), 0)
 
+	// A removed entity (a collected coin) leaves the lookups: they never return a freed node
+	spawnedBefore := len(level.spawned)
+	Scene_RemoveNode(scene, coin.id)
+	Scene_Update(scene, nil, 1.0 / 60)
+	testing.expect_value(t, len(level.spawned), spawnedBefore - 1)
+	testing.expect_value(t, len(LDtk_FindEntityNodes(level, "Coin")), 0)
+	testing.expect(t, len(lever) == 1 && LDtk_EntityRefNode(lever[0], "door") == nil, "a reference to a removed entity is nil")
+
 	// Every level of the world, one after the other (a linear layout); no entities
 	world := cast(^LDtkLevelNode)created[1]
 	testing.expect_value(t, len(world.views), 2)

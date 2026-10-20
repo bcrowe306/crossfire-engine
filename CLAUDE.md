@@ -187,6 +187,9 @@ draw shapes and SDL_ttf text alike (pixels read back), and the demo runs with ea
   inherited tint). Draw a sprite centered on (0, 0) and let the node's transform place it. Layers in
   `scene.screenLayers` skip the camera.
 - Draw order: layer first, then tree order (parent before children, siblings in insertion order).
+- **A negative scale mirrors**: `DrawTexture` flips the texture when the draw transform's
+  determinant is negative (`scale.x = -1` faces a sprite the other way), since
+  `RenderTextureRotated` only takes a rotation.
 - `Scene_DrawWithView(scene, renderer, view, ...)` draws through any view transform instead of the
   camera. The editor's viewport uses it with `positionOnlyScale` set to its zoom.
 - `Node.getBounds` (optional) reports the local rectangle a node draws (`Node_GetLocalBounds`).
@@ -328,6 +331,11 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
 - **Entity tiles** follow LDtk's EntityRender.hx per tile render mode (the tile's pivot on the
   entity's position); shapes only in tools. LDtk's internal icons (FinalBossBlues' paid pack)
   can't ship: a copy beside the .ldtk (`finalbossblues-icons_full_16.png`) is used.
+- **Removed entities** (a collected coin) leave `LDtkLevelNode.spawned` through an `onExit`
+  listener, so lookups (`LDtk_FindEntityNodes`, `LDtk_EntityRefNode`) never return a freed node.
+- **Tile vertices are on whole pixels**: SDL's software renderer (the editor's viewport) draws
+  axis-aligned quads as rectangles rounded one by one, which left 1 px cracks between tiles at
+  some camera positions.
 - **Hot reload** (`LDtk_WatchFiles`, dev runs only, from Game_Update): reloaded projects replace
   the game's; the old ones are kept to the end (`Game.ldtkRetired`: entity nodes point into
   them). Built nodes are updated in place, not rebuilt: tile layers, colors, backgrounds and the

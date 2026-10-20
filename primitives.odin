@@ -135,7 +135,8 @@ Inputs:
 - rotation: Degrees, clockwise around the center of `dest`
 - src: Part of the texture to draw, in texture pixels (e.g. one sprite sheet frame). nil draws the whole texture
 - tint: Multiplies the texture's colors and alpha. White leaves it unchanged
-- flip: Mirror the texture horizontally and/or vertically
+- flip: Mirror the texture horizontally and/or vertically (a draw transform with a negative scale,
+  like a sprite node with scale.x -1, mirrors it too)
 
 Example:
 	ship := rm->loadTexture("ship.png")
@@ -160,6 +161,11 @@ DrawTexture :: proc(
 	w, h := dest.w * scale.x, dest.h * scale.y
 	angle := rotation + Transform2D_Rotation(drawTransform)
 	tint := tinted(tint)
+	// A mirroring transform (a negative scale: a sprite turned to face left): its x axis gives the
+	// angle, so flipping vertically before SDL rotates draws the mirror image
+	t := drawTransform
+	flip := flip
+	if t.x.x * t.y.y - t.x.y * t.y.x < 0 do flip = sdl.FlipMode(u32(flip) ~ u32(sdl.FlipMode.VERTICAL))
 
 	dst := sdl.FRect{center.x - w * 0.5, center.y - h * 0.5, w, h}
 	srcRect, hasSrc := src.?

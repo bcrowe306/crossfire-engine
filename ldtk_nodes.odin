@@ -2,6 +2,7 @@ package engine
 
 import "core:c"
 import "core:log"
+import "core:math"
 import "core:mem"
 import "core:strings"
 import sdl "vendor:sdl3"
@@ -593,6 +594,14 @@ spawnEntity :: proc(root: ^LDtkLevelNode, group: ^Node, level: ^LDtkLevel, layer
 	n.layer = group.layer
 	Node_AddChild(group, n)
 	append(&root.spawned, LDtkSpawned{n, entity, level})
+	// A removed entity (a collected coin) leaves the list, so lookups never return a freed node
+	n.onExit->subscribe(proc(_: ^EventSubject, source: rawptr, _: EventData, userData: rawptr) {
+		root := cast(^LDtkLevelNode)userData
+		for s, i in root.spawned do if rawptr(s.node) == source {
+			ordered_remove(&root.spawned, i)
+			return
+		}
+	}, root)
 
 	if !attachScripts do return
 	// A script named like the entity, its fields from the entity's
@@ -774,8 +783,12 @@ ldtkTileLayerDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 		offset, s := parallaxOf(l, node.parent)
 		shift, scale = offset + (s - 1) * l.offset, s
 	}
+	// On whole pixels: neighbouring tiles then share exact edges. SDL's software renderer (the
+	// editor's viewport) draws axis-aligned quads as rectangles, each rounded on its own, which
+	// left 1 px cracks between tiles at some camera positions; pixel art stays crisp too
 	place :: proc(p, shift: [2]f32, scale: f32) -> sdl.FPoint {
-		return sdl.FPoint(toScreen(shift + p * scale))
+		q := toScreen(shift + p * scale)
+		return {math.round(q.x), math.round(q.y)}
 	}
 	lo, hi := visibleBox(renderer, shift, scale)
 

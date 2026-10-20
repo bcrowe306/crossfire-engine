@@ -254,3 +254,45 @@ scene_format_v1_is_migrated :: proc(t: ^testing.T) {
 	testing.expect(t, abs(scene.nodes[2].rotation + 30) < 0.001, "camera rotation is negated")
 	testing.expect(t, near(scene.nodes[0].position, {100, 100}), "top-level positions don't change")
 }
+
+// A negative scale mirrors textures (a sprite facing left), not turns them upside down
+@(test)
+negative_scale_mirrors_textures :: proc(t: ^testing.T) {
+	surface := sdl.CreateSurface(40, 40, .RGBA32)
+	defer sdl.DestroySurface(surface)
+	renderer := sdl.CreateSoftwareRenderer(surface)
+	defer sdl.DestroyRenderer(renderer)
+	// 2 x 2: red, blue on top; green, yellow below
+	source := sdl.CreateSurface(2, 2, .RGBA32)
+	defer sdl.DestroySurface(source)
+	colors := [4][4]u8{{255, 0, 0, 255}, {0, 0, 255, 255}, {0, 255, 0, 255}, {255, 255, 0, 255}}
+	for c, i in colors {
+		row := ([^]u8)(source.pixels)[(i / 2) * int(source.pitch):]
+		for k in 0 ..< 4 do row[(i % 2) * 4 + k] = c[k]
+	}
+	texture := sdl.CreateTextureFromSurface(renderer, source)
+	defer sdl.DestroyTexture(texture)
+	sdl.SetTextureScaleMode(texture, .NEAREST)
+	pixel :: proc(surface: ^sdl.Surface, x, y: int) -> [4]u8 {
+		row := ([^]u8)(surface.pixels)[y * int(surface.pitch):]
+		return {row[x * 4], row[x * 4 + 1], row[x * 4 + 2], row[x * 4 + 3]}
+	}
+	draw :: proc(renderer: ^sdl.Renderer, texture: ^sdl.Texture, transform: Transform2D) {
+		sdl.SetRenderDrawColor(renderer, 0, 0, 0, 255)
+		sdl.RenderClear(renderer)
+		SetDrawState(transform)
+		DrawTexture(renderer, texture, {-10, -10, 20, 20})
+		SetDrawState(TRANSFORM2D_IDENTITY)
+		sdl.RenderPresent(renderer)
+	}
+	// Facing right: red top-left
+	draw(renderer, texture, Transform2D{x = {1, 0}, y = {0, 1}, origin = {20, 20}})
+	testing.expect_value(t, pixel(surface, 15, 15), colors[0])
+	// scale.x -1: mirrored, blue top-left, yellow bottom-left (not turned: yellow would be top-left)
+	draw(renderer, texture, Transform2D{x = {-1, 0}, y = {0, 1}, origin = {20, 20}})
+	testing.expect_value(t, pixel(surface, 15, 15), colors[1])
+	testing.expect_value(t, pixel(surface, 15, 25), colors[3])
+	// scale.y -1: upside down, green top-left
+	draw(renderer, texture, Transform2D{x = {1, 0}, y = {0, -1}, origin = {20, 20}})
+	testing.expect_value(t, pixel(surface, 15, 15), colors[2])
+}
