@@ -89,6 +89,9 @@ Node :: struct {
 	// The name from the scene file ("" for nodes made in code unless set). Used by
 	// `Scene_FindNode` and `Node_FindChild`; owned by the node's arena when set by `Scene_Build`
 	name: string,
+	// The root of a component instance: the component's file (`Scene_AddComponent`,
+	// `Node_GetComponent`; in the node's arena). "" for any other node
+	component: string,
 	// The layer it draws on (Layer1 first, Layer8 on top). Not inherited by children
 	layer: RenderLayer,
 	// The scene that made it (`CreateNode`)

@@ -159,8 +159,10 @@ Scene_Build :: proc(scene: ^Scene, data: ^SceneData, projectDir: string, allocat
 
 /*
 Adds an instance of a component to a scene: its whole node tree, built like a scene file's, with
-its scripts (their `ready` runs on the scene's next update). Call it as often as needed: each
-call makes another instance. The component's file is read once per game and cached.
+its scripts. Like `Scene_AddNode`, the nodes join the scene at the start of its next update
+(`onEnter`, then the scripts' `ready`). Call it as often as needed: each call makes another
+instance. The component's file is read once per game and cached. `Scene_RemoveComponent`
+removes an instance.
 
 Inputs:
 - scene: The scene
@@ -169,13 +171,14 @@ Inputs:
 - position: Where its root goes, relative to the parent
 
 Returns:
-- The instance's root node (nil, logged, if the component can't be read)
+- The instance's root node (nil, logged, if the component can't be read). It takes the
+  component's name; `Node_GetComponent` tells which component it is
 
 Example:
 	// Given: self: ^e.Script, COMPONENT_BULLET: e.ComponentAsset
-	bullet := e.Scene_Instantiate(self.scene, COMPONENT_BULLET, position = e.Node_GetWorldPosition(self.node))
+	bullet := e.Scene_AddComponent(self.scene, COMPONENT_BULLET, position = e.Node_GetWorldPosition(self.node))
 */
-Scene_Instantiate :: proc(scene: ^Scene, component: ComponentAsset, parent: ^Node = nil, position: [2]f32 = {}) -> ^Node {
+Scene_AddComponent :: proc(scene: ^Scene, component: ComponentAsset, parent: ^Node = nil, position: [2]f32 = {}) -> ^Node {
 	if scene == nil || scene.game == nil do return nil
 	instance := DEFAULT_SCENE_NODE
 	instance.kind = .Component
@@ -188,6 +191,79 @@ Scene_Instantiate :: proc(scene: ^Scene, component: ComponentAsset, parent: ^Nod
 	root := created[0]
 	if root != nil && parent != nil do Node_AddChild(parent, root)
 	return root
+}
+
+// Another name for `Scene_AddComponent` (its first name)
+Scene_Instantiate :: Scene_AddComponent
+
+/*
+Removes a component instance, its whole tree, like `Scene_RemoveNode`: at the start of the next
+update they get `onExit`, then their `destroy` hooks, then their memory is freed. Only an
+instance's root is accepted (a node made by `Scene_AddComponent`, or a scene file's Component
+node), so a stray id can't remove part of an instance; use `Scene_RemoveNode` for any node.
+
+Inputs:
+- scene: The scene
+- instanceId: The instance root's `id`
+
+Returns:
+- false (logged) when no node of the scene has that id, or it isn't an instance's root
+
+Example:
+	// Given: self: ^e.Script, bullet: ^e.Node (from e.Scene_AddComponent)
+	e.Scene_RemoveComponent(self.scene, bullet.id)
+*/
+Scene_RemoveComponent :: proc(scene: ^Scene, instanceId: EntityId) -> bool {
+	root := Scene_GetNode(scene, instanceId)
+	if root == nil {
+		log.warnf("Scene_RemoveComponent: no node with that id in the scene")
+		return false
+	}
+	if root.component == "" {
+		log.warnf("Scene_RemoveComponent: %s isn't a component instance's root (Scene_RemoveNode removes any node)", root.name)
+		return false
+	}
+	Scene_RemoveNode(scene, instanceId)
+	return true
+}
+
+/*
+The component a node is the root of an instance of.
+
+Inputs:
+- node: The node
+
+Returns:
+- The component (its path, like the `COMPONENT_...` constants), and false for nodes that aren't
+  an instance's root (nodes inside an instance included)
+*/
+Node_GetComponent :: proc(node: ^Node) -> (ComponentAsset, bool) {
+	if node == nil || node.component == "" do return {}, false
+	return ComponentAsset{node.component}, true
+}
+
+/*
+Every instance of a component in a scene: their roots, in the scene and waiting to join it (in
+tree order, then the order they were added). Removed instances are listed until the next update
+frees them.
+
+Inputs:
+- scene: The scene
+- component: The component
+
+Returns:
+- The instances' roots (temp allocated)
+
+Example:
+	// Given: scene: ^e.Scene, COMPONENT_BULLET: e.ComponentAsset
+	for bullet in e.Scene_GetComponentInstances(scene, COMPONENT_BULLET) do e.Scene_RemoveComponent(scene, bullet.id)
+*/
+Scene_GetComponentInstances :: proc(scene: ^Scene, component: ComponentAsset) -> []^Node {
+	found := make([dynamic]^Node, context.temp_allocator)
+	for list in ([2][]^Node{scene.nodes[:], scene.addQueue[:]}) {
+		for node in list do if node.component != "" && node.component == component.path do append(&found, node)
+	}
+	return found[:]
 }
 
 /*
@@ -378,6 +454,7 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 		n.visible = node.visible
 		// A component instance keeps its root's settings unless the instance sets them
 		instance := node.kind == .Component
+		if instance do n.component = strings.clone(node.component, Node_GetAllocator(n))
 		if !instance || node.processMode != .Inherit do n.processMode = node.processMode
 		if !instance || node.blendMode != .Blend do n.blendMode = node.blendMode
 		if !instance || node.zIndex != 0 do n.zIndex = node.zIndex

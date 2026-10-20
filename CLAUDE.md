@@ -356,9 +356,13 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
   children in the scene file go under the root; its script, if any, only when the root has none.
 - `Game_LoadComponent` reads each file once (`Game.components`, in the game's arena); editors
   fill that map with their in-memory components before building, so unsaved edits show.
-- `Scene_Instantiate(scene, COMPONENT_X, parent, position)` adds one from code (scripts attach,
-  `ready` next update). Components nest, at most MAX_COMPONENT_DEPTH deep (one holding itself
-  stops there with an error).
+- From code, like `Scene_AddNode` / `Scene_RemoveNode`: `Scene_AddComponent(scene, COMPONENT_X,
+  parent, position)` adds one (it joins next update; scripts attach, `ready` then; `Scene_Instantiate`
+  is its old name), `Scene_RemoveComponent(scene, root.id)` removes one with its tree (only an
+  instance's root: anything else is refused, logged). An instance's root keeps its component's
+  path (`Node.component`, in its arena; set by `buildNodes` for every Component node, nested ones
+  too): `Node_GetComponent`, `Scene_GetComponentInstances`. Components nest, at most
+  MAX_COMPONENT_DEPTH deep (one holding itself stops there with an error).
 
 **Input** (input.odin):
 - `Input_Update` runs first in `Game_Update` with the frame's SDL events: it clears last frame's
@@ -454,6 +458,11 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
   (another for the texture), through `view × inverse(render world)` for world-space particles.
 - `settings.emitting` is how an emitter starts; `emitter.emitting` is whether it's emitting now (a
   non-continuous one stops after a cycle).
+- `onFinished` (EventSubject, source the emitter) is notified once per run: when it stopped
+  emitting (a one-shot cycle ended, or `ParticleEmitter_Stop`) and its last particle died
+  (`finishPending`, set by Stop, cleared by Start; checked at the end of each update). A
+  continuous emitter never stopped never finishes; one never started neither. The demo's Burst
+  script removes its blood instance with it.
 
 **Scripts** (`script.odin`, doc comment at the top has the full example):
 - A script struct's first field is `using script: e.Script` (checked at registration). It's

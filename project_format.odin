@@ -779,7 +779,7 @@ Parses the text of a component file: one node tree saved to be reused in any sce
 Its first top-level node is the root (others are ignored). Scenes use it through a `Component`
 node, `<node kind="Component" name="Ship2" x="100" y="50" component="components/ship.component.xml"/>`:
 the component's nodes are built in its place, the root taking the instance's name, transform,
-layer and visibility (Scene_Build); `Scene_Instantiate` adds one from code.
+layer and visibility (Scene_Build); `Scene_AddComponent` adds one from code.
 
 Inputs:
 - text: The XML

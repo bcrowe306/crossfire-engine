@@ -136,6 +136,54 @@ emitter_emits_cycles_and_stops :: proc(t: ^testing.T) {
 }
 
 @(test)
+emitter_notifies_when_it_finishes :: proc(t: ^testing.T) {
+	scene := testScene()
+	defer freeScene(scene)
+	settings := DEFAULT_PARTICLE_SETTINGS
+	settings.amount = 10
+	settings.lifetime = 0.5
+	settings.burst = 1
+	settings.continuous = false
+	emitter := CreateParticleEmitter(scene, settings)
+	Scene_ProcessQueues(scene)
+	count := 0
+	count_finished :: proc(_: ^EventSubject, source: rawptr, _: EventData, userData: rawptr) { (cast(^int)userData)^ += 1 }
+	Event_Subscribe(&emitter.onFinished, count_finished, &count)
+
+	// A one-shot: once, after the cycle ended and its particles died
+	run(scene, 0.25)
+	testing.expect_value(t, count, 0)
+	run(scene, 2)
+	testing.expect(t, !emitter.emitting && ParticleEmitter_AliveCount(emitter) == 0, "done")
+	testing.expect_value(t, count, 1)
+	run(scene, 1)
+	testing.expect_value(t, count, 1)
+	// Started again: another run, another notification
+	ParticleEmitter_Start(emitter)
+	run(scene, 2)
+	testing.expect_value(t, count, 2)
+
+	// Continuous: never, until stopped; then once its particles are gone
+	emitter.settings.continuous = true
+	ParticleEmitter_Start(emitter)
+	run(scene, 3)
+	testing.expect_value(t, count, 2)
+	ParticleEmitter_Stop(emitter)
+	testing.expect_value(t, count, 2)
+	run(scene, 2)
+	testing.expect_value(t, count, 3)
+
+	// Never started: never finishes
+	settings.emitting = false
+	idle := CreateParticleEmitter(scene, settings)
+	idleCount := 0
+	Event_Subscribe(&idle.onFinished, count_finished, &idleCount)
+	ParticleEmitter_Stop(idle)
+	run(scene, 1)
+	testing.expect_value(t, idleCount, 0)
+}
+
+@(test)
 particles_move_in_the_world_or_with_the_emitter :: proc(t: ^testing.T) {
 	scene := testScene()
 	defer freeScene(scene)

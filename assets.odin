@@ -69,7 +69,7 @@ MusicAsset :: struct {
 	path: string,
 }
 
-// A component in the project (a saved node tree, `.component.xml`): `Scene_Instantiate` adds one
+// A component in the project (a saved node tree, `.component.xml`): `Scene_AddComponent` adds one
 ComponentAsset :: struct {
 	// The component file's path, relative to the project folder ("" for none)
 	path: string,

@@ -91,4 +91,30 @@ components_are_instanced :: proc(t: ^testing.T) {
 	testing.expect_value(t, a.position, [2]f32{1, 2})
 	testing.expect(t, b.parent == player, "under the given parent")
 	testing.expect_value(t, len(a.children), 2)
+
+	// Scene_AddComponent is the same; an instance's root knows its component, nodes inside don't
+	SHIP_ASSET :: ComponentAsset{"components/ship.component.xml"}
+	c := Scene_AddComponent(scene, SHIP_ASSET, position = {3, 4})
+	Scene_ProcessQueues(scene)
+	testing.expect(t, c != nil && c.position == {3, 4}, "added")
+	ship, isInstance := Node_GetComponent(c)
+	testing.expect(t, isInstance && ship == SHIP_ASSET, "the root knows its component")
+	_, inside := Node_GetComponent(c.children[0])
+	testing.expect(t, !inside, "its children aren't instances")
+	fleet, _ := Node_GetComponent(Scene_FindNode(scene, "Fleet"))
+	testing.expect_value(t, fleet.path, "components/fleet.component.xml")
+	lead, _ := Node_GetComponent(Scene_FindNode(scene, "Fleet/Lead"))
+	testing.expect_value(t, lead, SHIP_ASSET) // Nested instances too
+	// Player, Enemy, Lead, Wing, a, b, c
+	testing.expect_value(t, len(Scene_GetComponentInstances(scene, SHIP_ASSET)), 7)
+
+	// Removing: an instance's root goes with its tree; anything else is refused
+	testing.expect(t, !Scene_RemoveComponent(scene, c.children[0].id), "not an instance's root")
+	testing.expect(t, !Scene_RemoveComponent(scene, NewEntityId()), "not in the scene")
+	cId, gunId, bId := c.id, c.children[1].id, b.id
+	testing.expect(t, Scene_RemoveComponent(scene, cId) && Scene_RemoveComponent(scene, bId), "removed")
+	Scene_ProcessQueues(scene)
+	testing.expect(t, Scene_GetNode(scene, cId) == nil && Scene_GetNode(scene, gunId) == nil, "with its tree")
+	testing.expect(t, Scene_GetNode(scene, bId) == nil && len(player.children) == 2, "and from under its parent (Player keeps its own two)")
+	testing.expect_value(t, len(Scene_GetComponentInstances(scene, SHIP_ASSET)), 5)
 }

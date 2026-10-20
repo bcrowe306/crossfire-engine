@@ -418,6 +418,22 @@ ParticleEmitter :: struct {
 	cycleStarted: bool,
 	// The slot the next particle goes in
 	head: int,
+	/*
+	Notified once when a run has ended: emitting stopped (a one-shot cycle ended, or
+	`ParticleEmitter_Stop`) and its last particle died. `source` is the emitter, no data. A
+	continuous emitter that's never stopped never finishes; `ParticleEmitter_Start` begins
+	another run, which notifies again when it ends. In the node's arena.
+
+	Example:
+		// Given: scene: ^e.Scene, boom: ^e.ParticleEmitter
+		e.Event_Subscribe(&boom.onFinished, proc(_: ^e.EventSubject, source: rawptr, _: e.EventData, userData: rawptr) {
+			emitter := cast(^e.ParticleEmitter)source
+			e.Scene_RemoveNode(emitter.scene, emitter.id)
+		}, nil)
+	*/
+	onFinished: EventSubject,
+	// The run stopped and onFinished is still to come (when the last particle dies)
+	finishPending: bool,
 }
 
 /*
@@ -435,6 +451,7 @@ CreateParticleEmitter :: proc(scene: ^Scene, settings := DEFAULT_PARTICLE_SETTIN
 	emitter.settings = settings
 	emitter.emitting = settings.emitting
 	emitter.particles = make([]Particle, MAX_PARTICLES, Node_GetAllocator(emitter))
+	EventSubject_Init(&emitter.onFinished, Node_GetAllocator(emitter))
 	emitter.update = particleEmitterUpdate
 	emitter.draw = particleEmitterDraw
 	emitter.getBounds = particleEmitterBounds
@@ -455,6 +472,7 @@ Example:
 */
 ParticleEmitter_Start :: proc(emitter: ^ParticleEmitter) {
 	emitter.emitting = true
+	emitter.finishPending = false
 	emitter.cycleStarted = false
 	emitter.cycleTime = 0
 	emitter.emitTimer = 0
@@ -462,12 +480,13 @@ ParticleEmitter_Start :: proc(emitter: ^ParticleEmitter) {
 }
 
 /*
-Stops emitting; live particles finish their lives.
+Stops emitting; live particles finish their lives, then `onFinished` is notified.
 
 Inputs:
 - emitter: The emitter
 */
 ParticleEmitter_Stop :: proc(emitter: ^ParticleEmitter) {
+	if emitter.emitting do emitter.finishPending = true
 	emitter.emitting = false
 	emitter.cycleStarted = false
 }
@@ -572,6 +591,11 @@ ParticleEmitter_Update :: proc(emitter: ^ParticleEmitter, deltaTime: f32) {
 		}
 	}
 	if s.collisionEnabled do collideParticles(emitter)
+	// The run is over once it stopped emitting and its particles are gone
+	if emitter.finishPending && !emitter.emitting && ParticleEmitter_AliveCount(emitter) == 0 {
+		emitter.finishPending = false
+		Event_Notify(&emitter.onFinished, emitter, nil)
+	}
 }
 
 /*
