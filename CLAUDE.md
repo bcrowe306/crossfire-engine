@@ -88,7 +88,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `animation_player.odin` | Plays animations by name or index, with events |
 | `event.odin` | `EventSubject`: subscribe / unsubscribe / notify |
 | `timer.odin`, `ticker.odin` | Time-based events |
-| `ui_menu*.odin`, `ui_style.odin`, `ui_label.odin` | In-game `Menu` (button, checkbox, radio, slider, select) and `Label` nodes |
+| `ui_menu*.odin`, `ui_style.odin`, `ui_label.odin` | In-game `Menu` (button, checkbox, radio, slider, select) and `Label` nodes; menus navigate by the game's `ui_*` input actions when it has them (keyboard and gamepad, held directions repeat), else by fixed keys; `Menu_Command` |
+| `ui_menu_test.odin` | Tests: menus by keys (every item kind, the dropdown, wrapping, onBack), by actions from a gamepad (repeats), by the mouse (hover, click, slider drags) |
 | `layers.odin` | `RenderLayer` (draw order, `Layer1` first) |
 | `project_format.odin` | **Project/scene XML format spec** (doc comment) and parser: `ParseProject`, `ParseScene` → plain data (`ProjectData`, `SceneData`), no SDL |
 | `project_loader.odin` | Builds scenes from parsed data: `LoadProjectFile`, `Game_LoadProject`, `Scene_Build`; data-driven `Sprite` and `AnimatedSprite` nodes; menu actions `scene:<Name>` / `quit` |

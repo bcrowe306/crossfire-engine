@@ -4,18 +4,47 @@ import sdl "vendor:sdl3"
 
 // MENU INPUT HANDLING
 
+// The input actions menus navigate with, when the game has them (Godot's names; the editor adds
+// them to new projects): arrows / WASD, the d-pad and the left stick move, Enter / Space and the
+// gamepad's South button press, Escape and East go back. A game without them gets the keys only
+MENU_ACTION_UP :: "ui_up"
+MENU_ACTION_DOWN :: "ui_down"
+MENU_ACTION_LEFT :: "ui_left"
+MENU_ACTION_RIGHT :: "ui_right"
+MENU_ACTION_ACCEPT :: "ui_accept"
+MENU_ACTION_CANCEL :: "ui_cancel"
+
+// Holding a direction repeats it: first after this many seconds, then every MENU_REPEAT_INTERVAL
+MENU_REPEAT_DELAY :: 0.4
+MENU_REPEAT_INTERVAL :: 0.08
+
+// What a key press or an action asks a menu to do
+MenuCommand :: enum u8 {
+	None,
+	Up,
+	Down,
+	Left,
+	Right,
+	Accept,
+	Cancel,
+}
+
 Menu_update :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 	menu := cast(^Menu)node
 	if !Node_IsVisibleInTree(menu) do return
 	// Item rects are relative to the menu's origin; mouse events are in screen coordinates
 	origin := Node_GetScreenPosition(menu)
 
-	// Handlers return true after a button press or onBack, which commonly switch scenes.
-	// Remaining events are then left alone so they don't act on a menu that is going away
+	// Commands return true after a button press or onBack, which commonly switch scenes.
+	// Remaining input is then left alone so it doesn't act on a menu that is going away
+	game := menu.scene != nil ? menu.scene.game : nil
+	useActions := game != nil && Input_HasAction(MENU_ACTION_ACCEPT, game)
+	if useActions && navigateByActions(menu, game, deltaTime) do return
+
 	for &event in events {
 		#partial switch event.type {
 		case .KEY_DOWN:
-			if handleKey(menu, event.key) do return
+			if !useActions && Menu_Command(menu, keyCommand(event.key.scancode), event.key.repeat) do return
 
 		case .MOUSE_MOTION:
 			handleMouseMotion(menu, [2]f32{event.motion.x, event.motion.y} - origin)
@@ -31,46 +60,103 @@ Menu_update :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 	}
 }
 
-@(private="file")
-handleKey :: proc(menu: ^Menu, key: sdl.KeyboardEvent) -> bool {
-	// An open dropdown takes all keyboard input until it closes
+/*
+Does what a navigation command asks, as a key or an action would: move the focus, adjust the
+focused item, press it, or go back. For games that drive menus themselves (another input, a
+tutorial's script).
+
+Inputs:
+- menu: The menu
+- command: What to do
+- repeat: It comes from a held key or direction repeating (pressing and going back don't repeat)
+
+Returns:
+- true when a button was pressed or onBack ran (the menu may be going away: stop using it)
+*/
+Menu_Command :: proc(menu: ^Menu, command: MenuCommand, repeat := false) -> bool {
+	// An open dropdown takes all navigation until it closes
 	if menu.popupOpen {
 		item := &menu.items[menu.focused]
 		count := len(item.options)
-		#partial switch key.scancode {
-		case .UP, .W:
+		#partial switch command {
+		case .Up:
 			menu.popupHover = (menu.popupHover - 1 + count) % count
-		case .DOWN, .S:
+		case .Down:
 			menu.popupHover = (menu.popupHover + 1) % count
-		case .RETURN, .KP_ENTER, .SPACE:
-			if !key.repeat {
+		case .Accept:
+			if !repeat {
 				selectOption(menu, item, menu.popupHover)
 				menu.popupOpen = false
 			}
-		case .ESCAPE:
-			if !key.repeat do menu.popupOpen = false
+		case .Cancel:
+			if !repeat do menu.popupOpen = false
 		}
 		return false
 	}
 
-	#partial switch key.scancode {
-	case .UP, .W:
+	switch command {
+	case .None:
+	case .Up:
 		moveFocus(menu, -1)
-	case .DOWN, .S:
+	case .Down:
 		moveFocus(menu, 1)
-	case .LEFT, .A:
+	case .Left:
 		adjustFocused(menu, -1)
-	case .RIGHT, .D:
+	case .Right:
 		adjustFocused(menu, 1)
-	case .RETURN, .KP_ENTER, .SPACE:
-		if !key.repeat && menu.focused >= 0 {
+	case .Accept:
+		if !repeat && menu.focused >= 0 {
 			return activate(menu, menu.focused)
 		}
-	case .ESCAPE:
-		if !key.repeat && menu.onBack != nil {
+	case .Cancel:
+		if !repeat && menu.onBack != nil {
 			menu.onBack(menu, nil)
 			return true
 		}
+	}
+	return false
+}
+
+@(private="file")
+keyCommand :: proc(scancode: sdl.Scancode) -> MenuCommand {
+	#partial switch scancode {
+	case .UP, .W:                   return .Up
+	case .DOWN, .S:                 return .Down
+	case .LEFT, .A:                 return .Left
+	case .RIGHT, .D:                return .Right
+	case .RETURN, .KP_ENTER, .SPACE: return .Accept
+	case .ESCAPE:                   return .Cancel
+	}
+	return .None
+}
+
+// The ui_* actions this frame: presses, and held directions repeating
+@(private="file")
+navigateByActions :: proc(menu: ^Menu, game: ^Game, deltaTime: f64) -> bool {
+	if Input_IsActionJustPressed(MENU_ACTION_ACCEPT, game) && Menu_Command(menu, .Accept) do return true
+	if Input_IsActionJustPressed(MENU_ACTION_CANCEL, game) && Menu_Command(menu, .Cancel) do return true
+
+	DIRECTIONS :: [?]struct{action: string, command: MenuCommand}{
+		{MENU_ACTION_UP, .Up}, {MENU_ACTION_DOWN, .Down}, {MENU_ACTION_LEFT, .Left}, {MENU_ACTION_RIGHT, .Right},
+	}
+	for direction in DIRECTIONS {
+		if Input_IsActionJustPressed(direction.action, game) {
+			menu.held = direction.command
+			menu.repeatTimer = MENU_REPEAT_DELAY
+			_ = Menu_Command(menu, direction.command)
+		}
+	}
+	if menu.held == .None do return false
+	heldAction: string
+	for direction in DIRECTIONS do if direction.command == menu.held do heldAction = direction.action
+	if !Input_IsActionPressed(heldAction, game) {
+		menu.held = .None
+		return false
+	}
+	menu.repeatTimer -= f32(deltaTime)
+	for menu.repeatTimer <= 0 {
+		menu.repeatTimer += MENU_REPEAT_INTERVAL
+		_ = Menu_Command(menu, menu.held, repeat = true)
 	}
 	return false
 }

@@ -6,8 +6,10 @@ import sdl "vendor:sdl3"
 
 // A vertical list of interactive UI items with built-in keyboard and mouse navigation.
 //
-// Keyboard: W/S or Up/Down move focus, Enter/Space activate, A/D or Left/Right adjust
-// sliders and cycle select boxes, Escape closes an open dropdown or runs onBack.
+// Keyboard and gamepad: through the game's ui_* input actions when it has them (ui_up / ui_down
+// move focus, ui_left / ui_right adjust sliders and cycle select boxes, ui_accept activates,
+// ui_cancel closes an open dropdown or runs onBack; held directions repeat), else the keys:
+// W/S or Up/Down, A/D or Left/Right, Enter/Space, Escape. `Menu_Command` drives it from code.
 // Mouse: hover to focus, click to activate, click and drag sliders.
 //
 // Usage:
@@ -63,6 +65,8 @@ Menu :: struct {
 	dragging: int,     // Slider being dragged, -1 if none
 	popupOpen: bool,   // Dropdown of the focused select item is open
 	popupHover: int,   // Highlighted option in the open dropdown
+	held: MenuCommand, // Direction action held down (ui_up...), repeating
+	repeatTimer: f32,  // Seconds to its next repeat
 }
 
 CreateMenu :: proc(scene: ^Scene, pos: [2]f32, style := DEFAULT_MENU_STYLE) -> ^Menu {
