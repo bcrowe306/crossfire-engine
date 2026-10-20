@@ -479,6 +479,7 @@ Input_Update :: proc(input: ^InputState, events: []sdl.Event) {
 }
 
 // Closes the gamepads (Game_Destroy)
+@(private)
 Input_Destroy :: proc(input: ^InputState) {
 	for pad in input.gamepads do sdl.CloseGamepad(pad.handle)
 	delete(input.gamepads)

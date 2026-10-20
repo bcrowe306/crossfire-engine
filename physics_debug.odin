@@ -75,6 +75,7 @@ rememberPoses :: proc(world: ^PhysicsWorld) {
 Draws every body's shapes, the joints and the rays through `view` (world to screen).
 `Scene_DrawWithView` calls it when `settings.debugDraw` is on.
 */
+@(private)
 Physics_DrawDebug :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D) {
 	world := scene.physics
 	if world == nil do return

@@ -282,6 +282,7 @@ Audio_SetBuses :: proc(game: ^Game, buses: []AudioBusData) {
 }
 
 // Applies Master's volume, pan and mute to the final mix (Game_Update, every frame)
+@(private)
 Audio_Update :: proc(game: ^Game) {
 	if len(game.buses) == 0 do return
 	master := game.buses[0]
@@ -374,6 +375,7 @@ Audio_Positional :: proc(position, listener: [2]f32, settings: AudioSettings, vi
 }
 
 // Stops the players of a scene the game leaves (Game_Update): they start again with it
+@(private)
 Audio_SceneExited :: proc(game: ^Game, scene: ^Scene) {
 	for player in game.audioPlayers {
 		if player.scene != scene do continue
@@ -383,6 +385,7 @@ Audio_SceneExited :: proc(game: ^Game, scene: ^Scene) {
 }
 
 // Frees the buses' groups and forgets the players (Game_Destroy; the players go with their scenes)
+@(private)
 Audio_DestroyBuses :: proc(game: ^Game) {
 	if game.mixer != nil do _ = mix.SetPostMixCallback(game.mixer, nil, nil)
 	for b in game.buses do if b.group != nil do mix.DestroyGroup(b.group)

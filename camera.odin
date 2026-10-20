@@ -396,6 +396,7 @@ Inputs:
 - viewSize: Size of the visible area in screen coordinates, normally `game.size`
 - deltaTime: Seconds since the last frame
 */
+@(private)
 Camera2D_Update :: proc(camera: ^Camera2D, viewSize: [2]f32, deltaTime: f64) {
 	if camera.move.active {
 		move := &camera.move
@@ -437,6 +438,7 @@ Camera2D_Shake :: proc(camera: ^Camera2D, strength, duration: f32) {
 Moves a shake on by `deltaTime` real seconds: a new random offset, scaled by the square of the
 time left (strong at first, settling softly). Game_Update calls it for the current scene's camera.
 */
+@(private)
 Camera2D_UpdateShake :: proc(camera: ^Camera2D, deltaTime: f64) {
 	shake := &camera.shake
 	if shake.left <= 0 {

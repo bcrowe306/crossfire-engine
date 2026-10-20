@@ -145,6 +145,7 @@ Inputs:
 - node: The node to initialize
 - allocator: Allocator for the event listener lists
 */
+@(private)
 Node_Init :: proc(node: ^Node, allocator := context.allocator) {
 	EventSubject_Init(&node.onEnter, allocator)
 	EventSubject_Init(&node.onExit, allocator)

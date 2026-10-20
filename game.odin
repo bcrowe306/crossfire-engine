@@ -268,6 +268,7 @@ Builds a scene again from its file (`Game.sceneFiles`): its nodes are destroyed 
 when the game started. The game does it when a scene that has been played is entered again; a
 scene made by code (no file) is left as it is.
 */
+@(private)
 Game_RebuildScene :: proc(game: ^Game, scene: ^Scene) {
 	path, known := game.sceneFiles[scene.name]
 	if !known do return

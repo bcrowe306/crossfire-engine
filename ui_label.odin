@@ -29,6 +29,7 @@ CreateLabel :: proc(scene: ^Scene, text: string, pos: [2]f32, size: f32, color: 
 	return label
 }
 
+@(private)
 Label_draw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	label := cast(^Label)node
 	rm := &label.scene.game.resourceManager
@@ -41,6 +42,7 @@ Label_draw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	}
 }
 
+@(private)
 Label_getBounds :: proc(node: ^Node) -> (sdl.FRect, bool) {
 	label := cast(^Label)node
 	if label.scene == nil || label.scene.game == nil do return {}, false

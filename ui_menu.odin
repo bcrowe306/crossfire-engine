@@ -227,6 +227,7 @@ snapSliderValue :: proc(item: ^MenuItem, value: f32) -> f32 {
 }
 
 // The rows' combined rectangle, relative to the menu's origin
+@(private)
 Menu_getBounds :: proc(node: ^Node) -> (sdl.FRect, bool) {
 	menu := cast(^Menu)node
 	if menu.itemCount == 0 do return {}, false

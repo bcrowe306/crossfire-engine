@@ -23,6 +23,7 @@ Ticker :: struct {
 	onTick: EventSubject,
 }
 
+@(private)
 Ticker_Process :: proc(ticker: ^Ticker) {
 	if !ticker.running do return
 	tick := time.tick_now()

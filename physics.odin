@@ -101,6 +101,7 @@ Physics_SetGravity :: proc(scene: ^Scene, gravity: [2]f32) {
 }
 
 // Frees the scene's world (Scene_Destroy, after its nodes)
+@(private)
 Physics_Destroy :: proc(scene: ^Scene) {
 	world := scene.physics
 	if world == nil do return
@@ -120,6 +121,7 @@ Physics_Destroy :: proc(scene: ^Scene) {
 Creates the Box2D bodies of nodes that entered the scene, and rebuilds shapes that changed.
 `Scene_Update` calls it (before scripts' `ready`, so they can use their bodies).
 */
+@(private)
 Physics_Sync :: proc(scene: ^Scene) {
 	world := scene.physics
 	if world == nil do return
@@ -143,6 +145,7 @@ Steps the scene's physics for a frame (see the top of this file). `Scene_Update`
 Inputs:
 - deltaTime: Seconds since the last frame
 */
+@(private)
 Physics_Update :: proc(scene: ^Scene, deltaTime: f64) {
 	world := scene.physics
 	if world == nil || scene.physicsPaused do return

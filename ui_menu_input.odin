@@ -29,6 +29,7 @@ MenuCommand :: enum u8 {
 	Cancel,
 }
 
+@(private)
 Menu_update :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 	menu := cast(^Menu)node
 	if !Node_IsVisibleInTree(menu) do return

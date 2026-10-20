@@ -60,6 +60,7 @@ ResourceManager_Init :: proc(rm: ^ResourceManager, renderer: ^sdl.Renderer, mixe
 }
 
 // Loads any image format supported by SDL_image (png, jpg, bmp, webp, ...)
+@(private)
 ResourceManager_loadTexture :: proc(rm: ^ResourceManager, filePath: string) -> ^sdl.Texture {
 	if tex, ok := rm.textures[filePath]; ok {
 		return tex
@@ -77,6 +78,7 @@ ResourceManager_loadTexture :: proc(rm: ^ResourceManager, filePath: string) -> ^
 
 // Loads a sound or music file. predecode decodes the whole file up front, which is best
 // for short sound effects. Pass false for long music tracks to stream them instead.
+@(private)
 ResourceManager_loadAudio :: proc(rm: ^ResourceManager, filePath: string, predecode: bool = true) -> ^mix.Audio {
 	if audio, ok := rm.audio[filePath]; ok {
 		return audio
@@ -93,6 +95,7 @@ ResourceManager_loadAudio :: proc(rm: ^ResourceManager, filePath: string, predec
 }
 
 // Fonts are cached per point size, so the same file can be loaded at several sizes
+@(private)
 ResourceManager_loadFont :: proc(rm: ^ResourceManager, filePath: string, size: f32) -> ^ttf.Font {
 	key := fontKey(filePath, size, context.temp_allocator)
 	if font, ok := rm.fonts[key]; ok {
@@ -120,6 +123,7 @@ ResourceManager_loadFont :: proc(rm: ^ResourceManager, filePath: string, size: f
 	return font
 }
 
+@(private)
 ResourceManager_unloadTexture :: proc(rm: ^ResourceManager, filePath: string) {
 	if filePath not_in rm.textures do return
 	key, tex := delete_key(&rm.textures, filePath)
@@ -127,6 +131,7 @@ ResourceManager_unloadTexture :: proc(rm: ^ResourceManager, filePath: string) {
 	delete(key)
 }
 
+@(private)
 ResourceManager_unloadAudio :: proc(rm: ^ResourceManager, filePath: string) {
 	if filePath not_in rm.audio do return
 	key, audio := delete_key(&rm.audio, filePath)
@@ -134,6 +139,7 @@ ResourceManager_unloadAudio :: proc(rm: ^ResourceManager, filePath: string) {
 	delete(key)
 }
 
+@(private)
 ResourceManager_unloadFont :: proc(rm: ^ResourceManager, filePath: string, size: f32) {
 	lookup := fontKey(filePath, size, context.temp_allocator)
 	if lookup not_in rm.fonts do return
@@ -143,6 +149,7 @@ ResourceManager_unloadFont :: proc(rm: ^ResourceManager, filePath: string, size:
 	delete(key)
 }
 
+@(private)
 ResourceManager_destroy :: proc(rm: ^ResourceManager) {
 	if rm.textEngine != nil {
 		ttf.DestroyRendererTextEngine(rm.textEngine)

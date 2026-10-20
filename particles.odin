@@ -411,6 +411,7 @@ ParticleEmitter_AliveCount :: proc(emitter: ^ParticleEmitter) -> int {
 Moves the emitter on by `deltaTime` seconds: moves every particle, then emits. Its node's update
 does this each frame; call it yourself only for an emitter outside a scene.
 */
+@(private)
 ParticleEmitter_Update :: proc(emitter: ^ParticleEmitter, deltaTime: f32) {
 	s := &emitter.settings
 	// Live particles move first, so new ones start this frame at age 0 (and those emitted at the

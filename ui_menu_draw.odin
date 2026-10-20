@@ -6,6 +6,7 @@ import sdl "vendor:sdl3"
 
 // MENU DRAWING
 
+@(private)
 Menu_draw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	menu := cast(^Menu)node
 	rm := &menu.scene.game.resourceManager

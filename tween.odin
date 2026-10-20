@@ -205,6 +205,7 @@ Tween_IsRunning :: proc(tween: ^Tween) -> bool {
 Moves a scene's tweens on by `deltaTime` seconds and frees finished ones. Scene_Update calls it
 after the nodes update.
 */
+@(private)
 Scene_UpdateTweens :: proc(scene: ^Scene, deltaTime: f64) {
 	// By index: a callback may make more tweens
 	for i := 0; i < len(scene.tweens); i += 1 {

@@ -383,6 +383,7 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 	return created
 }
 
+@(private)
 Sprite_draw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	sprite := cast(^Sprite)node
 	if sprite.texture == nil do return
@@ -390,6 +391,7 @@ Sprite_draw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	DrawTexture(renderer, sprite.texture, {-size.x * 0.5, -size.y * 0.5, size.x, size.y})
 }
 
+@(private)
 Sprite_getBounds :: proc(node: ^Node) -> (sdl.FRect, bool) {
 	sprite := cast(^Sprite)node
 	if sprite.texture == nil do return {}, false
@@ -397,16 +399,19 @@ Sprite_getBounds :: proc(node: ^Node) -> (sdl.FRect, bool) {
 	return {-w * 0.5, -h * 0.5, w, h}, true
 }
 
+@(private)
 AnimatedSprite_getBounds :: proc(node: ^Node) -> (sdl.FRect, bool) {
 	size := AnimationPlayer_FrameSize(&(cast(^AnimatedSprite)node).animation)
 	if size == {} do return {}, false
 	return {-size.x * 0.5, -size.y * 0.5, size.x, size.y}, true
 }
 
+@(private)
 AnimatedSprite_update :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 	AnimationPlayer_Update(&(cast(^AnimatedSprite)node).animation, deltaTime)
 }
 
+@(private)
 AnimatedSprite_draw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	sprite := cast(^AnimatedSprite)node
 	size := AnimationPlayer_FrameSize(&sprite.animation)

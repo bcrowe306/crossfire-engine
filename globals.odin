@@ -63,6 +63,7 @@ Global :: proc($T: typeid, game: ^Game = nil) -> ^T {
 Creates the project's globals, fields set, before the scenes are built (`Game_LoadProject`).
 Unknown scripts are reported and left out.
 */
+@(private)
 Globals_Start :: proc(game: ^Game, globals: []GlobalData) {
 	allocator := Game_GetAllocator(game)
 	for g in globals {
@@ -87,16 +88,19 @@ Globals_Start :: proc(game: ^Game, globals: []GlobalData) {
 }
 
 // Runs the globals' `ready`, in order (after the scenes exist)
+@(private)
 Globals_Ready :: proc(game: ^Game) {
 	for g in game.globals do if g.info.ready != nil do g.info.ready(g.data)
 }
 
 // Every frame, before the scene updates
+@(private)
 Globals_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 	for g in game.globals do if g.info.update != nil do g.info.update(g.data, events, deltaTime)
 }
 
 // After the scene draws: globals with a `draw`, in screen space
+@(private)
 Globals_Draw :: proc(game: ^Game) {
 	SetDrawState(TRANSFORM2D_IDENTITY)
 	if game.renderer != nil do sdl.SetRenderDrawBlendMode(game.renderer, sdl.BLENDMODE_BLEND)
@@ -108,11 +112,13 @@ Globals_Draw :: proc(game: ^Game) {
 }
 
 // The game switched to another scene
+@(private)
 Globals_SceneChanged :: proc(game: ^Game, scene: ^Scene) {
 	for g in game.globals do if g.info.sceneChanged != nil do g.info.sceneChanged(g.data, scene)
 }
 
 // The game ends: `destroy` hooks, in reverse order (their memory goes with the game's)
+@(private)
 Globals_Destroy :: proc(game: ^Game) {
 	#reverse for g in game.globals do if g.info.destroy != nil do g.info.destroy(g.data)
 	clear(&game.globals)

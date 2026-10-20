@@ -222,6 +222,7 @@ backgrounds and the collision body. Entity nodes are left running (scripts may h
 entity changes and layers added or removed show on the next Play. The project replaced is kept
 until the game ends: entity nodes point into it.
 */
+@(private)
 LDtk_WatchFiles :: proc(game: ^Game, deltaTime: f64) {
 	game.ldtkWatchTimer -= deltaTime
 	if game.ldtkWatchTimer > 0 do return

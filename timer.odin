@@ -98,6 +98,7 @@ Inputs:
 - timer: The timer
 - deltaTime: Seconds since the last update
 */
+@(private)
 TimerNode_Update :: proc(timer: ^Timer, deltaTime: f32) {
 	if !timer.running do return
 	timer.elapsed += time.Duration(f64(deltaTime) * f64(time.Second))
