@@ -570,43 +570,69 @@ tileSource :: proc(tile: u32, x, y, w, h: int) -> (int, int) {
 	return sx, sy
 }
 
-// Composites the layers under `parent` (-1: the top level) onto `target`, bottom up
+// A layer to draw in a frame, in Aseprite's render plan: its place in the layer order, and its cel
 @(private="file")
-composeGroup :: proc(ase: ^Aseprite, frame, parent: int, target: []u8, only: []int) {
-	// The group's layers in this frame's order: by index plus their cel's z-index (NOTE.5)
-	Entry :: struct { layer, order, zIndex: int }
-	entries := make([dynamic]Entry, context.temp_allocator)
-	for layer, i in ase.layers {
-		if layer.parent != parent do continue
-		z := 0
-		if cel := Aseprite_Cel(ase, frame, i); cel != nil do z = cel.zIndex
-		append(&entries, Entry{i, i + z, z})
-	}
-	slice.stable_sort_by(entries[:], proc(a, b: Entry) -> bool { return a.order < b.order || (a.order == b.order && a.zIndex < b.zIndex) })
+PlanItem :: struct {
+	order, zIndex: int,
+	layer: int,
+	cel: ^AsepriteCel,
+}
 
-	for entry in entries {
-		layer := &ase.layers[entry.layer]
-		if only == nil {
-			if !layer.visible || layer.reference do continue
-		} else if layer.type != .Group && !slice.contains(only, entry.layer) {
+/*
+The layers under `parent` (-1: the top level) in the order Aseprite draws them (its RenderPlan):
+numbered in tree order (groups take a number too), flattened into their layers unless groups are
+composited apart (the file's flag), then sorted by number + the cel's z-index (ties: the lower
+z-index first); hidden ones (or, with `only`, those not listed) left out after sorting.
+*/
+@(private="file")
+renderPlan :: proc(ase: ^Aseprite, frame, parent: int, only: []int) -> [dynamic]PlanItem {
+	items := make([dynamic]PlanItem, context.temp_allocator)
+	order := 0
+	add :: proc(ase: ^Aseprite, frame, layer: int, order: ^int, items: ^[dynamic]PlanItem) {
+		order^ += 1
+		if ase.layers[layer].type == .Group && !ase.groupBlending {
+			for child, i in ase.layers do if child.parent == layer do add(ase, frame, i, order, items)
+			return
+		}
+		cel := Aseprite_Cel(ase, frame, layer)
+		append(items, PlanItem{order = order^, zIndex = cel != nil ? cel.zIndex : 0, layer = layer, cel = cel})
+	}
+	for layer, i in ase.layers do if layer.parent == parent do add(ase, frame, i, &order, &items)
+	hasZ := false
+	for item in items do if item.zIndex != 0 do hasZ = true
+	if hasZ {
+		for &item in items do item.order += item.zIndex
+		slice.stable_sort_by(items[:], proc(a, b: PlanItem) -> bool { return a.order < b.order || (a.order == b.order && a.zIndex < b.zIndex) })
+	}
+	kept := make([dynamic]PlanItem, context.temp_allocator)
+	for item in items {
+		if only != nil {
+			if ase.layers[item.layer].type != .Group && !slice.contains(only, item.layer) do continue
+		} else if !Aseprite_LayerShown(ase, item.layer) {
 			continue
 		}
+		append(&kept, item)
+	}
+	return kept
+}
+
+// Composites the layers under `parent` (-1: the top level) onto `target`, as Aseprite renders them
+@(private="file")
+composeGroup :: proc(ase: ^Aseprite, frame, parent: int, target: []u8, only: []int) {
+	for item in renderPlan(ase, frame, parent, only) {
+		layer := &ase.layers[item.layer]
 		switch layer.type {
 		case .Group:
-			if ase.groupBlending && (layer.opacity < 255 || layer.blendMode != .Normal) {
-				// Composited apart, then blended as one picture
-				group := make([]u8, len(target), context.temp_allocator)
-				composeGroup(ase, frame, entry.layer, group, only)
-				blendImage(target, ase.width, ase.height, group, 0, 0, ase.width, ase.height, layer.opacity, layer.blendMode)
-			} else {
-				composeGroup(ase, frame, entry.layer, target, only)
-			}
+			// Composited apart (the file says so), then blended as one picture
+			group := make([]u8, len(target), context.temp_allocator)
+			composeGroup(ase, frame, item.layer, group, only)
+			blendImage(target, ase.width, ase.height, group, 0, 0, ase.width, ase.height, layer.opacity, layer.blendMode)
 		case .Image:
-			cel := Aseprite_Cel(ase, frame, entry.layer)
+			cel := item.cel
 			if cel == nil || cel.pixels == nil do continue
 			blendImage(target, ase.width, ase.height, cel.pixels, cel.x, cel.y, cel.width, cel.height, mul8(cel.opacity, layer.opacity), layer.blendMode)
 		case .Tilemap:
-			cel := Aseprite_Cel(ase, frame, entry.layer)
+			cel := item.cel
 			if cel == nil || cel.tiles == nil || layer.tileset < 0 || layer.tileset >= len(ase.tilesets) do continue
 			tileset := &ase.tilesets[layer.tileset]
 			for row in 0..<cel.height do for column in 0..<cel.width {
@@ -619,9 +645,22 @@ composeGroup :: proc(ase: ^Aseprite, frame, parent: int, target: []u8, only: []i
 	}
 }
 
+// Aseprite's MUL_UN8 (pixman's): a * b / 255, rounded
+@(private="file")
+mulUn8 :: #force_inline proc(a, b: int) -> int {
+	t := a * b + 0x80
+	return ((t >> 8) + t) >> 8
+}
+
+// Aseprite's DIV_UN8: a * 255 / b, rounded
+@(private="file")
+divUn8 :: #force_inline proc(a, b: int) -> int {
+	return (a * 0xff + b / 2) / b
+}
+
 @(private="file")
 mul8 :: proc(a, b: u8) -> u8 {
-	return u8((int(a) * int(b) + 127) / 255)
+	return u8(mulUn8(int(a), int(b)))
 }
 
 // Blends an image onto the target at (x, y), clipped to it
@@ -631,120 +670,140 @@ blendImage :: proc(target: []u8, targetWidth, targetHeight: int, image: []u8, x,
 	for row in max(0, -y)..<min(height, targetHeight - y) {
 		for column in max(0, -x)..<min(width, targetWidth - x) {
 			src := image[(row * width + column) * 4:][:4]
-			if src[3] == 0 do continue
+			// Aseprite skips the image's mask color (0: fully transparent black)
+			if src[0] == 0 && src[1] == 0 && src[2] == 0 && src[3] == 0 do continue
 			dst := target[((y + row) * targetWidth + x + column) * 4:][:4]
-			blendPixel(dst, src, opacity, mode)
+			out := blendPixel({int(dst[0]), int(dst[1]), int(dst[2]), int(dst[3])}, {int(src[0]), int(src[1]), int(src[2]), int(src[3])}, int(opacity), mode)
+			dst[0], dst[1], dst[2], dst[3] = u8(out[0]), u8(out[1]), u8(out[2]), u8(out[3])
 		}
 	}
 }
 
-// Source over backdrop with a blend mode (W3C Compositing and Blending Level 1, non-premultiplied)
+/*
+A pixel blended as Aseprite blends it (its blend_funcs.cpp, with its default "new blending"):
+normal is source over backdrop in integers; the other modes blend the colors, then mix that with
+normal by the backdrop's alpha.
+*/
 @(private="file")
-blendPixel :: proc(dst, src: []u8, opacity: u8, mode: AsepriteBlendMode) {
-	as := f32(src[3]) / 255 * f32(opacity) / 255
-	ab := f32(dst[3]) / 255
-	cs := [3]f32{f32(src[0]), f32(src[1]), f32(src[2])} / 255
-	cb := [3]f32{f32(dst[0]), f32(dst[1]), f32(dst[2])} / 255
-	mixed := cs
-	if mode != .Normal && ab > 0 {
-		blended := blendColor(cb, cs, mode)
-		mixed = (1 - ab) * cs + ab * blended
-	}
-	ao := as + ab * (1 - as)
-	if ao <= 0 {
-		dst[0], dst[1], dst[2], dst[3] = 0, 0, 0, 0
-		return
-	}
-	co := (as * mixed + ab * (1 - as) * cb) / ao
-	for i in 0..<3 do dst[i] = u8(clamp(co[i] * 255 + 0.5, 0, 255))
-	dst[3] = u8(clamp(ao * 255 + 0.5, 0, 255))
+blendPixel :: proc(b, s: [4]int, opacity: int, mode: AsepriteBlendMode) -> [4]int {
+	if mode == .Normal || b[3] == 0 do return blendNormal(b, s, opacity)
+	normal := blendNormal(b, s, opacity)
+	blend := blendNormal(b, {0, 0, 0, s[3]} + blendColor(b, s, mode), opacity)
+	normalToBlend := blendMerge(normal, blend, b[3])
+	srcTotalAlpha := mulUn8(s[3], opacity)
+	return blendMerge(normalToBlend, blend, mulUn8(b[3], srcTotalAlpha))
 }
 
+// rgba_blender_normal
 @(private="file")
-blendColor :: proc(b, s: [3]f32, mode: AsepriteBlendMode) -> [3]f32 {
-	switch mode {
-	case .Hue:        return setLum(setSat(s, sat(b)), lum(b))
-	case .Saturation: return setLum(setSat(b, sat(s)), lum(b))
-	case .Color:      return setLum(s, lum(b))
-	case .Luminosity: return setLum(b, lum(s))
-	case .Normal, .Multiply, .Screen, .Overlay, .Darken, .Lighten, .Color_Dodge, .Color_Burn, .Hard_Light,
-	     .Soft_Light, .Difference, .Exclusion, .Addition, .Subtract, .Divide:
-	}
-	out: [3]f32
-	for i in 0..<3 do out[i] = blendChannel(b[i], s[i], mode)
-	return out
+blendNormal :: proc(b, s: [4]int, opacity: int) -> [4]int {
+	if b[3] == 0 do return {s[0], s[1], s[2], mulUn8(s[3], opacity)}
+	if s[3] == 0 do return b
+	sa := mulUn8(s[3], opacity)
+	ra := sa + b[3] - mulUn8(b[3], sa)
+	return {b[0] + (s[0] - b[0]) * sa / ra, b[1] + (s[1] - b[1]) * sa / ra, b[2] + (s[2] - b[2]) * sa / ra, ra}
 }
 
+// rgba_blender_merge
 @(private="file")
-blendChannel :: proc(b, s: f32, mode: AsepriteBlendMode) -> f32 {
-	multiply :: proc(b, s: f32) -> f32 { return b * s }
-	screen :: proc(b, s: f32) -> f32 { return b + s - b * s }
-	hardLight :: proc(b, s: f32) -> f32 { return s <= 0.5 ? b * 2 * s : b + (2 * s - 1) - b * (2 * s - 1) }
+blendMerge :: proc(b, s: [4]int, opacity: int) -> [4]int {
+	r: [4]int
+	switch {
+	case b[3] == 0: r.rgb = s.rgb
+	case s[3] == 0: r.rgb = b.rgb
+	case:
+		for i in 0..<3 do r[i] = b[i] + mulUn8(s[i] - b[i], opacity)
+	}
+	r[3] = b[3] + mulUn8(s[3] - b[3], opacity)
+	if r[3] == 0 do r.rgb = 0
+	return r
+}
+
+// A blend mode's color (its alpha 0), from the backdrop's and the source's
+@(private="file")
+blendColor :: proc(b, s: [4]int, mode: AsepriteBlendMode) -> [4]int {
 	#partial switch mode {
-	case .Multiply:    return multiply(b, s)
-	case .Screen:      return screen(b, s)
-	case .Overlay:     return hardLight(s, b)
-	case .Darken:      return min(b, s)
-	case .Lighten:     return max(b, s)
+	case .Hue, .Saturation, .Color, .Luminosity:
+		bf := [3]f64{f64(b[0]), f64(b[1]), f64(b[2])} / 255
+		sf := [3]f64{f64(s[0]), f64(s[1]), f64(s[2])} / 255
+		out: [3]f64
+		#partial switch mode {
+		case .Hue:        out = setLum(setSat(sf, sat(bf)), lum(bf))
+		case .Saturation: out = setLum(setSat(bf, sat(sf)), lum(bf))
+		case .Color:      out = setLum(sf, lum(bf))
+		case .Luminosity: out = setLum(bf, lum(sf))
+		}
+		// Truncated, as Aseprite does
+		return {int(255 * out[0]), int(255 * out[1]), int(255 * out[2]), 0}
+	}
+	r: [4]int
+	for i in 0..<3 do r[i] = blendChannel(b[i], s[i], mode)
+	return r
+}
+
+@(private="file")
+blendChannel :: proc(b, s: int, mode: AsepriteBlendMode) -> int {
+	multiply :: proc(b, s: int) -> int { return mulUn8(b, s) }
+	screen :: proc(b, s: int) -> int { return b + s - mulUn8(b, s) }
+	hardLight :: proc(b, s: int) -> int { return s < 128 ? multiply(b, s << 1) : screen(b, (s << 1) - 255) }
+	#partial switch mode {
+	case .Multiply:   return multiply(b, s)
+	case .Screen:     return screen(b, s)
+	case .Overlay:    return hardLight(s, b)
+	case .Darken:     return min(b, s)
+	case .Lighten:    return max(b, s)
 	case .Color_Dodge:
 		if b == 0 do return 0
-		if s >= 1 do return 1
-		return min(1, b / (1 - s))
+		if b >= 255 - s do return 255
+		return divUn8(b, 255 - s)
 	case .Color_Burn:
-		if b >= 1 do return 1
-		if s <= 0 do return 0
-		return 1 - min(1, (1 - b) / s)
-	case .Hard_Light:  return hardLight(b, s)
+		if b == 255 do return 255
+		if 255 - b >= s do return 0
+		return 255 - divUn8(255 - b, s)
+	case .Hard_Light: return hardLight(b, s)
 	case .Soft_Light:
-		if s <= 0.5 do return b - (1 - 2 * s) * b * (1 - b)
-		d := b <= 0.25 ? ((16 * b - 12) * b + 4) * b : math.sqrt(b)
-		return b + (2 * s - 1) * (d - b)
-	case .Difference:  return abs(b - s)
-	case .Exclusion:   return b + s - 2 * b * s
-	case .Addition:    return min(1, b + s)
-	case .Subtract:    return max(0, b - s)
+		bf, sf := f64(b) / 255, f64(s) / 255
+		d := bf <= 0.25 ? ((16 * bf - 12) * bf + 4) * bf : math.sqrt(bf)
+		r := sf <= 0.5 ? bf - (1 - 2 * sf) * bf * (1 - bf) : bf + (2 * sf - 1) * (d - bf)
+		return int(r * 255 + 0.5)
+	case .Difference: return abs(b - s)
+	case .Exclusion:
+		t := mulUn8(b, s)
+		return b + s - 2 * t
+	case .Addition:   return min(b + s, 255)
+	case .Subtract:   return max(b - s, 0)
 	case .Divide:
 		if b == 0 do return 0
-		if b >= s do return 1
-		return b / s
+		if b >= s do return 255
+		return divUn8(b, s)
 	}
 	return s
 }
 
 @(private="file")
-lum :: proc(c: [3]f32) -> f32 { return 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2] }
+lum :: proc(c: [3]f64) -> f64 { return 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2] }
 
 @(private="file")
-sat :: proc(c: [3]f32) -> f32 { return max(c[0], c[1], c[2]) - min(c[0], c[1], c[2]) }
+sat :: proc(c: [3]f64) -> f64 { return max(c[0], c[1], c[2]) - min(c[0], c[1], c[2]) }
 
+// set_lum with clip_color
 @(private="file")
-setLum :: proc(c: [3]f32, l: f32) -> [3]f32 {
-	d := l - lum(c)
-	out := c + d
-	// Clip into 0..1 keeping the luminosity
+setLum :: proc(c: [3]f64, l: f64) -> [3]f64 {
+	out := c + (l - lum(c))
 	l2 := lum(out)
 	n := min(out[0], out[1], out[2])
 	x := max(out[0], out[1], out[2])
-	if n < 0 && l2 - n != 0 do out = l2 + (out - l2) * l2 / (l2 - n)
-	if x > 1 && x - l2 != 0 do out = l2 + (out - l2) * (1 - l2) / (x - l2)
+	if n < 0 do out = l2 + ((out - l2) * l2) / (l2 - n)
+	if x > 1 do out = l2 + ((out - l2) * (1 - l2)) / (x - l2)
 	return out
 }
 
 @(private="file")
-setSat :: proc(c: [3]f32, s: f32) -> [3]f32 {
-	hi, lo := 0, 0
-	for i in 1..<3 {
-		if c[i] > c[hi] do hi = i
-		if c[i] < c[lo] do lo = i
-	}
-	if hi == lo do return {0, 0, 0}
-	mid := 3 - hi - lo
-	out: [3]f32
-	if c[hi] > c[lo] {
-		out[mid] = (c[mid] - c[lo]) * s / (c[hi] - c[lo])
-		out[hi] = s
-	}
-	return out
+setSat :: proc(c: [3]f64, s: f64) -> [3]f64 {
+	lo := min(c[0], c[1], c[2])
+	range := max(c[0], c[1], c[2]) - lo
+	if range > 0 do return ((c - lo) * s) / range
+	return {0, 0, 0}
 }
 
 // --- Reading ---
