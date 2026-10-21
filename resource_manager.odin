@@ -40,6 +40,9 @@ ResourceManager :: struct {
 	mixer: ^mix.Mixer,
 	// Loaded textures, by path (the keys are owned)
 	textures: map[string]^sdl.Texture,
+	// Each texture file's modification time when it was read (keys shared with `textures`), for
+	// `ResourceManager_ReloadChangedTextures`
+	textureTimes: map[string]i64,
 	// Loaded sounds, by path (the keys are owned)
 	audio: map[string]^mix.Audio,
 	// Loaded fonts, by "path@size" (the keys are owned)
@@ -124,8 +127,66 @@ ResourceManager_loadTexture :: proc(rm: ^ResourceManager, filePath: string) -> ^
 		return nil
 	}
 
-	rm.textures[strings.clone(filePath)] = tex
+	key := strings.clone(filePath)
+	rm.textures[key] = tex
+	rm.textureTimes[key] = fileModified(filePath)
 	return tex
+}
+
+/*
+Reads again the textures whose files changed since they were loaded (saved in Aseprite or an image
+editor), updating them in place: nodes keep drawing the same texture, now with the new pixels. A
+file that changed size isn't updated (logged): it shows when its scene is built again. Development
+runs call it twice a second (`Game_Update`); editors call it for their previews.
+
+Inputs:
+- rm: The resource manager
+
+Returns:
+- How many textures were updated
+*/
+ResourceManager_ReloadChangedTextures :: proc(rm: ^ResourceManager) -> (reloaded: int) {
+	for path, texture in rm.textures {
+		modified := fileModified(path)
+		if modified == 0 || modified == rm.textureTimes[path] do continue
+		rm.textureTimes[path] = modified
+		surface: ^sdl.Surface
+		if Aseprite_IsFile(path) {
+			ase, err := Aseprite_Load(path)
+			if err != .None {
+				log.warnf("Reloading %s: %v", path, err)
+				continue
+			}
+			pixels := Aseprite_FramePixels(ase, 0, context.temp_allocator)
+			if ase.width > 0 && ase.height > 0 {
+				view := sdl.CreateSurfaceFrom(i32(ase.width), i32(ase.height), .RGBA32, raw_data(pixels), i32(ase.width * 4))
+				if view != nil {
+					surface = sdl.DuplicateSurface(view)
+					sdl.DestroySurface(view)
+				}
+			}
+			Aseprite_Destroy(ase)
+		} else {
+			surface = Platform_LoadSurface(path)
+		}
+		if surface == nil {
+			log.warnf("Reloading %s: %s", path, sdl.GetError())
+			continue
+		}
+		defer sdl.DestroySurface(surface)
+		if surface.w != texture.w || surface.h != texture.h {
+			log.warnf("%s is %d x %d now (it was %d x %d): it shows at its new size once its scene is built again", path, surface.w, surface.h, texture.w, texture.h)
+			continue
+		}
+		converted := sdl.ConvertSurface(surface, texture.format)
+		if converted == nil do continue
+		defer sdl.DestroySurface(converted)
+		if sdl.UpdateTexture(texture, nil, converted.pixels, converted.pitch) {
+			reloaded += 1
+			log.infof("Reloaded %s", path)
+		}
+	}
+	return
 }
 
 // Loads a sound or music file. predecode decodes the whole file up front, which is best
@@ -179,6 +240,7 @@ ResourceManager_loadFont :: proc(rm: ^ResourceManager, filePath: string, size: f
 ResourceManager_unloadTexture :: proc(rm: ^ResourceManager, filePath: string) {
 	if filePath not_in rm.textures do return
 	key, tex := delete_key(&rm.textures, filePath)
+	delete_key(&rm.textureTimes, filePath)
 	sdl.DestroyTexture(tex)
 	delete(key)
 }
@@ -213,6 +275,7 @@ ResourceManager_destroy :: proc(rm: ^ResourceManager) {
 		delete(key)
 	}
 	delete(rm.textures)
+	delete(rm.textureTimes)
 
 	for key, audio in rm.audio {
 		Audio_Destroy(audio)

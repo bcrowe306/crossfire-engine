@@ -523,6 +523,13 @@ savedFields).
   apart only when the file says so (header flag 2) and they have an opacity or blend mode.
 - Textures from Aseprite files get nearest filtering (pixel art).
 
+**Images saved while running** (`ResourceManager_ReloadChangedTextures`, resource_manager.odin):
+the resource manager keeps each texture file's modification time (`textureTimes`); development
+runs (`Game.devKeys`) look twice a second and update changed textures **in place**
+(`UpdateTexture` after converting to the texture's format), so every node keeps its pointer. A
+file that changed size isn't updated (logged). Any image (`Platform_LoadSurface`), Aseprite files
+too. Editors call it for their previews. changed_textures_reload_in_place tests both kinds.
+
 **Particles** (particles.odin; its doc comment has the details):
 - A `ParticleEmitter`'s `settings` is a plain value (no pointers): scene files store it as a
   `<particles>` element of the fields that differ from `DEFAULT_PARTICLE_SETTINGS`, by reflection

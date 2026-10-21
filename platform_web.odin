@@ -176,6 +176,21 @@ Platform_LoadTexture :: proc(renderer: ^sdl.Renderer, path: string) -> ^sdl.Text
 	return sdl.CreateTextureFromSurface(renderer, surface)
 }
 
+/*
+Reads an image file into a surface: PNG or BMP in the browser.
+
+Inputs:
+- path: The file
+
+Returns:
+- The surface (the caller's), or nil
+*/
+Platform_LoadSurface :: proc(path: string) -> ^sdl.Surface {
+	surface := sdl.LoadPNG(fmt.ctprint(path))
+	if surface == nil do surface = sdl.LoadBMP(fmt.ctprint(path))
+	return surface
+}
+
 // Saves in the browser: localStorage (web/odin_env.js), keyed "<game>/<slot>"
 foreign import storage "env.o"
 

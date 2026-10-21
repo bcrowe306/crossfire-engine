@@ -4,7 +4,10 @@ package crossfire
 import "core:math/rand"
 import "core:slice"
 import "core:os"
+import "core:strings"
 import "core:testing"
+import "core:time"
+import "core:log"
 import sdl "vendor:sdl3"
 
 // Aseprite files: Aseprite's own test sprites (testdata/aseprite, MIT) read, composited (its
@@ -219,6 +222,7 @@ aseprite_files_are_textures :: proc(t: ^testing.T) {
 			delete(path)
 		}
 		delete(rm.textures)
+		delete(rm.textureTimes)
 	}
 	path := "testdata/aseprite/z-order.aseprite"
 	texture := ResourceManager_loadTexture(&rm, path)
@@ -243,5 +247,87 @@ aseprite_files_are_textures :: proc(t: ^testing.T) {
 		got := pixels[int(y) * int(surface.pitch) + x * 4:][:4]
 		testing.expectf(t, got[0] == want[0] && got[1] == want[1] && got[2] == want[2], "(%d, %d): %v, want %v", x, y, got, want)
 	}
+	free_all(context.temp_allocator)
+}
+
+// Saved again (in Aseprite, or an image editor): the texture takes the new pixels in place; a new
+// size waits for the scene to be built again
+@(test)
+changed_textures_reload_in_place :: proc(t: ^testing.T) {
+	base, _ := os.temp_directory(context.temp_allocator)
+	dir := JoinPath(base, "engine_test_texture_reload")
+	_ = os.remove_all(dir)
+	_ = os.make_directory_all(dir)
+	defer os.remove_all(dir)
+	copyFixture :: proc(name, to: string) {
+		data, _ := os.read_entire_file(JoinPath("testdata/aseprite", name), context.temp_allocator)
+		_ = os.write_entire_file(to, data)
+	}
+	path := JoinPath(dir, "art.aseprite")
+	copyFixture("tags3.aseprite", path)
+
+	surface := sdl.CreateSurface(8, 8, .RGBA32)
+	defer sdl.DestroySurface(surface)
+	renderer := sdl.CreateSoftwareRenderer(surface)
+	defer sdl.DestroyRenderer(renderer)
+	rm := ResourceManager{renderer = renderer}
+	defer {
+		for key, texture in rm.textures {
+			sdl.DestroyTexture(texture)
+			delete(key)
+		}
+		delete(rm.textures)
+		delete(rm.textureTimes)
+	}
+	texture := ResourceManager_loadTexture(&rm, path)
+	testing.expect(t, texture != nil, "loaded")
+	if texture == nil do return
+	testing.expect_value(t, ResourceManager_ReloadChangedTextures(&rm), 0)
+
+	draw :: proc(renderer: ^sdl.Renderer, texture: ^sdl.Texture, surface: ^sdl.Surface) -> [4]u8 {
+		sdl.SetRenderDrawColor(renderer, 0, 0, 0, 0)
+		sdl.RenderClear(renderer)
+		sdl.RenderTexture(renderer, texture, nil, &sdl.FRect{0, 0, 4, 4})
+		sdl.FlushRenderer(renderer)
+		p := ([^]u8)(surface.pixels)
+		return {p[0], p[1], p[2], p[3]}
+	}
+	before := draw(renderer, texture, surface)
+	// Another 4 x 4 sprite saved over it
+	time.sleep(20 * time.Millisecond)
+	copyFixture("bg-index-3.aseprite", path)
+	testing.expect_value(t, ResourceManager_ReloadChangedTextures(&rm), 1)
+	testing.expect_value(t, rm.textures[path], texture)
+	after := draw(renderer, texture, surface)
+	other := loadFixture(t, "bg-index-3.aseprite")
+	if other != nil {
+		want := pixelAt(Aseprite_FramePixels(other, 0, context.temp_allocator), 4, 0, 0)
+		testing.expectf(t, after.rgb == want.rgb, "the new pixels: %v, want %v (it was %v)", after, want, before)
+		Aseprite_Destroy(other)
+	}
+	// A 7 x 15 one: left as it is (logged)
+	time.sleep(20 * time.Millisecond)
+	copyFixture("z-order.aseprite", path)
+	context.logger = log.nil_logger()
+	testing.expect_value(t, ResourceManager_ReloadChangedTextures(&rm), 0)
+	testing.expect_value(t, draw(renderer, texture, surface), after)
+
+	// Other images too (SDL_image): a red picture saved over in blue
+	saveBMP :: proc(path: string, color: [4]u8) {
+		image := sdl.CreateSurface(4, 4, .RGBA32)
+		defer sdl.DestroySurface(image)
+		sdl.FillSurfaceRect(image, nil, sdl.MapSurfaceRGBA(image, color.r, color.g, color.b, color.a))
+		sdl.SaveBMP(image, strings.clone_to_cstring(path, context.temp_allocator))
+	}
+	bmp := JoinPath(dir, "plain.bmp")
+	saveBMP(bmp, {255, 0, 0, 255})
+	plain := ResourceManager_loadTexture(&rm, bmp)
+	testing.expect(t, plain != nil, "a BMP")
+	if plain == nil do return
+	testing.expect_value(t, draw(renderer, plain, surface).rgb, [3]u8{255, 0, 0})
+	time.sleep(20 * time.Millisecond)
+	saveBMP(bmp, {0, 0, 255, 255})
+	testing.expect_value(t, ResourceManager_ReloadChangedTextures(&rm), 1)
+	testing.expect_value(t, draw(renderer, plain, surface).rgb, [3]u8{0, 0, 255})
 	free_all(context.temp_allocator)
 }

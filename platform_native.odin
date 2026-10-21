@@ -136,6 +136,22 @@ Platform_LoadTexture :: proc(renderer: ^sdl.Renderer, path: string) -> ^sdl.Text
 	return img.LoadTexture(renderer, fmt.ctprint(path))
 }
 
+/*
+Reads an image file into a surface (any format SDL_image reads), from the data pack first.
+
+Inputs:
+- path: The file
+
+Returns:
+- The surface (the caller's), or nil
+*/
+Platform_LoadSurface :: proc(path: string) -> ^sdl.Surface {
+	if data, packed := Pack_Bytes(path); packed {
+		return img.Load_IO(sdl.IOFromConstMem(raw_data(data), uint(len(data))), true)
+	}
+	return img.Load(fmt.ctprint(path))
+}
+
 // A context for contextless code (`@(init)` procedures): Odin's default
 Platform_DefaultContext :: proc "contextless" () -> runtime.Context {
 	return runtime.default_context()

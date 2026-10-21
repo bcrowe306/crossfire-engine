@@ -494,7 +494,7 @@ LDtk_IntGridAtPosition :: proc(root: ^LDtkLevelNode, layer: string, position: [2
 // INTERNAL
 
 // A file's modification time (SDL's: on the desktop and in the browser), 0 when it's missing
-@(private="file")
+@(private)
 fileModified :: proc(path: string) -> i64 {
 	info: sdl.PathInfo
 	if !sdl.GetPathInfo(strings.clone_to_cstring(path, context.temp_allocator), &info) do return 0

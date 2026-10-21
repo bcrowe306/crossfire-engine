@@ -109,6 +109,8 @@ Game :: struct {
 	ldtkRetired: [dynamic]^LDtkProject,
 	// Development runs: seconds until the LDtk files are looked at again
 	ldtkWatchTimer: f64,
+	// Seconds to the next look at the texture files (development runs)
+	textureWatchTimer: f64,
 	// The folder asset paths are relative to (owned; set by Game_LoadProject, "" for the working directory)
 	projectDir: string,
 	// Seconds left of a hitstop (Game_HitStop): scenes and globals get a delta time of 0
@@ -373,8 +375,15 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 	}
 	if scene := game.currentScene; scene != nil && scene.camera != nil do Camera2D_UpdateShake(scene.camera, realDeltaTime)
 
-	// Development runs: LDtk files saved since are read again (ldtk_nodes.odin)
+	// Development runs: LDtk files saved since are read again (ldtk_nodes.odin), and images
 	if game.devKeys && len(game.ldtk) > 0 do LDtk_WatchFiles(game, deltaTime)
+	if game.devKeys {
+		game.textureWatchTimer -= realDeltaTime
+		if game.textureWatchTimer <= 0 {
+			game.textureWatchTimer = LDTK_WATCH_SECONDS
+			ResourceManager_ReloadChangedTextures(&game.resourceManager)
+		}
+	}
 
 	// Globals first: the scene's nodes see what they changed this frame
 	Globals_Update(game, events, deltaTime)
