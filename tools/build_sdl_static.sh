@@ -7,7 +7,10 @@
 #
 # Every library is built with no outside dependencies:
 #   SDL3_image  PNG and JPEG through stb_image (not libpng: no animated PNG); BMP, GIF, TGA, QOI, PNM, SVG, XCF, XPM, LBM,
-#               PCX built in. No AVIF, TIFF, WebP or JPEG XL (they'd need more libraries)
+#               PCX built in. No AVIF, TIFF, WebP or JPEG XL (they'd need more libraries). Not
+#               Apple's ImageIO either (SDL_image's default on Apple, ahead of stb): it color-
+#               manages PNGs, so a Mac showed other pixels than every other platform (the Aseprite
+#               conformance test failed there)
 #   SDL3_ttf    its bundled FreeType; no HarfBuzz (complex-script shaping: it's C++) or PlutoSVG
 #               (color emoji)
 #   SDL3_mixer  WAV, AIFF, VOC, AU, FLAC (dr_flac), MP3 (dr_mp3), Ogg Vorbis (stb_vorbis), MIDI
@@ -77,7 +80,7 @@ build() { # <source> <name> <options...>
 }
 
 build "$src/SDL" SDL3 -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_TEST_LIBRARY=OFF
-build "$src/SDL_image" SDL3_image -DSDLIMAGE_VENDORED=OFF -DSDLIMAGE_DEPS_SHARED=OFF -DSDLIMAGE_BACKEND_STB=ON -DSDLIMAGE_PNG_LIBPNG=OFF \
+build "$src/SDL_image" SDL3_image -DSDLIMAGE_VENDORED=OFF -DSDLIMAGE_DEPS_SHARED=OFF -DSDLIMAGE_BACKEND_STB=ON -DSDLIMAGE_BACKEND_IMAGEIO=OFF -DSDLIMAGE_PNG_LIBPNG=OFF \
 	-DSDLIMAGE_AVIF=OFF -DSDLIMAGE_JXL=OFF -DSDLIMAGE_TIF=OFF -DSDLIMAGE_WEBP=OFF -DSDLIMAGE_SAMPLES=OFF -DSDLIMAGE_TESTS=OFF
 build "$src/SDL_ttf" SDL3_ttf -DSDLTTF_VENDORED=ON -DSDLTTF_HARFBUZZ=OFF -DSDLTTF_PLUTOSVG=OFF -DSDLTTF_SAMPLES=OFF
 build "$src/SDL_mixer" SDL3_mixer -DSDLMIXER_VENDORED=OFF -DSDLMIXER_DEPS_SHARED=OFF -DSDLMIXER_EXAMPLES=OFF -DSDLMIXER_TESTS=OFF \

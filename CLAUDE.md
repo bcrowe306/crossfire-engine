@@ -51,7 +51,8 @@ shared libraries are linked: `libSDL3`, `libSDL3_image`, `libSDL3_ttf`, `libSDL3
   the bindings' 0, so the static `sdl3_static.lib`... define everything and SDL3.dll isn't loaded.
   The names avoid `SDL3.lib` on purpose. Odin ignores `priority_index` elsewhere (its order only
   matters to MSVC).
-- What's built in: images through stb_image (PNG, JPEG) plus SDL_image's own formats (no AVIF,
+- What's built in: images through stb_image (PNG, JPEG; not Apple's ImageIO, which color-manages
+  PNGs: the same pixels on every platform) plus SDL_image's own formats (no AVIF,
   TIFF, WebP, JXL, animated PNG); SDL_ttf with its bundled FreeType (no HarfBuzz shaping, no
   color emoji); SDL_mixer with WAV, AIFF, VOC, AU, FLAC, MP3, Ogg Vorbis, MIDI. FreeType's
   license asks games to credit it.
