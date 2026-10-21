@@ -112,14 +112,22 @@ ResourceManager_loadTexture :: proc(rm: ^ResourceManager, filePath: string) -> ^
 	}
 
 	tex: ^sdl.Texture
-	file, sheet := asepriteSheetFile(filePath)
+	file, part, index := asepriteTextureKey(filePath)
 	if Aseprite_IsFile(file) {
 		ase, err := Aseprite_Load(file)
 		if err != .None {
 			log.errorf("Error loading texture: %s, %v", filePath, err)
 			return nil
 		}
-		tex = Aseprite_CreateTexture(rm.renderer, ase, sheet ? -1 : 0)
+		pixels, width, height := asepritePartPixels(ase, part, index)
+		if width > 0 && height > 0 {
+			if surface := sdl.CreateSurfaceFrom(i32(width), i32(height), .RGBA32, raw_data(pixels), i32(width * 4)); surface != nil {
+				tex = sdl.CreateTextureFromSurface(rm.renderer, surface)
+				sdl.DestroySurface(surface)
+				// Pixel art
+				if tex != nil do sdl.SetTextureScaleMode(tex, .NEAREST)
+			}
+		}
 		Aseprite_Destroy(ase)
 	} else {
 		tex = Platform_LoadTexture(rm.renderer, filePath)
@@ -149,7 +157,7 @@ Returns:
 */
 ResourceManager_ReloadChangedTextures :: proc(rm: ^ResourceManager) -> (reloaded: int) {
 	for path, texture in rm.textures {
-		file, sheet := asepriteSheetFile(path)
+		file, part, index := asepriteTextureKey(path)
 		modified := fileModified(file)
 		if modified == 0 || modified == rm.textureTimes[path] do continue
 		rm.textureTimes[path] = modified
@@ -160,15 +168,7 @@ ResourceManager_ReloadChangedTextures :: proc(rm: ^ResourceManager) -> (reloaded
 				log.warnf("Reloading %s: %v", path, err)
 				continue
 			}
-			pixels: []u8
-			width, height := ase.width, ase.height
-			if sheet {
-				columns, rows: int
-				pixels, columns, rows = Aseprite_SheetPixels(ase, context.temp_allocator)
-				width, height = columns * ase.width, rows * ase.height
-			} else {
-				pixels = Aseprite_FramePixels(ase, 0, context.temp_allocator)
-			}
+			pixels, width, height := asepritePartPixels(ase, part, index)
 			if width > 0 && height > 0 {
 				view := sdl.CreateSurfaceFrom(i32(width), i32(height), .RGBA32, raw_data(pixels), i32(width * 4))
 				if view != nil {

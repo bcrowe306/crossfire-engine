@@ -184,6 +184,7 @@ SCENE_NODE_TYPES := [SceneNodeKind]typeid{
 	.AudioPlayer2D   = AudioPlayer,
 	.MusicPlayer     = AudioPlayer,
 	.LDtkLevel       = LDtkLevelNode,
+	.TileMap         = TileMapNode,
 }
 
 /*
@@ -517,6 +518,8 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			}
 		case .LDtkLevel:
 			n = ldtkBuildNode(scene, &node, projectDir, attachScripts, depth)
+		case .TileMap:
+			n = tileMapBuildNode(scene, &node, projectDir)
 		}
 		if Node_IsPhysicsBody(n) {
 			body := cast(^PhysicsBody)n

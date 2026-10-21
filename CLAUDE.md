@@ -148,6 +148,9 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `aseprite_test.odin`, `testdata/aseprite/` | Tests on Aseprite's own test sprites (MIT, from its `tests/` folder; LICENSE.txt beside them): its z-order test's colors, groups, tags, linked cels, indexed transparency, tilemaps and flips, user data, slices; damaged files; textures drawn; the inflater |
 | `animation_sets.odin` | **Animation assets**: `AnimationSetData` (`.anim.xml`, `ParseAnimationSet`), `AnimationSet_FromAseprite` (an Aseprite file's tags), `Game_LoadAnimationSet` (`Game.animationSets`), `AnimatedSprite_SetAnimations`, `AnimatedSprite_UseAnimations` (scripts), `Asset_Animations`, `ASEPRITE_SHEET_SUFFIX` |
 | `animation_sets_test.odin` | Tests: frame durations, repeats, reverse ping-pong, clearing; Aseprite tags as animations (directions, repeats); `.anim.xml` files; scene files' AnimatedSprites playing an Aseprite file; switching sets from code |
+| `tilemap.odin` | **TileMap nodes**: an Aseprite file's tilemap layers (`TileMapSettings`: `tilemap`, `frame`, `layers`, `tileCollision`), a `TileMapLayer` per layer drawn in one batch, collision from tile properties (`TileMap_TileCollision`: StaticBody "Collision" for solid and one-way tiles, an Area per area name), `TileMap_TileAt`, `TileMap_TileProperty`, `TileMap_Rebuild`, reloading saved files in development runs |
+| `tile_batch.odin` | `TileBatch` / `TileQuad`: tiles of one texture with Aseprite's flips drawn as one `RenderGeometry`, culled to the screen; the software renderer's cache (as LDtk's layers) |
+| `tilemap_test.odin` | Tests: an Aseprite file written by the test (tilemap layer, tile properties, a flipped tile): collision kinds, the built layer and bodies (merged shapes, one-way, an Area), lookups, pixels and flips, a development run reloading the saved file |
 | `pack.odin` | **The data pack**: a game's files appended to its own executable (`Pack_Append`; the footer's `ODINPAK1`), read back by `Pack_Open` at start (the project is then `PACK_ROOT`); `Pack_Bytes` / `Pack_Has`, a `Pack` value for tools and tests (`Pack_OpenFile`) |
 | `pack_test.odin` | Tests: a pack appended to a file and read back by path |
 | `sdl_static.odin` | Links the static SDL (tools/build_sdl_static.sh) when it's built: `SDL_STATIC`, `SDL_LINKED_STATICALLY` |
@@ -534,6 +537,15 @@ savedFields).
   reloads like any texture); a tag without a repeat count loops, as Aseprite's preview plays it.
 - Sets are read once per game (`Game.animationSets`, its arena), like components; editors put
   their in-memory sets there before building.
+
+**TileMaps** (tilemap.odin; its doc comment has the details): **Aseprite's tilemap model is the
+engine's**: tilesets of same-sized tiles (tile 0 empty), layers of 32-bit tile values (index +
+flip bits), properties on tiles. A TileMap node keeps its own parsed file (`TileMapNode.ase`; the
+layers' tiles point into it); a rebuild keeps the old file until the next update
+(`retired`), when the replaced layers are gone. Tilesets load as `<file>#tileset<n>` textures
+(the resource manager's `asepriteTextureKey`), so they reload in place too. Painting tilemaps
+in the editor will write the same data (later). LDtk's tile layers still draw with their own
+code (square tiles, no diagonal flips); moving them onto `TileBatch` is a possible cleanup.
 
 **Images saved while running** (`ResourceManager_ReloadChangedTextures`, resource_manager.odin):
 the resource manager keeps each texture file's modification time (`textureTimes`); development

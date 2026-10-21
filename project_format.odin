@@ -136,7 +136,8 @@ Version history:
   0 for the device's own; stereo 48 kHz without them); scenes' own settings (`SceneSettings`: `screenLayers`, `background`, `gravityX` /
   `gravityY` on the root element); animation assets (`.anim.xml` files, kind "Animation", and
   Aseprite files: animation_sets.odin), AnimatedSprite `animations`, `<animation>` `durations`
-  and `repeat`, the `PingPongReverse` play mode; LDtkLevel `oneWayValues`, `areaValues` and
+  and `repeat`, the `PingPongReverse` play mode; `TileMap` nodes (`tilemap`, `frame`, `layers`,
+  `tileCollision`: tilemap.odin); LDtkLevel `oneWayValues`, `areaValues` and
   `<entity make script noScript>`. Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
@@ -208,6 +209,9 @@ SceneNodeKind :: enum {
 	MusicPlayer,
 	// A level (or every level of a world) of an LDtk project: tiles, entities, collision
 	LDtkLevel,
+	// The tilemap layers of an Aseprite file: tiles, and collision from the tiles' properties
+	// (format 13; tilemap.odin)
+	TileMap,
 }
 
 /*
@@ -275,6 +279,7 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.AudioPlayer2D  = {"Plays a sound in the world: panned and quieter with distance from the camera", .Audio},
 	.MusicPlayer    = {"Streams music: fades, looping, seeking, through a mix bus", .Audio},
 	.LDtkLevel      = {"A level made in the LDtk level editor: its tile layers, entities and IntGrid collision", .Scene},
+	.TileMap        = {"Tilemap layers drawn in Aseprite: their tiles, and collision from the tiles' properties", .Graphics},
 }
 
 /*
@@ -487,6 +492,9 @@ SceneNodeData :: struct {
 	// generated collision uses `collisionLayer`, `collisionMask`, `friction`, `restitution`
 	// (ldtk_nodes.odin)
 	ldtk: LDtkLevelSettings,
+	// TileMap: `tilemap` (an Aseprite file), `frame`, `layers`, `tileCollision` (tilemap.odin); its
+	// collision uses `collisionLayer`, `collisionMask`, `friction`, `restitution` too
+	tilemap: TileMapSettings,
 }
 
 /*
@@ -650,6 +658,7 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	particles = DEFAULT_PARTICLE_SETTINGS,
 	audio = DEFAULT_AUDIO_SETTINGS,
 	ldtk = DEFAULT_LDTK_LEVEL_SETTINGS,
+	tilemap = DEFAULT_TILEMAP_SETTINGS,
 }
 
 /*
@@ -1104,6 +1113,8 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.sound)
 		delete(node.bus)
 		LDtkLevelSettings_Destroy(&node.ldtk)
+		delete(node.tilemap.file)
+		delete(node.tilemap.layers)
 	}
 	delete(scene.nodes)
 	delete(scene.name)
@@ -1356,6 +1367,12 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.hertz = attrF32(doc, element, "hertz", 0)
 	node.dampingRatio = attrF32(doc, element, "damping", DEFAULT_SCENE_NODE.dampingRatio)
 	node.collideConnected = attrBool(doc, element, "collideConnected", false)
+	node.tilemap = {
+		file = cloneAttr(doc, element, "tilemap", ""),
+		frame = max(attrInt(doc, element, "frame", 0), 0),
+		layers = cloneAttr(doc, element, "layers", ""),
+		collision = attrBool(doc, element, "tileCollision", DEFAULT_TILEMAP_SETTINGS.collision),
+	}
 	dl := DEFAULT_LDTK_LEVEL_SETTINGS
 	node.ldtk = {
 		file = cloneAttr(doc, element, "ldtk", ""),

@@ -175,9 +175,50 @@ Asset_Animations :: proc(game: ^Game, asset: AnimationAsset) -> ^AnimationSetDat
 	return set
 }
 
-// "assets/hero.aseprite#sheet" -> "assets/hero.aseprite", true
+// The resource manager key suffix for an Aseprite file's tileset (`#tileset0`: its first; tilemap.odin)
+ASEPRITE_TILESET_SUFFIX :: "#tileset"
+
+// What part of an Aseprite file a texture key names
 @(private)
-asepriteSheetFile :: proc(key: string) -> (string, bool) {
-	if !strings.has_suffix(key, ASEPRITE_SHEET_SUFFIX) do return key, false
-	return key[:len(key) - len(ASEPRITE_SHEET_SUFFIX)], true
+AsepriteTexturePart :: enum {
+	// Its first frame (the plain path)
+	Frame,
+	// Every frame on a sheet (ASEPRITE_SHEET_SUFFIX)
+	Sheet,
+	// A tileset's tiles, one column (ASEPRITE_TILESET_SUFFIX and its index)
+	Tileset,
+}
+
+// "assets/hero.aseprite#sheet" -> "assets/hero.aseprite", .Sheet; "x.aseprite#tileset1" -> .Tileset, 1
+@(private)
+asepriteTextureKey :: proc(key: string) -> (file: string, part: AsepriteTexturePart, index: int) {
+	if strings.has_suffix(key, ASEPRITE_SHEET_SUFFIX) do return key[:len(key) - len(ASEPRITE_SHEET_SUFFIX)], .Sheet, 0
+	if at := strings.last_index(key, ASEPRITE_TILESET_SUFFIX); at >= 0 {
+		digits := key[at + len(ASEPRITE_TILESET_SUFFIX):]
+		n := 0
+		for ch in digits {
+			if ch < '0' || ch > '9' do return key, .Frame, 0
+			n = n * 10 + int(ch - '0')
+		}
+		if len(digits) > 0 do return key[:at], .Tileset, n
+	}
+	return key, .Frame, 0
+}
+
+// The pixels of a part of an Aseprite file (temp allocated), and their size; nil when it has none
+@(private)
+asepritePartPixels :: proc(ase: ^Aseprite, part: AsepriteTexturePart, index: int) -> (pixels: []u8, width, height: int) {
+	switch part {
+	case .Frame:
+		return Aseprite_FramePixels(ase, 0, context.temp_allocator), ase.width, ase.height
+	case .Sheet:
+		columns, rows: int
+		pixels, columns, rows = Aseprite_SheetPixels(ase, context.temp_allocator)
+		return pixels, columns * ase.width, rows * ase.height
+	case .Tileset:
+		if index < 0 || index >= len(ase.tilesets) || ase.tilesets[index].pixels == nil do return nil, 0, 0
+		t := &ase.tilesets[index]
+		return t.pixels, t.tileWidth, t.tileHeight * t.count
+	}
+	return nil, 0, 0
 }
