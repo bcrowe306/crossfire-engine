@@ -151,7 +151,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `animation_sets_test.odin` | Tests: frame durations, repeats, reverse ping-pong, clearing; Aseprite tags as animations (directions, repeats); `.anim.xml` files; scene files' AnimatedSprites playing an Aseprite file; switching sets from code |
 | `aseprite_nodes.odin` | **Aseprite in a running game**: `Game_LoadAseprite` (files kept for slices and events; `Game_ReloadChangedAseprites`), `Aseprite_SliceAt`, `Aseprite_FrameEvents`, `Aseprite_LayersNamed`; sprites' pivot slices (`Sprite_Origin`) and 9-patches, CollisionShapes following slices (hitboxes), layer-filtered texture keys (`?layers=`); Sprite / AnimatedSprite drawing |
 | `aseprite_nodes_test.odin` | Tests (on Aseprite's files): frame events through `animation.onFrameEvent`, layers drawn, pivot and 9-patch slices, hitboxes following a moving slice (mirrored, hidden), animated tilemaps and tiles set while they play |
-| `tilemap.odin` | **TileMap nodes**: an Aseprite file's tilemap layers (`TileMapSettings`: `tilemap`, `frame`, `layers`, `tileCollision`), a `TileMapLayer` per layer drawn in one batch, collision from tile properties (`TileMap_TileCollision`: StaticBody "Collision" for solid and one-way tiles, an Area per area name), `TileMap_TileAt`, `TileMap_TileProperty`, `TileMap_Rebuild`, reloading saved files in development runs |
+| `tilemap.odin` | **TileMap nodes**: an Aseprite file's tilemap layers (`TileMapSettings`: `tilemap`, `frame`, `layers`, `tileCollision`), a `TileMapLayer` per layer drawn in one batch, collision from tile properties (`TileMap_TileCollision`: StaticBody "Collision" for solid and one-way tiles, an Area per area name), `TileMap_TileAt`, `TileMap_TileProperty`, `TileMap_Rebuild`, painted layers (`TileLayerData`), terrains (`Terrain_TileFor`, `TileGrid_PaintTerrain`, `TileMap_SetTerrain`), reloading saved files in development runs |
 | `tile_batch.odin` | `TileBatch` / `TileQuad`: tiles of one texture with Aseprite's flips drawn as one `RenderGeometry`, culled to the screen; the software renderer's cache (as LDtk's layers) |
 | `tilemap_test.odin` | Tests: an Aseprite file written by the test (tilemap layer, tile properties, a flipped tile): collision kinds, the built layer and bodies (merged shapes, one-way, an Area), lookups, pixels and flips, a development run reloading the saved file |
 | `pack.odin` | **The data pack**: a game's files appended to its own executable (`Pack_Append`; the footer's `ODINPAK1`), read back by `Pack_Open` at start (the project is then `PACK_ROOT`); `Pack_Bytes` / `Pack_Has`, a `Pack` value for tools and tests (`Pack_OpenFile`) |
@@ -553,8 +553,15 @@ engine's**: tilesets of same-sized tiles (tile 0 empty), layers of 32-bit tile v
 flip bits), properties on tiles. A TileMap node keeps its own parsed file (`TileMapNode.ase`; the
 layers' tiles point into it); a rebuild keeps the old file until the next update
 (`retired`), when the replaced layers are gone. Tilesets load as `<file>#tileset<n>` textures
-(the resource manager's `asepriteTextureKey`), so they reload in place too. Painting tilemaps
-in the editor will write the same data (later). LDtk's tile layers still draw with their own
+(the resource manager's `asepriteTextureKey`), so they reload in place too. **Painted layers** (`TileMapSettings.painted`, `TileLayerData`: scene files'
+`<tiles layer tileset x y columns rows data/>`, the tiles little-endian u32 in base64:
+`TileLayer_Encode` / `Decode`) replace the file layer of their name or add a layer of their own;
+the build gives them a synthetic cel in the node's arena, so drawing, collision and
+`TileMap_SetTile` treat them like the file's. **Terrains** (autotiling): tile properties `terrain`
+(a name) and `mask` (same-terrain neighbours: `TERRAIN_N` 1 ... `TERRAIN_NW` 128, or names);
+`Terrain_TileFor` takes the closest mask (corners count only with both sides: the blob rule; an
+edge-only set ignores them), `TileGrid_PaintTerrain` sets a cell and refits its neighbours
+(off-grid counts as the same terrain), `TileMap_SetTerrain` from code. tilemap_paint_test.odin. LDtk's tile layers still draw with their own
 code (square tiles, no diagonal flips); moving them onto `TileBatch` is a possible cleanup.
 
 **Aseprite in a running game** (aseprite_nodes.odin; its doc comment has the details):
