@@ -57,8 +57,12 @@ AsepriteEntry :: struct {
 	modified: i64,
 }
 
-// Frees the files the game read (Game_Destroy)
-@(private)
+/*
+Frees the Aseprite files the game keeps (Game_Destroy does it; editors' preview games too).
+
+Inputs:
+- game: The game
+*/
 Game_ForgetAseprites :: proc(game: ^Game) {
 	for _, entry in game.aseprites do Aseprite_Destroy(entry.ase)
 	game.aseprites = nil

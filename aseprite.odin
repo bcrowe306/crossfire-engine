@@ -1196,6 +1196,9 @@ parseAseprite :: proc(ase: ^Aseprite, data: []u8) -> AsepriteError {
 	ase.layers = layers[:]
 	ase.frames = frames[:]
 	ase.tags = tags[:]
+	// Aseprite lists slices in the opposite order to its file's chunks (its own reader adds each
+	// to the front): the same order here
+	slice.reverse(slices[:])
 	ase.slices = slices[:]
 	ase.tilesets = tilesets[:]
 	// Cels on layers that don't exist would index past them

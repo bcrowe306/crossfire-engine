@@ -73,6 +73,22 @@ aseprite_matches_aseprite :: proc(t: ^testing.T) {
 			testing.expectf(t, ours.name == o["name"].(json.String) && ours.from == int(o["from"].(json.Float)) && ours.to == int(o["to"].(json.Float)) &&
 				directions[ours.direction] == o["direction"].(json.String) && ours.repeat == repeat, "%s: tag %d (%v)", name, i, o)
 		}
+		// Slices: the same order, names and keys
+		refSlices, _ := root["meta"].(json.Object)["slices"].(json.Array)
+		testing.expectf(t, len(refSlices) == len(ase.slices), "%s: %d slices, Aseprite %d", name, len(ase.slices), len(refSlices))
+		for rs, i in refSlices do if i < len(ase.slices) {
+			o := rs.(json.Object)
+			ours := ase.slices[i]
+			testing.expectf(t, ours.name == o["name"].(json.String), "%s: slice %d is %s, Aseprite's %v", name, i, ours.name, o["name"])
+			keys := o["keys"].(json.Array)
+			testing.expectf(t, len(keys) == len(ours.keys), "%s: slice %s's keys", name, ours.name)
+			for k, j in keys do if j < len(ours.keys) {
+				b := k.(json.Object)["bounds"].(json.Object)
+				got := ours.keys[j]
+				testing.expectf(t, got.frame == int(k.(json.Object)["frame"].(json.Float)) && got.bounds == {int(b["x"].(json.Float)), int(b["y"].(json.Float)), int(b["w"].(json.Float)), int(b["h"].(json.Float))},
+					"%s: slice %s key %d: %v", name, ours.name, j, got)
+			}
+		}
 		checked += 1
 	}
 	testing.expectf(t, checked >= 27, "%d cases checked", checked)
