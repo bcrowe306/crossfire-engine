@@ -575,7 +575,37 @@ ldtkBuildNode :: proc(scene: ^Scene, data: ^SceneNodeData, projectDir: string, a
 	root.project = project
 	if project == nil || len(project.worlds) == 0 do return root
 
-	// The level, and its world
+	placed, found := LDtk_PlacedLevels(project, settings^, context.temp_allocator)
+	if !found {
+		log.errorf("LDtk: %s has no level '%s'", settings.file, settings.level)
+		return root
+	}
+	for p in placed do buildLevel(root, p.level, p.position, data, projectDir, attachScripts, depth)
+	return root
+}
+
+// A level a level node builds, and where in the node it goes
+LDtkPlacedLevel :: struct {
+	level: ^LDtkLevel,
+	position: [2]f32,
+}
+
+/*
+The levels a level node builds, where each goes in the node: the chosen one (`settings.level`, by
+identifier or iid; "" for the first) at the node's origin, or with `allLevels` every level of its
+world, at its world position (laid end to end in linear worlds).
+
+Inputs:
+- project: The parsed project
+- settings: The level node's settings
+- allocator: For the list
+
+Returns:
+- The levels, and false when the chosen level isn't in the project
+*/
+LDtk_PlacedLevels :: proc(project: ^LDtkProject, settings: LDtkLevelSettings, allocator := context.allocator) -> ([]LDtkPlacedLevel, bool) {
+	placed := make([dynamic]LDtkPlacedLevel, allocator)
+	if project == nil || len(project.worlds) == 0 do return placed[:], true
 	world := &project.worlds[0]
 	chosen: ^LDtkLevel
 	if settings.level != "" {
@@ -584,28 +614,24 @@ ldtkBuildNode :: proc(scene: ^Scene, data: ^SceneNodeData, projectDir: string, a
 				chosen, world = &l, &w
 			}
 		}
-		if chosen == nil {
-			log.errorf("LDtk: %s has no level '%s'", settings.file, settings.level)
-			return root
-		}
+		if chosen == nil do return placed[:], false
 	} else if len(world.levels) > 0 {
 		chosen = &world.levels[0]
 	}
-	if chosen == nil do return root
-
-	if settings.allLevels {
-		at: [2]f32
-		for &level in world.levels {
-			position := level.world
-			if world.layout == .LinearHorizontal || world.layout == .LinearVertical do position = at
-			buildLevel(root, &level, position, data, projectDir, attachScripts, depth)
-			if world.layout == .LinearHorizontal do at.x += level.size.x
-			if world.layout == .LinearVertical do at.y += level.size.y
-		}
-	} else {
-		buildLevel(root, chosen, {}, data, projectDir, attachScripts, depth)
+	if chosen == nil do return placed[:], true
+	if !settings.allLevels {
+		append(&placed, LDtkPlacedLevel{chosen, {}})
+		return placed[:], true
 	}
-	return root
+	at: [2]f32
+	for &level in world.levels {
+		position := level.world
+		if world.layout == .LinearHorizontal || world.layout == .LinearVertical do position = at
+		append(&placed, LDtkPlacedLevel{&level, position})
+		if world.layout == .LinearHorizontal do at.x += level.size.x
+		if world.layout == .LinearVertical do at.y += level.size.y
+	}
+	return placed[:], true
 }
 
 @(private="file")
@@ -706,14 +732,12 @@ spawnEntity :: proc(root: ^LDtkLevelNode, group: ^Node, level: ^LDtkLevel, layer
 	scene := root.scene
 	n: ^Node
 	// A component mapped to it
-	for m in settings.entityComponents {
-		if m.entity != entity.identifier || m.component == "" do continue
+	if component := LDtk_EntityComponent(settings, entity.identifier); component != "" {
 		instance := DEFAULT_SCENE_NODE
 		instance.kind = .Component
-		instance.component = m.component
+		instance.component = component
 		instance.name = entity.identifier
 		n = buildNodes(scene, {instance}, projectDir, context.temp_allocator, attachScripts, depth + 1)[0]
-		break
 	}
 	// Code that makes it
 	if n == nil {
@@ -774,16 +798,77 @@ entityProps :: proc(info: ^ScriptInfo, entity: ^LDtkEntity, gridSize: int) -> []
 	props := make([dynamic]ScriptPropData, context.temp_allocator)
 	for field in info.fields {
 		for f in entity.fields {
-			if !sameFieldName(field.name, f.identifier) do continue
+			if !LDtk_FieldMatches(field.name, f.identifier) do continue
 			if text, ok := LDtk_ValueText(f.value, gridSize); ok do append(&props, ScriptPropData{field.name, text})
 		}
 	}
 	return props[:]
 }
 
-// "maxSpeed" matches LDtk's "max_speed", "MaxSpeed" and "Max_speed"
-@(private="file")
-sameFieldName :: proc(a, b: string) -> bool {
+/*
+How a level node builds an entity (`spawnEntity`), in order: the component mapped to its type
+(`LDtkLevelSettings.entityComponents`), else code registered for it (`LDtk_RegisterEntity`), else
+its rectangle (and tile); then, if what was built has no script, the script named like the type
+(`Script_Find(identifier)`). Its LDtk fields set the script fields whose names match
+(`LDtk_FieldMatches`). Editors describe it with these procedures.
+
+Inputs:
+- settings: The level node's settings
+- identifier: The entity type ("Coin")
+
+Returns:
+- The component its type is mapped to, or "" for none
+*/
+LDtk_EntityComponent :: proc(settings: ^LDtkLevelSettings, identifier: string) -> string {
+	for m in settings.entityComponents do if m.entity == identifier && m.component != "" do return m.component
+	return ""
+}
+
+/*
+Whether code registered a spawner for an entity type (`LDtk_RegisterEntity`): the game's own
+build has them; an editor (without the game's scripts) never does.
+
+Inputs:
+- identifier: The entity type
+
+Returns:
+- true when a spawner makes its nodes
+*/
+LDtk_HasSpawner :: proc(identifier: string) -> bool {
+	return identifier in ldtkSpawners
+}
+
+/*
+Whether an IntGrid value is solid for a level node's collision: any value but 0 when the node
+lists none, else one it lists.
+
+Inputs:
+- values: The node's collision values (`LDtkLevelSettings.collisionValues`)
+- value: The cell's value
+
+Returns:
+- true when the cell becomes collision
+*/
+LDtk_IsCollisionValue :: proc(values: []int, value: int) -> bool {
+	if value == 0 do return false
+	if len(values) == 0 do return true
+	for wanted in values do if wanted == value do return true
+	return false
+}
+
+/*
+Whether a script field takes an LDtk field's value: their names match, ignoring case and
+underscores ("maxSpeed" matches LDtk's "max_speed", "MaxSpeed" and "Max_speed").
+
+Inputs:
+- scriptField: The script field's name
+- ldtkField: The LDtk field's identifier
+
+Returns:
+- true when they match
+*/
+LDtk_FieldMatches :: proc(scriptField, ldtkField: string) -> bool {
+	a, b := scriptField, ldtkField
 	normalize :: proc(s: string) -> string {
 		lower := strings.to_lower(s, context.temp_allocator)
 		result, _ := strings.remove_all(lower, "_", context.temp_allocator)
@@ -799,11 +884,7 @@ buildCollision :: proc(view: ^LDtkLevelView, layer: ^LDtkLayer, values: []int, p
 	w, h := layer.cells.x, layer.cells.y
 	if w <= 0 || h <= 0 do return
 	solid :: proc(layer: ^LDtkLayer, values: []int, x, y: int) -> bool {
-		v := LDtk_IntGridAt(layer, x, y)
-		if v == 0 do return false
-		if len(values) == 0 do return true
-		for wanted in values do if wanted == v do return true
-		return false
+		return LDtk_IsCollisionValue(values, LDtk_IntGridAt(layer, x, y))
 	}
 	used := make([]bool, w * h, context.temp_allocator)
 	body := CreateStaticBody(scene)

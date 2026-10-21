@@ -417,3 +417,18 @@ ldtk_reloads_while_playing :: proc(t: ^testing.T) {
 	testing.expect(t, Scene_FindNode(scene, "Level/Level_0/Walls") != nil && len(LDtk_FindEntityNodes(level, "Lever")) == 1, "the rest stays")
 	free_all(context.temp_allocator)
 }
+
+@(test)
+ldtk_build_rules_for_editors :: proc(t: ^testing.T) {
+	testing.expect(t, LDtk_FieldMatches("maxSpeed", "max_speed") && LDtk_FieldMatches("maxSpeed", "MaxSpeed"), "case and underscores ignored")
+	testing.expect(t, !LDtk_FieldMatches("speed", "maxSpeed"), "other names")
+	testing.expect(t, LDtk_IsCollisionValue(nil, 3) && !LDtk_IsCollisionValue(nil, 0), "any value but 0 without a list")
+	testing.expect(t, LDtk_IsCollisionValue({1, 2}, 2) && !LDtk_IsCollisionValue({1, 2}, 3), "the listed ones")
+	settings: LDtkLevelSettings
+	settings.entityComponents = make([dynamic]LDtkEntityComponent, context.temp_allocator)
+	append(&settings.entityComponents, LDtkEntityComponent{"Coin", "components/coin.component.xml"}, LDtkEntityComponent{"Hero", ""})
+	testing.expect_value(t, LDtk_EntityComponent(&settings, "Coin"), "components/coin.component.xml")
+	testing.expect_value(t, LDtk_EntityComponent(&settings, "Hero"), "")
+	testing.expect(t, !LDtk_HasSpawner("NobodyRegisteredThis"), "no spawner")
+	free_all(context.temp_allocator)
+}

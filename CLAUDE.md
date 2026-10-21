@@ -430,6 +430,11 @@ in stereo whatever's asked (audio_test.odin checks the rate).
 - LDtk lists layers top-most first: they're built in reverse. Entity `px` is the pivot.
 - Tile layers draw as one `RenderGeometry` through the draw transform and tint; tilesets get
   nearest filtering unless `smoothTiles`. IntGrid layers without tiles draw their values' colors.
+- **The build rules are public for editors** (and used by the build itself, so they can't drift):
+  `LDtk_PlacedLevels` (which levels a node builds and where), `LDtk_EntityComponent` (its
+  doc lists the entity rules: mapped component, else a spawner, else its rectangle; then the
+  script named like the type if what was built has none), `LDtk_HasSpawner`,
+  `LDtk_IsCollisionValue`, `LDtk_FieldMatches`.
 - Script fields from LDtk fields: names match ignoring case and underscores; points become the
   pixel middle of their cell; arrays, tiles and references are left to code (`LDtk_EntityOf`).
 - **Parallax** is LDtk's (its Camera.hx): offset camera-in-level × factor (− half the layer ×
