@@ -21,7 +21,7 @@ SHIP :: `<?xml version="1.0" encoding="UTF-8"?>
 		<node kind="ParticleEmitter" name="Exhaust" y="30"/>
 		<node kind="Node2D" name="Gun" x="10"/>
 	</node>
-	<node kind="Node2D" name="Ignored"/>
+	<node kind="Node2D" name="Beside"/>
 </component>`
 
 @(private="file")
@@ -45,7 +45,8 @@ components_are_instanced :: proc(t: ^testing.T) {
 	defer SceneData_Destroy(&parsed)
 	testing.expect_value(t, err, ProjectError.None)
 	testing.expect_value(t, parsed.name, "Ship")
-	testing.expect_value(t, len(parsed.nodes), 3) // The root and its children; a second root is ignored
+	testing.expect_value(t, len(parsed.nodes), 4) // The root and its children; a node beside it goes under it
+	testing.expect_value(t, parsed.nodes[3].parent, 0)
 	_, wrong := ParseComponent(`<scene name="S"/>`)
 	testing.expect_value(t, wrong, ProjectError.Wrong_Root)
 
@@ -90,7 +91,8 @@ components_are_instanced :: proc(t: ^testing.T) {
 	testing.expect(t, a != nil && b != nil && a != b, "two more")
 	testing.expect_value(t, a.position, [2]f32{1, 2})
 	testing.expect(t, b.parent == player, "under the given parent")
-	testing.expect_value(t, len(a.children), 2)
+	testing.expect_value(t, len(a.children), 3)
+	testing.expect(t, Node_FindPath(a, "Beside") != nil, "the node beside the root, under it")
 
 	// Scene_AddComponent is the same; an instance's root knows its component, nodes inside don't
 	SHIP_ASSET :: ComponentAsset{"components/ship.component.xml"}
@@ -115,6 +117,6 @@ components_are_instanced :: proc(t: ^testing.T) {
 	testing.expect(t, Scene_RemoveComponent(scene, cId) && Scene_RemoveComponent(scene, bId), "removed")
 	Scene_ProcessQueues(scene)
 	testing.expect(t, Scene_GetNode(scene, cId) == nil && Scene_GetNode(scene, gunId) == nil, "with its tree")
-	testing.expect(t, Scene_GetNode(scene, bId) == nil && len(player.children) == 2, "and from under its parent (Player keeps its own two)")
+	testing.expect(t, Scene_GetNode(scene, bId) == nil && len(player.children) == 3, "and from under its parent (Player keeps its own three)")
 	testing.expect_value(t, len(Scene_GetComponentInstances(scene, SHIP_ASSET)), 5)
 }

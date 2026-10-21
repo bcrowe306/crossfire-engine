@@ -356,7 +356,9 @@ depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
 
 **Components** (project_loader.odin, project_format.odin's `ParseComponent`):
 - A component is a node tree in its own file (`<component>` root, the first node is the root),
-  an asset of kind "Component". A `Component` node in a scene is an instance: `buildNodes` builds
+  an asset of kind "Component". **It has one root:** `ParseComponent` reads top-level nodes after
+  the first as the root's last children (an older editor let nodes be added beside the root, and
+  they were dropped: a script's node field to one found nothing). A `Component` node in a scene is an instance: `buildNodes` builds
   the component's nodes in its place, and the root takes the instance's name, position,
   rotation, scale, layer and visibility (replacing the root's own transform). The instance's
   children in the scene file go under the root; its script, if any, only when the root has none.

@@ -888,7 +888,9 @@ Parses the text of a component file: one node tree saved to be reused in any sce
 		</node>
 	</component>
 
-Its first top-level node is the root (others are ignored). Scenes use it through a `Component`
+Its first top-level node is the root. A component has one root: top-level nodes after it are
+read as the root's last children, their values as they are (an older editor let nodes be added
+beside the root; they were dropped). Scenes use it through a `Component`
 node, `<node kind="Component" name="Ship2" x="100" y="50" component="components/ship.component.xml"/>`:
 the component's nodes are built in its place, the root taking the instance's name, transform,
 layer and visibility (Scene_Build); `Scene_AddComponent` adds one from code.
@@ -909,11 +911,10 @@ ParseComponent :: proc(text: string, allocator := context.allocator) -> (compone
 	context.allocator = allocator
 	component.name = cloneAttr(doc, 0, "name", "")
 	component.nodes = make([dynamic]SceneNodeData)
+	// The root, then any other top-level node under it
 	for child in childElements(doc, 0) {
-		if doc.elements[child].ident == "node" {
-			parseNode(doc, child, -1, &component)
-			break
-		}
+		if doc.elements[child].ident != "node" do continue
+		parseNode(doc, child, len(component.nodes) == 0 ? -1 : 0, &component)
 	}
 	return component, .None
 }
