@@ -228,4 +228,29 @@ do
   local tag = spr:newTag(1, 2) tag.name = "flow"
   save(spr, "tilemap_animated")
 end
+-- 10. A terrain (autotiling): 16 grass tiles, one per combination of same-terrain edges
+-- (mask: N=1, E=4, S=16, W=64), each its own color, and a dirt tile without a terrain
+do
+  local spr = Sprite(16, 16, ColorMode.RGB)
+  app.command.NewLayer{ tilemap = true, gridBounds = Rectangle{ 0, 0, 4, 4 } }
+  local mapLay = app.layer
+  mapLay.name = "Ground"
+  spr:deleteLayer(spr.layers[1])
+  local bits = { 1, 4, 16, 64 }
+  for i = 0, 15 do
+    local tile = spr:newTile(mapLay.tileset, i + 1)
+    fill(tile.image, function(x, y) return rgba(i * 16, 255 - i * 16, (x + y) * 30, 255) end)
+    local mask = 0
+    for b = 0, 3 do if (i >> b) & 1 == 1 then mask = mask | bits[b + 1] end end
+    tile.properties.terrain = "grass"
+    tile.properties.mask = mask
+  end
+  local dirt = spr:newTile(mapLay.tileset, 17)
+  fill(dirt.image, function(x, y) return rgba(120, 80, 40, 255) end)
+  local map = Image{ width = 4, height = 4, colorMode = ColorMode.TILEMAP }
+  spr:newCel(mapLay, 1, map, Point(0, 0))
+  map = mapLay:cel(1).image
+  for i = 0, 15 do map:drawPixel(i % 4, i // 4, i + 1) end
+  save(spr, "terrain")
+end
 print("feature cases written")

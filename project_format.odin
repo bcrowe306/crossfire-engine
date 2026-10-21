@@ -1141,6 +1141,8 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.nineSlice)
 		delete(node.slice)
 		delete(node.tilemap.tag)
+		for &layer in node.tilemap.painted do TileLayerData_Destroy(&layer)
+		delete(node.tilemap.painted)
 		delete(node.component)
 		delete(node.sound)
 		delete(node.bus)
@@ -1411,6 +1413,7 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		collision = attrBool(doc, element, "tileCollision", DEFAULT_TILEMAP_SETTINGS.collision),
 		animate = attrBool(doc, element, "animate", false),
 		tag = cloneAttr(doc, element, "tag", ""),
+		painted = make([dynamic]TileLayerData),
 	}
 	dl := DEFAULT_LDTK_LEVEL_SETTINGS
 	node.ldtk = {
@@ -1449,6 +1452,18 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		case "particles":
 			// Unknown or bad attributes keep the default
 			for a in doc.elements[child].attribs do ParticleSettings_Set(&scene.nodes[index].particles, a.key, a.val)
+		case "tiles":
+			// A TileMap's painted layer (tilemap.odin)
+			columns, rows := max(attrInt(doc, child, "columns", 0), 0), max(attrInt(doc, child, "rows", 0), 0)
+			data, _ := xml.find_attribute_val_by_key(doc, child, "data")
+			tiles, _ := TileLayer_Decode(data, columns * rows)
+			append(&scene.nodes[index].tilemap.painted, TileLayerData{
+				layer = cloneAttr(doc, child, "layer", ""),
+				tileset = max(attrInt(doc, child, "tileset", 0), 0),
+				x = attrInt(doc, child, "x", 0), y = attrInt(doc, child, "y", 0),
+				columns = columns, rows = rows,
+				tiles = tiles,
+			})
 		case "entity":
 			append(&scene.nodes[index].ldtk.entityComponents, LDtkEntityComponent{
 				entity = cloneAttr(doc, child, "name", ""),

@@ -1,5 +1,6 @@
 package crossfire
 
+import "core:encoding/base64"
 import "core:fmt"
 import "core:log"
 import "core:strings"
@@ -52,6 +53,94 @@ TileMapSettings :: struct {
 	animate: bool,
 	// `tag`: the tag it plays ("": every frame)
 	tag: string,
+	// `<tiles>` children: layers painted in the editor (or by code), each replacing the file's
+	// tilemap layer of its name, or a new layer on one of the file's tilesets (format 13)
+	painted: [dynamic]TileLayerData,
+}
+
+/*
+A tilemap layer painted in the editor, kept in the scene file:
+
+	<tiles layer="Ground" tileset="0" x="0" y="0" columns="40" rows="12" data="AQAAAAEAAAA..."/>
+
+`data` is the tile values (Aseprite's: `ASEPRITE_TILE_ID` with the flip bits), row by row, as
+little-endian 32-bit numbers in base64 (`TileLayer_Encode`). A layer named like one of the file's
+tilemap layers replaces its tiles in every frame (the file's layer keeps its tileset, opacity and
+place among the others); any other name is a new layer, drawn over the file's, on the file's
+tileset `tileset` (an index in `Aseprite.tilesets`).
+*/
+TileLayerData :: struct {
+	// The layer's name
+	layer: string,
+	// A new layer's tileset (index in the file's tilesets)
+	tileset: int,
+	// Its top-left corner, in pixels (in the TileMap node's space)
+	x, y: int,
+	// Its grid's size in tiles
+	columns, rows: int,
+	// The tile values, row by row (columns * rows)
+	tiles: [dynamic]u32,
+}
+
+/*
+Tile values as the scene file's `data`: little-endian 32-bit numbers in base64.
+
+Inputs:
+- tiles: The tile values
+- allocator: For the text
+
+Returns:
+- The text
+*/
+TileLayer_Encode :: proc(tiles: []u32, allocator := context.allocator) -> string {
+	raw := make([]u8, len(tiles) * 4, context.temp_allocator)
+	for t, i in tiles do raw[i * 4], raw[i * 4 + 1], raw[i * 4 + 2], raw[i * 4 + 3] = u8(t), u8(t >> 8), u8(t >> 16), u8(t >> 24)
+	text, _ := base64.encode(raw, allocator = allocator)
+	return text
+}
+
+/*
+A scene file's `data` as tile values (`TileLayer_Encode`'s inverse).
+
+Inputs:
+- text: The base64 text
+- count: How many tiles it should hold (columns * rows)
+- allocator: For the tiles
+
+Returns:
+- The tiles (always `count` of them: missing ones empty), and false when the text is damaged
+*/
+TileLayer_Decode :: proc(text: string, count: int, allocator := context.allocator) -> ([dynamic]u32, bool) {
+	tiles := make([dynamic]u32, max(count, 0), allocator)
+	raw, err := base64.decode(text, allocator = context.temp_allocator)
+	if err != nil do return tiles, false
+	for i in 0..<min(count, len(raw) / 4) {
+		tiles[i] = u32(raw[i * 4]) | u32(raw[i * 4 + 1]) << 8 | u32(raw[i * 4 + 2]) << 16 | u32(raw[i * 4 + 3]) << 24
+	}
+	return tiles, len(raw) == count * 4
+}
+
+// Frees a painted layer's strings and tiles
+TileLayerData_Destroy :: proc(layer: ^TileLayerData, allocator := context.allocator) {
+	delete(layer.layer, allocator)
+	delete(layer.tiles)
+	layer^ = {}
+}
+
+// A copy of a painted layer (owning its name and tiles)
+TileLayerData_Clone :: proc(layer: TileLayerData, allocator := context.allocator) -> TileLayerData {
+	copy := layer
+	copy.layer = strings.clone(layer.layer, allocator)
+	copy.tiles = make([dynamic]u32, len(layer.tiles), allocator)
+	for t, i in layer.tiles do copy.tiles[i] = t
+	return copy
+}
+
+// Whether two painted layers are the same
+TileLayerData_Equal :: proc(a, b: TileLayerData) -> bool {
+	if a.layer != b.layer || a.tileset != b.tileset || a.x != b.x || a.y != b.y || a.columns != b.columns || a.rows != b.rows || len(a.tiles) != len(b.tiles) do return false
+	for t, i in a.tiles do if t != b.tiles[i] do return false
+	return true
 }
 
 // A TileMap node's settings by default
@@ -232,6 +321,8 @@ tileMapBuildNode :: proc(scene: ^Scene, data: ^SceneNodeData, projectDir: string
 	node.tileLayers = make([dynamic]^TileMapLayer, allocator)
 	node.bodies = make([dynamic]^Node, allocator)
 	node.settings.tag = strings.clone(data.tilemap.tag, allocator)
+	node.settings.painted = make([dynamic]TileLayerData, allocator)
+	for layer in data.tilemap.painted do append(&node.settings.painted, TileLayerData_Clone(layer, allocator))
 	node.retired = make([dynamic]^Aseprite, allocator)
 	node.getBounds = tileMapBounds
 	node.update = tileMapUpdate
@@ -278,34 +369,63 @@ buildTileMap :: proc(node: ^TileMapNode) {
 	node.shown, node.clock = 0, 0
 	for f, i in node.frames do if f == base do node.shown = i
 
+	named :: proc(wanted: []string, name: string) -> bool {
+		for w in wanted do if w == name do return true
+		return false
+	}
+	painted :: proc(node: ^TileMapNode, name: string) -> ^TileLayerData {
+		for &p in node.settings.painted do if p.layer == name do return &p
+		return nil
+	}
+	// The layers it builds: the file's tilemap layers (named, or none named and shown, or
+	// painted), then painted layers of their own
+	Source :: struct { name: string, layer: int, tileset: int, opacity: u8, painted: ^TileLayerData }
+	sources := make([dynamic]Source, context.temp_allocator)
 	for layer, i in ase.layers {
 		if layer.type != .Tilemap || layer.tileset < 0 || layer.tileset >= len(ase.tilesets) do continue
-		if len(wanted) > 0 {
-			named := false
-			for w in wanted do if w == layer.name do named = true
-			if !named do continue
-		} else if !Aseprite_LayerShown(ase, i) {
-			continue
+		p := painted(node, layer.name)
+		if len(wanted) > 0 ? !named(wanted[:], layer.name) : !Aseprite_LayerShown(ase, i) && p == nil do continue
+		append(&sources, Source{layer.name, i, layer.tileset, layer.opacity, p})
+	}
+	for &p in node.settings.painted {
+		if Aseprite_FindLayer(ase, p.layer) >= 0 && ase.layers[Aseprite_FindLayer(ase, p.layer)].type == .Tilemap do continue
+		if p.tileset < 0 || p.tileset >= len(ase.tilesets) do continue
+		if len(wanted) > 0 && !named(wanted[:], p.layer) do continue
+		append(&sources, Source{p.layer, -1, p.tileset, 255, &p})
+	}
+
+	for source in sources {
+		// A painted layer's tiles, the same in every frame: a cel of its own (the node's memory)
+		paintedCel: ^AsepriteCel
+		if p := source.painted; p != nil {
+			paintedCel = new(AsepriteCel, allocator)
+			paintedCel^ = {layer = source.layer, x = p.x, y = p.y, width = p.columns, height = p.rows, opacity = 255}
+			paintedCel.tiles = make([]u32, p.columns * p.rows, allocator)
+			copy(paintedCel.tiles, p.tiles[:])
+		}
+		celIn :: proc(ase: ^Aseprite, frame, layer: int, painted: ^AsepriteCel) -> ^AsepriteCel {
+			if painted != nil do return painted
+			return layer >= 0 ? Aseprite_Cel(ase, frame, layer) : nil
 		}
 		// A cel in some frame it plays, or in its frame
-		baseCel := Aseprite_Cel(ase, base, i)
+		baseCel := celIn(ase, base, source.layer, paintedCel)
 		any := baseCel != nil
-		for f in node.frames do if Aseprite_Cel(ase, f, i) != nil do any = true
+		for f in node.frames do if celIn(ase, f, source.layer, paintedCel) != nil do any = true
 		if !any do continue
-		tileset := &ase.tilesets[layer.tileset]
+		tileset := &ase.tilesets[source.tileset]
 		l := CreateNode(scene, TileMapLayer)
 		layerAllocator := Node_GetAllocator(l)
-		l.name = strings.clone(layer.name, layerAllocator)
+		l.name = strings.clone(source.name, layerAllocator)
 		l.layerName = l.name
-		l.layerIndex = i
+		l.layerIndex = source.layer
 		l.tileset = tileset
-		l.opacity = layer.opacity
+		l.opacity = source.opacity
 		l.base = baseCel
 		l.tileSize = {f32(tileset.tileWidth), f32(tileset.tileHeight)}
-		l.texture = scene.game.resourceManager->loadTexture(fmt.tprintf("%s%s%d", full, ASEPRITE_TILESET_SUFFIX, layer.tileset))
+		l.texture = scene.game.resourceManager->loadTexture(fmt.tprintf("%s%s%d", full, ASEPRITE_TILESET_SUFFIX, source.tileset))
 		l.frames = make([]TileMapLayerFrame, len(node.frames), layerAllocator)
 		for f, at in node.frames {
-			cel := Aseprite_Cel(ase, f, i)
+			cel := celIn(ase, f, source.layer, paintedCel)
 			l.frames[at] = {cel = cel, quads = make([dynamic]TileQuad, 0, cel != nil ? len(cel.tiles) : 0, layerAllocator)}
 			fillQuads(l, &l.frames[at])
 		}
@@ -577,4 +697,204 @@ TileMap_Rebuild :: proc(node: ^TileMapNode, ase: ^Aseprite) {
 	// The tilesets' textures follow the file (in place when their size is the same)
 	ResourceManager_ReloadChangedTextures(&node.scene.game.resourceManager)
 	buildTileMap(node)
+}
+
+// Terrains (autotiling): see the file's overview
+
+// The neighbour bits of a terrain tile's `mask` property: the neighbours of the same terrain it's
+// drawn for (a corner counts only with both its edges: the "blob" rule)
+TERRAIN_N  :: 1
+TERRAIN_NE :: 2
+TERRAIN_E  :: 4
+TERRAIN_SE :: 8
+TERRAIN_S  :: 16
+TERRAIN_SW :: 32
+TERRAIN_W  :: 64
+TERRAIN_NW :: 128
+
+/*
+The terrain a tile belongs to: its `terrain` property in Aseprite ("" for none).
+
+Inputs:
+- tileset: The tileset
+- tile: A tile value (flips don't matter)
+*/
+Tileset_TerrainOf :: proc(tileset: ^AsepriteTileset, tile: u32) -> string {
+	id := int(tile & ASEPRITE_TILE_ID)
+	if id <= 0 || id >= len(tileset.tileUserData) do return ""
+	value, ok := Aseprite_Property(tileset.tileUserData[id], "terrain")
+	if !ok do return ""
+	text, _ := value.(string)
+	return text
+}
+
+/*
+A tileset's terrains, in the order their first tiles come.
+
+Inputs:
+- tileset: The tileset
+- allocator: For the list
+
+Returns:
+- The terrains' names
+*/
+Tileset_Terrains :: proc(tileset: ^AsepriteTileset, allocator := context.allocator) -> []string {
+	names := make([dynamic]string, allocator)
+	for id in 1..<tileset.count {
+		name := Tileset_TerrainOf(tileset, u32(id))
+		if name == "" do continue
+		known := false
+		for n in names do if n == name do known = true
+		if !known do append(&names, name)
+	}
+	return names[:]
+}
+
+// A tile's `mask` property (-1 when it has none)
+@(private="file")
+terrainMask :: proc(tileset: ^AsepriteTileset, id: int) -> int {
+	if id <= 0 || id >= len(tileset.tileUserData) do return -1
+	value, ok := Aseprite_Property(tileset.tileUserData[id], "mask")
+	if !ok do return -1
+	switch v in value {
+	case i64: return int(v) & 0xff
+	case f64: return int(v) & 0xff
+	case string:
+		// "N,E,S" (names) or a number
+		mask := 0
+		for part in strings.split(v, ",", context.temp_allocator) {
+			switch strings.to_upper(strings.trim_space(part), context.temp_allocator) {
+			case "N": mask |= TERRAIN_N
+			case "NE": mask |= TERRAIN_NE
+			case "E": mask |= TERRAIN_E
+			case "SE": mask |= TERRAIN_SE
+			case "S": mask |= TERRAIN_S
+			case "SW": mask |= TERRAIN_SW
+			case "W": mask |= TERRAIN_W
+			case "NW": mask |= TERRAIN_NW
+			}
+		}
+		return mask
+	case bool, AsepritePoint, AsepriteSize, AsepriteRect, AsepriteUUID, []AsepriteValue, map[string]AsepriteValue:
+	}
+	return -1
+}
+
+// The blob rule: a corner counts only with both of its edges
+@(private="file")
+reduceMask :: proc(mask: int) -> int {
+	m := mask
+	if m & TERRAIN_N == 0 || m & TERRAIN_E == 0 do m &~= TERRAIN_NE
+	if m & TERRAIN_S == 0 || m & TERRAIN_E == 0 do m &~= TERRAIN_SE
+	if m & TERRAIN_S == 0 || m & TERRAIN_W == 0 do m &~= TERRAIN_SW
+	if m & TERRAIN_N == 0 || m & TERRAIN_W == 0 do m &~= TERRAIN_NW
+	return m
+}
+
+/*
+The tile of a terrain drawn for a cell whose same-terrain neighbours are `mask`: the one whose
+own mask matches best (exactly, else in the most neighbours; corners only when the terrain's tiles
+use them, so a 16-tile set of edges works too), else any tile of the terrain.
+
+Inputs:
+- tileset: The tileset
+- terrain: The terrain's name
+- mask: The cell's neighbours of the same terrain (TERRAIN_* bits)
+
+Returns:
+- The tile (an index; 0 when the tileset has no tile of that terrain)
+*/
+Terrain_TileFor :: proc(tileset: ^AsepriteTileset, terrain: string, mask: int) -> u32 {
+	corners := false
+	for id in 1..<tileset.count {
+		if Tileset_TerrainOf(tileset, u32(id)) != terrain do continue
+		if m := terrainMask(tileset, id); m > 0 && m & (TERRAIN_NE | TERRAIN_SE | TERRAIN_SW | TERRAIN_NW) != 0 do corners = true
+	}
+	considered := corners ? 0xff : (TERRAIN_N | TERRAIN_E | TERRAIN_S | TERRAIN_W)
+	want := reduceMask(mask) & considered
+	best, bestScore := u32(0), -1
+	for id in 1..<tileset.count {
+		if Tileset_TerrainOf(tileset, u32(id)) != terrain do continue
+		m := terrainMask(tileset, id)
+		score := 0
+		if m >= 0 {
+			have := reduceMask(m) & considered
+			if have == want do return u32(id)
+			for bit := 1; bit <= 128; bit <<= 1 do if bit & considered != 0 && (have & bit) == (want & bit) do score += 1
+		}
+		if score > bestScore do best, bestScore = u32(id), score
+	}
+	return best
+}
+
+/*
+Paints a terrain into a grid of tiles (autotiling): the cell takes the terrain, then it and its
+eight neighbours of a terrain take the tile that fits their neighbours (`Terrain_TileFor`).
+Painting "" erases the cell and fixes its neighbours. Cells off the grid count as the same terrain,
+so a terrain reaches the map's edges without a border.
+
+Inputs:
+- tileset: The tileset
+- tiles: The grid, row by row (changed in place)
+- columns, rows: Its size
+- column, row: The cell
+- terrain: The terrain ("" to erase)
+
+Returns:
+- false when the cell is off the grid
+*/
+TileGrid_PaintTerrain :: proc(tileset: ^AsepriteTileset, tiles: []u32, columns, rows, column, row: int, terrain: string) -> bool {
+	if column < 0 || row < 0 || column >= columns || row >= rows do return false
+	tiles[row * columns + column] = terrain == "" ? 0 : max(Terrain_TileFor(tileset, terrain, 0xff), 1)
+	OFFSETS :: [8][2]int{{0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}}
+	offsets := OFFSETS
+	for dy in -1..=1 do for dx in -1..=1 {
+		x, y := column + dx, row + dy
+		if x < 0 || y < 0 || x >= columns || y >= rows do continue
+		name := Tileset_TerrainOf(tileset, tiles[y * columns + x])
+		if name == "" do continue
+		mask := 0
+		for offset, bit in offsets {
+			nx, ny := x + offset.x, y + offset.y
+			same := nx < 0 || ny < 0 || nx >= columns || ny >= rows || Tileset_TerrainOf(tileset, tiles[ny * columns + nx]) == name
+			if same do mask |= 1 << uint(bit)
+		}
+		if tile := Terrain_TileFor(tileset, name, mask); tile != 0 do tiles[y * columns + x] = tile
+	}
+	return true
+}
+
+/*
+Paints a terrain into a TileMap's layer from code (`TileGrid_PaintTerrain`): drawn at once,
+collision on the next update, every frame of an animated layer.
+
+Inputs:
+- node: The TileMap
+- layer: The layer's name
+- column, row: The cell
+- terrain: The terrain's name ("" erases)
+
+Returns:
+- false when there's no such layer or cell
+
+Example:
+	// Given: level: ^e.TileMapNode, hit: [2]f32
+	if column, row, ok := e.TileMap_CellAt(level, "Ground", hit); ok do e.TileMap_SetTerrain(level, "Ground", column, row, "")
+*/
+TileMap_SetTerrain :: proc(node: ^TileMapNode, layer: string, column, row: int, terrain: string) -> bool {
+	for l in node.tileLayers {
+		if l.layerName != layer do continue
+		changed := false
+		if l.base != nil && TileGrid_PaintTerrain(l.tileset, l.base.tiles, l.base.width, l.base.height, column, row, terrain) do changed = true
+		for &frame in l.frames {
+			if frame.cel == nil || frame.cel == l.base || raw_data(frame.cel.tiles) == raw_data(l.base.tiles) do continue
+			if TileGrid_PaintTerrain(l.tileset, frame.cel.tiles, frame.cel.width, frame.cel.height, column, row, terrain) do changed = true
+		}
+		if !changed do return false
+		for &frame in l.frames do fillQuads(l, &frame)
+		showFrame(node, node.shown)
+		node.collisionDirty = node.settings.collision
+		return true
+	}
+	return false
 }
