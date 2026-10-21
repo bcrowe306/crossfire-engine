@@ -93,6 +93,9 @@ ANIMATOR_PROPERTIES := [?]AnimatorProperty{
 	{"animation", .Text, "Animation", AnimatedSprite},
 	{"text", .Text, "Text", Label},
 	{"color", .Color, "Text color", Label},
+	{"energy", .Float, "Light energy", Light2D},
+	{"lightRadius", .Float, "Light radius", Light2D},
+	{"lightColor", .Color, "Light color", Light2D},
 }
 
 // The track property that fires the Animator's `onEvent` instead of setting a value
@@ -889,6 +892,12 @@ readProperty :: proc(node: ^Node, property: string) -> (AnimatorValue, bool) {
 		if Node_Is(node, Label) do return (cast(^Label)node).text, true
 	case "color":
 		if Node_Is(node, Label) do return (cast(^Label)node).color, true
+	case "energy":
+		if Node_Is(node, Light2D) do return (cast(^Light2D)node).settings.energy, true
+	case "lightRadius":
+		if Node_Is(node, Light2D) do return (cast(^Light2D)node).settings.radius, true
+	case "lightColor":
+		if Node_Is(node, Light2D) do return (cast(^Light2D)node).settings.color, true
 	}
 	if strings.has_prefix(property, ANIMATOR_SCRIPT_PREFIX) {
 		field, ok := scriptField(node, property)
@@ -953,6 +962,12 @@ writeProperty :: proc(node: ^Node, property: string, value: AnimatorValue) {
 		}
 	case "color":
 		if Node_Is(node, Label) && isC do (cast(^Label)node).color = c
+	case "energy":
+		if Node_Is(node, Light2D) && isF do (cast(^Light2D)node).settings.energy = max(f, 0)
+	case "lightRadius":
+		if Node_Is(node, Light2D) && isF do (cast(^Light2D)node).settings.radius = max(f, 0)
+	case "lightColor":
+		if Node_Is(node, Light2D) && isC do (cast(^Light2D)node).settings.color = c
 	case:
 		if !strings.has_prefix(property, ANIMATOR_SCRIPT_PREFIX) do return
 		field, ok := scriptField(node, property)

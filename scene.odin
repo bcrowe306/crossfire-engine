@@ -60,6 +60,8 @@ Scene :: struct {
 	paused: bool,
 	// UI controls' focus and layout passes (ui_controls.odin)
 	ui: SceneUI,
+	// 2D lighting (lighting.odin): `Scene_SetLighting`
+	lighting: SceneLighting,
 	// It has been the current scene before: entering it again rebuilds it from its file
 	// (Game.sceneFiles), so every visit starts fresh
 	played: bool,
@@ -183,6 +185,7 @@ Scene_Destroy :: proc(scene: ^Scene) {
 	destroyTweens(scene)
 	debugDestroy(scene)
 	// Destroy, not free_all: free_all keeps the first block, which leaked once the scene was freed
+	Lighting_Destroy(scene)
 	MemoryArena_Destroy(&scene.arena)
 }
 
@@ -489,7 +492,19 @@ Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transfo
 	defer if renderer != nil do sdl.SetRenderDrawBlendMode(renderer, sdl.BLENDMODE_BLEND)
 
 	layers := drawOrder(scene)
+	// Lighting multiplies the light map over the world after its last lit layer (screen layers
+	// aren't lit)
+	lastLit := -1
+	if scene.lighting.enabled {
+		// The last layer the camera draws (the background too is lit, with nothing drawn)
+		for layer in RenderLayer do if layer not_in scene.screenLayers do lastLit = int(layer)
+	}
+	litDone := false
 	for &items, layer in layers {
+		if lastLit >= 0 && !litDone && int(layer) > lastLit {
+			Lighting_Apply(scene, renderer, view)
+			litDone = true
+		}
 		base := layer in scene.screenLayers && !screenLayersUseView ? TRANSFORM2D_IDENTITY : view
 		for item in items {
 			node := item.node
@@ -504,6 +519,7 @@ Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transfo
 			if item.scriptDraw != nil do item.scriptDraw(node.script.data, renderer)
 		}
 	}
+	if lastLit >= 0 && !litDone do Lighting_Apply(scene, renderer, view)
 	if scene.physics != nil && scene.physics.settings.debugDraw do Physics_DrawDebug(scene, renderer, view)
 	if len(scene.debugShapes) > 0 do debugDrawShapes(scene, renderer, view)
 }

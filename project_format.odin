@@ -139,7 +139,9 @@ Version history:
   and `repeat` and `events`, the `PingPongReverse` play mode; `TileMap` nodes (`tilemap`, `frame`,
   `layers`, `tileCollision`, `animate`, `tag`: tilemap.odin); Sprite and AnimatedSprite `layers`
   and `pivotSlice`, Sprite `nineSlice`, `nineWidth`, `nineHeight`, CollisionShape `slice`
-  (aseprite_nodes.odin); UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText:
+  (aseprite_nodes.odin); 2D lighting: scenes' `lighting`, `ambient`, `bodyShadows`, Light2D
+  (`lightKind`, `lightColor`, `energy`, `lightRadius`, `spotAngle`, `shadows`) and LightOccluder
+  (a CollisionShape's shape attributes) nodes (lighting.odin); UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText:
   `width`, `height`, `anchor`, `margin`, `layout`, `align`, `justify`, `columns`, `padding`,
   `spacing`, `expand`, `disabled`, `value`, `min`, `max`, `direction`, `showValue`, `maxLength`,
   `patchMargins`, `textSize`, `textAlign`, `theme`, `placeholder`, `action`: ui_controls.odin),
@@ -221,6 +223,9 @@ SceneNodeKind :: enum {
 	TileMap,
 	// Keyframe animations of other nodes' properties: clips of tracks (format 13; animator.odin)
 	Animator,
+	// 2D lighting (format 13; lighting.odin): a point or spot light; a shape that casts shadows
+	Light2D,
+	LightOccluder,
 	// UI controls (format 13; ui_controls.odin): a box laying out controls; a button; a bar
 	// showing a value; a line of text to type; a scrolling column; text with colors and sizes
 	Panel,
@@ -303,6 +308,8 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.TextField      = {"A box the player types a line of text in: names, chat, codes", .UI},
 	.ScrollBox      = {"A column of controls that scrolls: long lists, inventories, credits", .UI},
 	.RichText       = {"Text with colors and sizes that wraps: dialogue, descriptions, tooltips", .UI},
+	.Light2D        = {"A light in a lit scene: a point or a spot cone, colored, with shadows from occluders", .Graphics},
+	.LightOccluder  = {"A shape that blocks light and casts shadows: walls, pillars, trees", .Graphics},
 	.Animator       = {"Animates other nodes' properties over time with keyframes: cutscenes, moving platforms, UI, effects", .Graphics},
 }
 
@@ -541,6 +548,10 @@ SceneNodeData :: struct {
 	// `UISettings` as attributes of the same names (`width` / `height` for size, `patchMargins`
 	// "l t r b"); their text in `text`, an image in `texture` (ui_controls.odin)
 	ui: UISettings,
+	// Light2D: `lightKind`, `color`... see lighting.odin (`LightSettings`: `lightKind`,
+	// `lightColor`, `energy`, `lightRadius`, `spotAngle`, `shadows`). A LightOccluder's shape uses
+	// `shape`, `width` / `height`, `radius` and `points` like a CollisionShape's
+	light: LightSettings,
 }
 
 /*
@@ -716,6 +727,7 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	tilemap = DEFAULT_TILEMAP_SETTINGS,
 	animator = DEFAULT_ANIMATOR_SETTINGS,
 	ui = DEFAULT_UI_SETTINGS,
+	light = DEFAULT_LIGHT_SETTINGS,
 }
 
 /*
@@ -747,6 +759,12 @@ SceneSettings :: struct {
 	hasGravity: bool,
 	// The scene's gravity in px/s², y down, when `hasGravity`
 	gravity: [2]f32,
+	// 2D lighting (lighting.odin): the world layers are dark outside lights (`lighting="true"`)
+	lighting: bool,
+	// The light everywhere (`ambient="#rrggbb"`; zero: `DEFAULT_AMBIENT`)
+	ambient: sdl.Color,
+	// Static bodies' shapes cast shadows (`bodyShadows="true"`)
+	bodyShadows: bool,
 }
 
 /*
@@ -1056,6 +1074,9 @@ ParseScene :: proc(text: string, allocator := context.allocator) -> (scene: Scen
 		scene.settings.hasGravity = true
 		scene.settings.gravity = {attrF32(doc, 0, "gravityX", DEFAULT_PHYSICS.gravity.x), attrF32(doc, 0, "gravityY", DEFAULT_PHYSICS.gravity.y)}
 	}
+	scene.settings.lighting = attrBool(doc, 0, "lighting", false)
+	scene.settings.ambient = attrColor(doc, 0, "ambient", {})
+	scene.settings.bodyShadows = attrBool(doc, 0, "bodyShadows", false)
 	for child in childElements(doc, 0) {
 		if doc.elements[child].ident == "node" do parseNode(doc, child, -1, &scene)
 	}
@@ -1490,6 +1511,15 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		animate = attrBool(doc, element, "animate", false),
 		tag = cloneAttr(doc, element, "tag", ""),
 		painted = make([dynamic]TileLayerData),
+	}
+	dli := DEFAULT_LIGHT_SETTINGS
+	node.light = {
+		kind = attrEnum(doc, element, "lightKind", dli.kind),
+		color = attrColor(doc, element, "lightColor", dli.color),
+		energy = max(attrF32(doc, element, "energy", dli.energy), 0),
+		radius = max(attrF32(doc, element, "lightRadius", dli.radius), 0),
+		angle = clamp(attrF32(doc, element, "spotAngle", dli.angle), 1, 359),
+		shadows = attrBool(doc, element, "shadows", dli.shadows),
 	}
 	du := DEFAULT_UI_SETTINGS
 	node.ui = du

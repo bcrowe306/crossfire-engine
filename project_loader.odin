@@ -209,6 +209,8 @@ SCENE_NODE_TYPES := [SceneNodeKind]typeid{
 	.TextField       = TextField,
 	.ScrollBox       = ScrollBox,
 	.RichText        = RichText,
+	.Light2D         = Light2D,
+	.LightOccluder   = LightOccluder,
 }
 
 /*
@@ -251,6 +253,7 @@ Scene_ApplySettings :: proc(scene: ^Scene, settings: SceneSettings) {
 	scene.screenLayers = settings.screenLayers
 	scene.background = nil
 	if settings.hasBackground do scene.background = settings.background
+	Scene_SetLighting(scene, settings.lighting, settings.ambient.a > 0 ? settings.ambient : DEFAULT_AMBIENT, settings.bodyShadows)
 	scene.gravity = nil
 	if settings.hasGravity {
 		scene.gravity = settings.gravity
@@ -562,6 +565,14 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			n = ldtkBuildNode(scene, &node, projectDir, attachScripts, depth)
 		case .TileMap:
 			n = tileMapBuildNode(scene, &node, projectDir)
+		case .Light2D:
+			n = CreateLight2D(scene, node.light)
+		case .LightOccluder:
+			o := CreateLightOccluder(scene, node.shapeSize)
+			o.shape = node.shape
+			o.radius = node.radius
+			append(&o.points, ..node.points[:])
+			n = o
 		case .Panel, .Button, .ProgressBar, .TextField, .ScrollBox, .RichText:
 			n = uiBuildNode(scene, &node, projectDir, attachScripts)
 		case .Animator:

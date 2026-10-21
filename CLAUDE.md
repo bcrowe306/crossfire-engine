@@ -153,6 +153,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `aseprite_nodes.odin` | **Aseprite in a running game**: `Game_LoadAseprite` (files kept for slices and events; `Game_ReloadChangedAseprites`), `Aseprite_SliceAt`, `Aseprite_FrameEvents`, `Aseprite_LayersNamed`; sprites' pivot slices (`Sprite_Origin`) and 9-patches, CollisionShapes following slices (hitboxes), layer-filtered texture keys (`?layers=`); Sprite / AnimatedSprite drawing |
 | `aseprite_nodes_test.odin` | Tests (on Aseprite's files): frame events through `animation.onFrameEvent`, layers drawn, pivot and 9-patch slices, hitboxes following a moving slice (mirrored, hidden), animated tilemaps and tiles set while they play |
 | `tilemap.odin` | **TileMap nodes**: an Aseprite file's tilemap layers (`TileMapSettings`: `tilemap`, `frame`, `layers`, `tileCollision`), a `TileMapLayer` per layer drawn in one batch, collision from tile properties (`TileMap_TileCollision`: StaticBody "Collision" for solid and one-way tiles, an Area per area name), `TileMap_TileAt`, `TileMap_TileProperty`, `TileMap_Rebuild`, painted layers (`TileLayerData`), terrains (`Terrain_TileFor`, `TileGrid_PaintTerrain`, `TileMap_SetTerrain`), reloading saved files in development runs |
+| `lighting.odin` | **2D lighting**: `Light2D` (`LightSettings`: point or spot, color, energy, radius, cone, shadows), `LightOccluder` (a CollisionShape's shapes), `SceneLighting` (`Scene.lighting`: `Scene_SetLighting`, ambient, static bodies' shadows), `Light_Visibility` (the polygon a light reaches), the light map (`Lighting_Apply`) |
+| `lighting_test.odin` | Tests: occluders stopping rays, lights without shadows, spot cones turned with the node, scene files; pixels: bright at a light, fading, dark past its reach and behind an occluder, screen layers unlit |
 | `ui_controls.odin` | **UI controls**: `Control` (settings `UISettings`, laid-out `size`, `offset` from its anchor) and its types `Panel`, `Button`, `ProgressBar`, `TextField`, `ScrollBox`, `RichText`; anchors (`UIAnchor`), layouts (`UILayout`: Row, Column, Grid; align, justify, expand), the mouse, focus moved by the ui_* actions or keys, typing, scroll boxes, rich text (`RichText_Layout`), 9-patch images; `Create*`, `Control_SetText`, `ProgressBar_SetValue`, `Control_Focus`, `Control_GetRect`, `Control_Theme` |
 | `ui_theme.odin` | **UI themes**: `UITheme` (tagged fields for editors: `UITheme_Fields` / `Get` / `Set`), `DEFAULT_UI_THEME`, `.theme.xml` files (`ParseTheme`, `FormatTheme`), `Game_LoadTheme` (`Game.themes`), the project's `uiTheme` |
 | `ui_controls_test.odin` | Tests: a scene file's controls laid out (a stretched column, a row with an expanding child, a corner with an offset, a scroll box hiding what doesn't fit), mouse presses, focus by keys, typing with a limit, the wheel, offsets; themes' text round trip; rich text tags and wrapping |
@@ -569,6 +571,17 @@ the build gives them a synthetic cel in the node's arena, so drawing, collision 
 edge-only set ignores them), `TileGrid_PaintTerrain` sets a cell and refits its neighbours
 (off-grid counts as the same terrain), `TileMap_SetTerrain` from code. tilemap_paint_test.odin. LDtk's tile layers still draw with their own
 code (square tiles, no diagonal flips); moving them onto `TileBatch` is a possible cleanup.
+
+**2D lighting** (lighting.odin; its doc comment has the details): `Scene_DrawWithView` applies the
+light map after the last layer the camera draws (`Lighting_Apply`; screen layers after it are
+unlit, the background before it is lit). The map is a render target the screen's size (the
+logical presentation's, else the viewport's: the editor's preview), cleared to the ambient
+color; each light's visibility polygon is a triangle fan whose vertex colors carry a linear
+falloff, drawn **alone into a scratch target with no blending, then added** to the map: added
+straight, SDL's software renderer drew shared triangle edges twice and left bright seams. The
+map is drawn with `BLENDMODE_MOD`. Rays hit occluder edges with a little tolerance past their
+ends, or a ray through a corner slipped between two edges (a bright sliver). Both targets live
+on `Scene.lighting` and are freed by `Scene_Destroy`.
 
 **UI controls** (ui_controls.odin; its doc comment has the details): controls lay out lazily,
 once per pass (`Scene.ui.stamp`, bumped by `Scene_Update` and `Scene_DrawWithView`;
