@@ -201,6 +201,7 @@ SCENE_NODE_TYPES := [SceneNodeKind]typeid{
 	.MusicPlayer     = AudioPlayer,
 	.LDtkLevel       = LDtkLevelNode,
 	.TileMap         = TileMapNode,
+	.Animator        = Animator,
 }
 
 /*
@@ -554,6 +555,10 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			n = ldtkBuildNode(scene, &node, projectDir, attachScripts, depth)
 		case .TileMap:
 			n = tileMapBuildNode(scene, &node, projectDir)
+		case .Animator:
+			animator := CreateAnimator(scene)
+			Animator_SetClips(animator, node.animator)
+			n = animator
 		}
 		if Node_IsPhysicsBody(n) {
 			body := cast(^PhysicsBody)n

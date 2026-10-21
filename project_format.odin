@@ -139,7 +139,8 @@ Version history:
   and `repeat` and `events`, the `PingPongReverse` play mode; `TileMap` nodes (`tilemap`, `frame`,
   `layers`, `tileCollision`, `animate`, `tag`: tilemap.odin); Sprite and AnimatedSprite `layers`
   and `pivotSlice`, Sprite `nineSlice`, `nineWidth`, `nineHeight`, CollisionShape `slice`
-  (aseprite_nodes.odin); LDtkLevel `oneWayValues`, `areaValues` and
+  (aseprite_nodes.odin); `Animator` nodes (`autoplay`, `speed`, `<clip>` / `<track>` / `<key>`:
+  animator.odin); LDtkLevel `oneWayValues`, `areaValues` and
   `<entity make script noScript>`. Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
@@ -214,6 +215,8 @@ SceneNodeKind :: enum {
 	// The tilemap layers of an Aseprite file: tiles, and collision from the tiles' properties
 	// (format 13; tilemap.odin)
 	TileMap,
+	// Keyframe animations of other nodes' properties: clips of tracks (format 13; animator.odin)
+	Animator,
 }
 
 /*
@@ -282,6 +285,7 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.MusicPlayer    = {"Streams music: fades, looping, seeking, through a mix bus", .Audio},
 	.LDtkLevel      = {"A level made in the LDtk level editor: its tile layers, entities and IntGrid collision", .Scene},
 	.TileMap        = {"Tilemap layers drawn in Aseprite: their tiles, and collision from the tiles' properties", .Graphics},
+	.Animator       = {"Animates other nodes' properties over time with keyframes: cutscenes, moving platforms, UI, effects", .Graphics},
 }
 
 /*
@@ -511,6 +515,10 @@ SceneNodeData :: struct {
 	// TileMap: `tilemap` (an Aseprite file), `frame`, `layers`, `tileCollision` (tilemap.odin); its
 	// collision uses `collisionLayer`, `collisionMask`, `friction`, `restitution` too
 	tilemap: TileMapSettings,
+	// Animator: `autoplay` (the clip it starts with), `speed`, and `<clip name length loop>`
+	// children holding `<track node property step>` children holding `<key time value ease/>`
+	// (animator.odin)
+	animator: AnimatorSettings,
 }
 
 /*
@@ -684,6 +692,7 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	audio = DEFAULT_AUDIO_SETTINGS,
 	ldtk = DEFAULT_LDTK_LEVEL_SETTINGS,
 	tilemap = DEFAULT_TILEMAP_SETTINGS,
+	animator = DEFAULT_ANIMATOR_SETTINGS,
 }
 
 /*
@@ -1149,6 +1158,7 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		LDtkLevelSettings_Destroy(&node.ldtk)
 		delete(node.tilemap.file)
 		delete(node.tilemap.layers)
+		AnimatorSettings_Destroy(&node.animator)
 	}
 	delete(scene.nodes)
 	delete(scene.name)
@@ -1309,6 +1319,43 @@ checkVersion :: proc(doc: ^xml.Document, element: xml.Element_ID) -> ProjectErro
 	return .None
 }
 
+// An Animator's `<clip>`: its `<track>`s and their `<key>`s (animator.odin)
+@(private="file")
+parseAnimatorClip :: proc(doc: ^xml.Document, element: xml.Element_ID) -> AnimatorClipData {
+	clip := AnimatorClipData{
+		name = cloneAttr(doc, element, "name", ""),
+		length = max(attrF32(doc, element, "length", 1), 0),
+		loop = attrBool(doc, element, "loop", false),
+		tracks = make([dynamic]AnimatorTrackData),
+	}
+	for t in childElements(doc, element) {
+		if doc.elements[t].ident != "track" do continue
+		track := AnimatorTrackData{
+			node = cloneAttr(doc, t, "node", ""),
+			property = cloneAttr(doc, t, "property", ""),
+			step = attrBool(doc, t, "step", false),
+			keys = make([dynamic]AnimatorKeyData),
+		}
+		for k in childElements(doc, t) {
+			if doc.elements[k].ident != "key" do continue
+			append(&track.keys, AnimatorKeyData{
+				time = max(attrF32(doc, k, "time", 0), 0),
+				value = cloneAttr(doc, k, "value", ""),
+				ease = attrEnum(doc, k, "ease", EaseType.Linear),
+			})
+		}
+		append(&clip.tracks, track)
+	}
+	// Keys in time order, as tools expect
+	for &track in clip.tracks {
+		keys := track.keys[:]
+		for i in 1..<len(keys) {
+			for j := i; j > 0 && keys[j].time < keys[j - 1].time; j -= 1 do keys[j], keys[j - 1] = keys[j - 1], keys[j]
+		}
+	}
+	return clip
+}
+
 @(private="file")
 parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scene: ^SceneData) {
 	node := DEFAULT_SCENE_NODE
@@ -1415,6 +1462,11 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		tag = cloneAttr(doc, element, "tag", ""),
 		painted = make([dynamic]TileLayerData),
 	}
+	node.animator = {
+		clips = make([dynamic]AnimatorClipData),
+		autoplay = node.kind == .Animator ? cloneAttr(doc, element, "autoplay", "") : "",
+		speed = attrF32(doc, element, "speed", DEFAULT_ANIMATOR_SETTINGS.speed),
+	}
 	dl := DEFAULT_LDTK_LEVEL_SETTINGS
 	node.ldtk = {
 		file = cloneAttr(doc, element, "ldtk", ""),
@@ -1464,6 +1516,8 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 				columns = columns, rows = rows,
 				tiles = tiles,
 			})
+		case "clip":
+			append(&scene.nodes[index].animator.clips, parseAnimatorClip(doc, child))
 		case "entity":
 			append(&scene.nodes[index].ldtk.entityComponents, LDtkEntityComponent{
 				entity = cloneAttr(doc, child, "name", ""),

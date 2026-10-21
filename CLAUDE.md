@@ -152,6 +152,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `aseprite_nodes.odin` | **Aseprite in a running game**: `Game_LoadAseprite` (files kept for slices and events; `Game_ReloadChangedAseprites`), `Aseprite_SliceAt`, `Aseprite_FrameEvents`, `Aseprite_LayersNamed`; sprites' pivot slices (`Sprite_Origin`) and 9-patches, CollisionShapes following slices (hitboxes), layer-filtered texture keys (`?layers=`); Sprite / AnimatedSprite drawing |
 | `aseprite_nodes_test.odin` | Tests (on Aseprite's files): frame events through `animation.onFrameEvent`, layers drawn, pivot and 9-patch slices, hitboxes following a moving slice (mirrored, hidden), animated tilemaps and tiles set while they play |
 | `tilemap.odin` | **TileMap nodes**: an Aseprite file's tilemap layers (`TileMapSettings`: `tilemap`, `frame`, `layers`, `tileCollision`), a `TileMapLayer` per layer drawn in one batch, collision from tile properties (`TileMap_TileCollision`: StaticBody "Collision" for solid and one-way tiles, an Area per area name), `TileMap_TileAt`, `TileMap_TileProperty`, `TileMap_Rebuild`, painted layers (`TileLayerData`), terrains (`Terrain_TileFor`, `TileGrid_PaintTerrain`, `TileMap_SetTerrain`), reloading saved files in development runs |
+| `animator.odin` | **Animator nodes**: keyframe clips (`AnimatorSettings` / `AnimatorClipData` / `AnimatorTrackData` / `AnimatorKeyData`: scene files' `<clip>` / `<track>` / `<key>`) of any node's properties (`ANIMATOR_PROPERTIES`, `script.<field>`), eased (`EaseType`) or stepping; event tracks (`onEvent`), `onFinished`; `Animator_Play` / `Stop` / `Pause` / `Seek` / `Apply` (editors' scrubbing), `Animator_SetClips`, value text (`Animator_ParseValue` / `FormatValue` / `ReadProperty`), settings clone / destroy / equal |
+| `animator_test.odin` | Tests: a scene file's clips playing (positions, opacity's curve, visibility, a script's float, enum and color fields, stepping rotation, events at the start, middle and end, finishing), looping, pausing, seeking, resuming, scrubbing, a removed target; values' text; clips from code at double speed |
 | `tile_batch.odin` | `TileBatch` / `TileQuad`: tiles of one texture with Aseprite's flips drawn as one `RenderGeometry`, culled to the screen; the software renderer's cache (as LDtk's layers) |
 | `tilemap_test.odin` | Tests: an Aseprite file written by the test (tilemap layer, tile properties, a flipped tile): collision kinds, the built layer and bodies (merged shapes, one-way, an Area), lookups, pixels and flips, a development run reloading the saved file |
 | `pack.odin` | **The data pack**: a game's files appended to its own executable (`Pack_Append`; the footer's `ODINPAK1`), read back by `Pack_Open` at start (the project is then `PACK_ROOT`); `Pack_Bytes` / `Pack_Has`, a `Pack` value for tools and tests (`Pack_OpenFile`) |
@@ -563,6 +565,17 @@ the build gives them a synthetic cel in the node's arena, so drawing, collision 
 edge-only set ignores them), `TileGrid_PaintTerrain` sets a cell and refits its neighbours
 (off-grid counts as the same terrain), `TileMap_SetTerrain` from code. tilemap_paint_test.odin. LDtk's tile layers still draw with their own
 code (square tiles, no diagonal flips); moving them onto `TileBatch` is a possible cleanup.
+
+**Animators** (animator.odin; its doc comment has the details): an Animator's clips are parsed
+into its arena when built (`Animator_SetClips`: keys sorted, values parsed by the property's
+kind; a script field's keys stay text until its target is found, since its kind comes from the
+script). Track paths are from the Animator's **parent**; targets are found lazily and checked
+by id before each use (a removed node is found again or skipped). Values are written in its
+update, so later updates (the target's own script) win that frame. Events fire for keys in
+(previous time, new time], keys at 0 when a clip starts; a loop fires the end's then the
+start's. A listener may play another clip: firing stops there. Stepping tracks (and Bool / Text
+values) set a value only when the key changes (`applied`), so text isn't cloned every frame.
+`started` stops autoplay (the editor sets it). Format 13 (`kind="Animator"`).
 
 **Aseprite in a running game** (aseprite_nodes.odin; its doc comment has the details):
 - Slices, events and layers are looked up through `Game_LoadAseprite` (the game keeps each file;

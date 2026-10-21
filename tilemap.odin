@@ -11,7 +11,7 @@ TileMap nodes: the tilemap layers of an Aseprite file in a scene. This is the st
 engine's tilemaps, and it takes **Aseprite's model as its own**: a tileset is tiles of one size,
 tile 0 the empty one; a tilemap layer is a grid of 32-bit tile values, the tile's index in its
 tileset (`ASEPRITE_TILE_ID`) with flip bits (`ASEPRITE_TILE_FLIP_X`, `_Y`, `_D`); tiles carry user
-data properties. Painting tilemaps in the editor will write the same data.
+data properties. The editor's tile painting writes the same data (painted layers, below).
 
 	<node kind="TileMap" name="Ground" tilemap="assets/level.aseprite" layers="Ground,Walls"/>
 
