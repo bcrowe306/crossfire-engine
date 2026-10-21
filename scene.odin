@@ -58,6 +58,8 @@ Scene :: struct {
 	// Paused (`Scene_SetPaused`): physics doesn't step, and only nodes whose process mode allows it
 	// update (`Node_CanProcess`); everything still draws
 	paused: bool,
+	// UI controls' focus and layout passes (ui_controls.odin)
+	ui: SceneUI,
 	// It has been the current scene before: entering it again rebuilds it from its file
 	// (Game.sceneFiles), so every visit starts fresh
 	played: bool,
@@ -383,6 +385,8 @@ Inputs:
 - deltaTime: Seconds since the last frame (after the game's time scale and hitstop)
 */
 Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
+	// UI controls lay out again in this pass
+	scene.ui.stamp += 1
 	// Last frame's debug shapes go (unless they last longer)
 	if len(scene.debugShapes) > 0 do debugExpire(scene, deltaTime)
 	Scene_ProcessQueues(scene)
@@ -479,6 +483,7 @@ Inputs:
   an editor passes its zoom so UI keeps its size relative to the game area
 */
 Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D, screenLayersUseView := false, positionOnlyScale: f32 = 1) {
+	scene.ui.stamp += 1
 	defer SetDrawState(TRANSFORM2D_IDENTITY)
 	// Shapes blend with the node's blend mode; afterwards normal alpha blending again
 	defer if renderer != nil do sdl.SetRenderDrawBlendMode(renderer, sdl.BLENDMODE_BLEND)

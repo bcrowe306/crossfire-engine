@@ -121,6 +121,7 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 	// Translations before anything that shows text
 	loadProjectTranslations(game, project, projectDir)
 	if project.icon != "" && game.window != nil do Game_SetWindowIcon(game, project.icon)
+	if project.uiTheme != "" do game.uiTheme = strings.clone(project.uiTheme, Game_GetAllocator(game))
 	// Globals exist before the scenes (their nodes' scripts may look them up in `ready`)
 	Globals_Start(game, project.globals[:])
 	delete(game.projectDir)
@@ -202,6 +203,12 @@ SCENE_NODE_TYPES := [SceneNodeKind]typeid{
 	.LDtkLevel       = LDtkLevelNode,
 	.TileMap         = TileMapNode,
 	.Animator        = Animator,
+	.Panel           = Panel,
+	.Button          = Button,
+	.ProgressBar     = ProgressBar,
+	.TextField       = TextField,
+	.ScrollBox       = ScrollBox,
+	.RichText        = RichText,
 }
 
 /*
@@ -555,6 +562,8 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			n = ldtkBuildNode(scene, &node, projectDir, attachScripts, depth)
 		case .TileMap:
 			n = tileMapBuildNode(scene, &node, projectDir)
+		case .Panel, .Button, .ProgressBar, .TextField, .ScrollBox, .RichText:
+			n = uiBuildNode(scene, &node, projectDir, attachScripts)
 		case .Animator:
 			animator := CreateAnimator(scene)
 			Animator_SetClips(animator, node.animator)

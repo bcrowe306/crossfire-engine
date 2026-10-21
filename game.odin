@@ -103,6 +103,10 @@ Game :: struct {
 	// Animation sets read so far, by path (nil: couldn't be read); in the game's memory
 	// (animation_sets.odin)
 	animationSets: map[string]^AnimationSetData,
+	// UI themes read so far, by path (nil: couldn't be read); in the game's memory (ui_theme.odin)
+	themes: map[string]^ThemeData,
+	// The project's UI theme (project.xml's `uiTheme`; "": the default), used by controls with none
+	uiTheme: string,
 	// Aseprite files read for their slices and events, by full path (aseprite_nodes.odin; each
 	// in its own arena)
 	aseprites: map[string]AsepriteEntry,

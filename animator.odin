@@ -31,7 +31,7 @@ a coin's bob and spin.
 - **Which node:** a track's `node` is a path from the Animator's parent (`Node_FindPath` from
   there: "Coin" is a sibling, "" or "." the parent itself, "Coin/Shine" a child of it, "/World"
   from the top level). Put the Animator inside what it animates.
-- **Properties** (`ANIMATOR_PROPERTIES`): `position`, `position.x`, `position.y`, `rotation`,
+- **Properties** (`ANIMATOR_PROPERTIES`): `position` (a UI control's offset from its anchor), `position.x`, `position.y`, `rotation`,
   `scale`, `scale.x`, `scale.y`, `tint`, `opacity` (the tint's alpha, 0 to 1), `visible`,
   `zIndex`; an AnimatedSprite's `animation` (plays it by name); a Label's `text` and `color`; a
   script's exported field, `script.<field>` (numbers, vectors and colors move, the rest step).
@@ -870,10 +870,11 @@ scriptField :: proc(node: ^Node, property: string) -> (ScriptField, bool) {
 
 @(private="file")
 readProperty :: proc(node: ^Node, property: string) -> (AnimatorValue, bool) {
+	position := Node_IsControl(node) ? (cast(^Control)node).offset : node.position
 	switch property {
-	case "position": return node.position, true
-	case "position.x": return node.position.x, true
-	case "position.y": return node.position.y, true
+	case "position": return position, true
+	case "position.x": return position.x, true
+	case "position.y": return position.y, true
 	case "rotation": return node.rotation, true
 	case "scale": return node.scale, true
 	case "scale.x": return node.scale.x, true
@@ -928,10 +929,12 @@ writeProperty :: proc(node: ^Node, property: string, value: AnimatorValue) {
 	f, isF := value.(f32)
 	v, isV := value.([2]f32)
 	c, isC := value.(sdl.Color)
+	// A UI control's position comes from its layout: it moves by its offset
+	position := Node_IsControl(node) ? &(cast(^Control)node).offset : &node.position
 	switch property {
-	case "position": if isV do node.position = v
-	case "position.x": if isF do node.position.x = f
-	case "position.y": if isF do node.position.y = f
+	case "position": if isV do position^ = v
+	case "position.x": if isF do position.x = f
+	case "position.y": if isF do position.y = f
 	case "rotation": if isF do node.rotation = f
 	case "scale": if isV do node.scale = v
 	case "scale.x": if isF do node.scale.x = f

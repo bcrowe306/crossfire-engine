@@ -153,6 +153,9 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `aseprite_nodes.odin` | **Aseprite in a running game**: `Game_LoadAseprite` (files kept for slices and events; `Game_ReloadChangedAseprites`), `Aseprite_SliceAt`, `Aseprite_FrameEvents`, `Aseprite_LayersNamed`; sprites' pivot slices (`Sprite_Origin`) and 9-patches, CollisionShapes following slices (hitboxes), layer-filtered texture keys (`?layers=`); Sprite / AnimatedSprite drawing |
 | `aseprite_nodes_test.odin` | Tests (on Aseprite's files): frame events through `animation.onFrameEvent`, layers drawn, pivot and 9-patch slices, hitboxes following a moving slice (mirrored, hidden), animated tilemaps and tiles set while they play |
 | `tilemap.odin` | **TileMap nodes**: an Aseprite file's tilemap layers (`TileMapSettings`: `tilemap`, `frame`, `layers`, `tileCollision`), a `TileMapLayer` per layer drawn in one batch, collision from tile properties (`TileMap_TileCollision`: StaticBody "Collision" for solid and one-way tiles, an Area per area name), `TileMap_TileAt`, `TileMap_TileProperty`, `TileMap_Rebuild`, painted layers (`TileLayerData`), terrains (`Terrain_TileFor`, `TileGrid_PaintTerrain`, `TileMap_SetTerrain`), reloading saved files in development runs |
+| `ui_controls.odin` | **UI controls**: `Control` (settings `UISettings`, laid-out `size`, `offset` from its anchor) and its types `Panel`, `Button`, `ProgressBar`, `TextField`, `ScrollBox`, `RichText`; anchors (`UIAnchor`), layouts (`UILayout`: Row, Column, Grid; align, justify, expand), the mouse, focus moved by the ui_* actions or keys, typing, scroll boxes, rich text (`RichText_Layout`), 9-patch images; `Create*`, `Control_SetText`, `ProgressBar_SetValue`, `Control_Focus`, `Control_GetRect`, `Control_Theme` |
+| `ui_theme.odin` | **UI themes**: `UITheme` (tagged fields for editors: `UITheme_Fields` / `Get` / `Set`), `DEFAULT_UI_THEME`, `.theme.xml` files (`ParseTheme`, `FormatTheme`), `Game_LoadTheme` (`Game.themes`), the project's `uiTheme` |
+| `ui_controls_test.odin` | Tests: a scene file's controls laid out (a stretched column, a row with an expanding child, a corner with an offset, a scroll box hiding what doesn't fit), mouse presses, focus by keys, typing with a limit, the wheel, offsets; themes' text round trip; rich text tags and wrapping |
 | `animator.odin` | **Animator nodes**: keyframe clips (`AnimatorSettings` / `AnimatorClipData` / `AnimatorTrackData` / `AnimatorKeyData`: scene files' `<clip>` / `<track>` / `<key>`) of any node's properties (`ANIMATOR_PROPERTIES`, `script.<field>`), eased (`EaseType`) or stepping; event tracks (`onEvent`), `onFinished`; `Animator_Play` / `Stop` / `Pause` / `Seek` / `Apply` (editors' scrubbing), `Animator_SetClips`, value text (`Animator_ParseValue` / `FormatValue` / `ReadProperty`), settings clone / destroy / equal |
 | `animator_test.odin` | Tests: a scene file's clips playing (positions, opacity's curve, visibility, a script's float, enum and color fields, stepping rotation, events at the start, middle and end, finishing), looping, pausing, seeking, resuming, scrubbing, a removed target; values' text; clips from code at double speed |
 | `tile_batch.odin` | `TileBatch` / `TileQuad`: tiles of one texture with Aseprite's flips drawn as one `RenderGeometry`, culled to the screen; the software renderer's cache (as LDtk's layers) |
@@ -566,6 +569,21 @@ the build gives them a synthetic cel in the node's arena, so drawing, collision 
 edge-only set ignores them), `TileGrid_PaintTerrain` sets a cell and refits its neighbours
 (off-grid counts as the same terrain), `TileMap_SetTerrain` from code. tilemap_paint_test.odin. LDtk's tile layers still draw with their own
 code (square tiles, no diagonal flips); moving them onto `TileBatch` is a possible cleanup.
+
+**UI controls** (ui_controls.odin; its doc comment has the details): controls lay out lazily,
+once per pass (`Scene.ui.stamp`, bumped by `Scene_Update` and `Scene_DrawWithView`;
+`ensureLayout` lays out a control's whole tree from its topmost control), so drawing without
+updates (the editor) and updates see the same layout. **A control's `position` is the layout's**:
+it's placed from its anchor plus `offset` (the scene file's x, y), or by its parent's layout; code
+and the Animator move `offset`. A top-level control's parent area is the screen (`game.size`); under
+a node that isn't a control, a point at that node. Input: the last control to update that's under
+a press takes it; one focus move per update pass (`Scene.ui.navigated`), done by the focused
+control (or the first focusable one when none is). Text fields start SDL text input on focus
+(`game.window`) and stop it on blur. Scroll boxes hide children that don't fit wholly
+(`Control.clipped`) instead of clipping them: the engine draws nodes in a flat sorted list, with
+no place to restore a clip rect after a subtree. Themes resolve per draw (`Control_Theme`: own,
+control ancestors', `Game.uiTheme`, default); a theme's font path is resolved once
+(`ThemeData.fontPath`, game arena).
 
 **Animators** (animator.odin; its doc comment has the details): an Animator's clips are parsed
 into its arena when built (`Animator_SetClips`: keys sorted, values parsed by the property's

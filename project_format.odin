@@ -139,7 +139,11 @@ Version history:
   and `repeat` and `events`, the `PingPongReverse` play mode; `TileMap` nodes (`tilemap`, `frame`,
   `layers`, `tileCollision`, `animate`, `tag`: tilemap.odin); Sprite and AnimatedSprite `layers`
   and `pivotSlice`, Sprite `nineSlice`, `nineWidth`, `nineHeight`, CollisionShape `slice`
-  (aseprite_nodes.odin); `Animator` nodes (`autoplay`, `speed`, `<clip>` / `<track>` / `<key>`:
+  (aseprite_nodes.odin); UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText:
+  `width`, `height`, `anchor`, `margin`, `layout`, `align`, `justify`, `columns`, `padding`,
+  `spacing`, `expand`, `disabled`, `value`, `min`, `max`, `direction`, `showValue`, `maxLength`,
+  `patchMargins`, `textSize`, `textAlign`, `theme`, `placeholder`, `action`: ui_controls.odin),
+  assets of kind "Theme" (`.theme.xml`: ui_theme.odin) and the project's `uiTheme`; `Animator` nodes (`autoplay`, `speed`, `<clip>` / `<track>` / `<key>`:
   animator.odin); LDtkLevel `oneWayValues`, `areaValues` and
   `<entity make script noScript>`. Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
@@ -217,6 +221,14 @@ SceneNodeKind :: enum {
 	TileMap,
 	// Keyframe animations of other nodes' properties: clips of tracks (format 13; animator.odin)
 	Animator,
+	// UI controls (format 13; ui_controls.odin): a box laying out controls; a button; a bar
+	// showing a value; a line of text to type; a scrolling column; text with colors and sizes
+	Panel,
+	Button,
+	ProgressBar,
+	TextField,
+	ScrollBox,
+	RichText,
 }
 
 /*
@@ -285,6 +297,12 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.MusicPlayer    = {"Streams music: fades, looping, seeking, through a mix bus", .Audio},
 	.LDtkLevel      = {"A level made in the LDtk level editor: its tile layers, entities and IntGrid collision", .Scene},
 	.TileMap        = {"Tilemap layers drawn in Aseprite: their tiles, and collision from the tiles' properties", .Graphics},
+	.Panel          = {"A box that lays out the controls in it (rows, columns, grids) on a themed or 9-patch background", .UI},
+	.Button         = {"A button with text or a picture: switches scenes, quits, or tells scripts it was pressed", .UI},
+	.ProgressBar    = {"A bar showing a value in its range: health, stamina, loading", .UI},
+	.TextField      = {"A box the player types a line of text in: names, chat, codes", .UI},
+	.ScrollBox      = {"A column of controls that scrolls: long lists, inventories, credits", .UI},
+	.RichText       = {"Text with colors and sizes that wraps: dialogue, descriptions, tooltips", .UI},
 	.Animator       = {"Animates other nodes' properties over time with keyframes: cutscenes, moving platforms, UI, effects", .Graphics},
 }
 
@@ -519,6 +537,10 @@ SceneNodeData :: struct {
 	// children holding `<track node property step>` children holding `<key time value ease/>`
 	// (animator.odin)
 	animator: AnimatorSettings,
+	// UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText): their
+	// `UISettings` as attributes of the same names (`width` / `height` for size, `patchMargins`
+	// "l t r b"); their text in `text`, an image in `texture` (ui_controls.odin)
+	ui: UISettings,
 }
 
 /*
@@ -693,6 +715,7 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	ldtk = DEFAULT_LDTK_LEVEL_SETTINGS,
 	tilemap = DEFAULT_TILEMAP_SETTINGS,
 	animator = DEFAULT_ANIMATOR_SETTINGS,
+	ui = DEFAULT_UI_SETTINGS,
 }
 
 /*
@@ -822,6 +845,9 @@ ProjectData :: struct {
 	// The language to start in (`locale="fr"`, format 13); "" for the player's system language.
 	// The translation tables are the assets of kind "Translation" (localization.odin)
 	locale: string,
+	// The UI theme controls use when they and their parents name none (`uiTheme`, a `.theme.xml`
+	// asset, format 13; ui_theme.odin)
+	uiTheme: string,
 	// The editor's grid for this project (`<grid width="16" height="16"/>`, format 13); games
 	// don't use it
 	grid: GridSettings,
@@ -917,6 +943,7 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		background = attrColor(doc, 0, "background", {0, 0, 0, 255}),
 		startScene = cloneAttr(doc, 0, "startScene", ""),
 		locale = cloneAttr(doc, 0, "locale", ""),
+		uiTheme = cloneAttr(doc, 0, "uiTheme", ""),
 		icon = cloneAttr(doc, 0, "icon", ""),
 		grid = DEFAULT_GRID_SETTINGS,
 		audioOutput = {
@@ -1104,6 +1131,7 @@ ProjectData_Destroy :: proc(project: ^ProjectData, allocator := context.allocato
 	for b in project.buses do delete(b.name)
 	delete(project.buses)
 	delete(project.locale)
+	delete(project.uiTheme)
 	delete(project.icon)
 	delete(project.name)
 	delete(project.startScene)
@@ -1159,6 +1187,7 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.tilemap.file)
 		delete(node.tilemap.layers)
 		AnimatorSettings_Destroy(&node.animator)
+		UISettings_Destroy(&node.ui)
 	}
 	delete(scene.nodes)
 	delete(scene.name)
@@ -1461,6 +1490,38 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		animate = attrBool(doc, element, "animate", false),
 		tag = cloneAttr(doc, element, "tag", ""),
 		painted = make([dynamic]TileLayerData),
+	}
+	du := DEFAULT_UI_SETTINGS
+	node.ui = du
+	// Only controls read these: other kinds use some of the names (an AnimatedSprite's columns)
+	isControl := node.kind >= .Panel && node.kind <= .RichText
+	if isControl do node.ui = {
+		size = {max(attrF32(doc, element, "width", 0), 0), max(attrF32(doc, element, "height", 0), 0)},
+		anchor = attrEnum(doc, element, "anchor", du.anchor),
+		margin = attrF32(doc, element, "margin", du.margin),
+		layout = attrEnum(doc, element, "layout", du.layout),
+		align = attrEnum(doc, element, "align", du.align),
+		justify = attrEnum(doc, element, "justify", du.justify),
+		columns = max(attrInt(doc, element, "columns", du.columns), 1),
+		padding = attrF32(doc, element, "padding", du.padding),
+		spacing = attrF32(doc, element, "spacing", du.spacing),
+		expand = attrBool(doc, element, "expand", false),
+		disabled = attrBool(doc, element, "disabled", false),
+		value = attrF32(doc, element, "value", du.value),
+		minValue = attrF32(doc, element, "min", du.minValue),
+		maxValue = attrF32(doc, element, "max", du.maxValue),
+		direction = attrEnum(doc, element, "direction", du.direction),
+		showValue = attrBool(doc, element, "showValue", false),
+		maxLength = max(attrInt(doc, element, "maxLength", 0), 0),
+		textSize = max(attrF32(doc, element, "textSize", 0), 0),
+		textAlign = attrEnum(doc, element, "textAlign", du.textAlign),
+		theme = cloneAttr(doc, element, "theme", ""),
+		placeholder = cloneAttr(doc, element, "placeholder", ""),
+		action = cloneAttr(doc, element, "action", ""),
+	}
+	if text, found := xml.find_attribute_val_by_key(doc, element, "patchMargins"); found && isControl {
+		parts := strings.fields(text, context.temp_allocator)
+		for part, i in parts do if i < 4 do node.ui.patchMargins[i], _ = strconv.parse_f32(part)
 	}
 	node.animator = {
 		clips = make([dynamic]AnimatorClipData),
