@@ -414,8 +414,11 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			sprite.getBounds = AnimatedSprite_getBounds
 			allocator := Node_GetAllocator(sprite)
 			AnimationPlayer_Init(&sprite.animation, allocator)
-			texture := loadAsset(rm, projectDir, node.texture)
-			if texture != nil {
+			// An animation asset's sheet and animations, else its own
+			texture := node.animationSet != "" ? nil : loadAsset(rm, projectDir, node.texture)
+			if node.animationSet != "" {
+				if set, ok := Game_LoadAnimationSet(scene.game, node.animationSet); ok do AnimatedSprite_SetAnimations(sprite, set, projectDir, node.autoplay)
+			} else if texture != nil {
 				if len(node.animations) == 0 {
 					AnimationPlayer_Add(&sprite.animation, CreateSpriteSheetAnimation("default", texture, node.columns, node.rows,
 						node.fps, node.loop, playMode = node.playMode, margin = node.margin, spacing = node.spacing, allocator = allocator))
@@ -608,7 +611,7 @@ runMenuAction :: proc(menu: ^Menu, item: ^MenuItem) {
 	}
 }
 
-@(private="file")
+@(private)
 loadAsset :: proc(rm: ^ResourceManager, projectDir, path: string) -> ^sdl.Texture {
 	if path == "" do return nil
 	fullPath := JoinPath(projectDir, path)

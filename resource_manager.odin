@@ -103,7 +103,8 @@ ResourceManager_Init :: proc(rm: ^ResourceManager, renderer: ^sdl.Renderer, mixe
 }
 
 // Loads any image format supported by SDL_image (png, jpg, bmp, webp, ...), and Aseprite files
-// (their first frame, every visible layer; aseprite.odin)
+// (their first frame, every visible layer; aseprite.odin; with ASEPRITE_SHEET_SUFFIX, every frame
+// on a sheet: animation_sets.odin)
 @(private)
 ResourceManager_loadTexture :: proc(rm: ^ResourceManager, filePath: string) -> ^sdl.Texture {
 	if tex, ok := rm.textures[filePath]; ok {
@@ -111,13 +112,14 @@ ResourceManager_loadTexture :: proc(rm: ^ResourceManager, filePath: string) -> ^
 	}
 
 	tex: ^sdl.Texture
-	if Aseprite_IsFile(filePath) {
-		ase, err := Aseprite_Load(filePath)
+	file, sheet := asepriteSheetFile(filePath)
+	if Aseprite_IsFile(file) {
+		ase, err := Aseprite_Load(file)
 		if err != .None {
 			log.errorf("Error loading texture: %s, %v", filePath, err)
 			return nil
 		}
-		tex = Aseprite_CreateTexture(rm.renderer, ase)
+		tex = Aseprite_CreateTexture(rm.renderer, ase, sheet ? -1 : 0)
 		Aseprite_Destroy(ase)
 	} else {
 		tex = Platform_LoadTexture(rm.renderer, filePath)
@@ -129,7 +131,7 @@ ResourceManager_loadTexture :: proc(rm: ^ResourceManager, filePath: string) -> ^
 
 	key := strings.clone(filePath)
 	rm.textures[key] = tex
-	rm.textureTimes[key] = fileModified(filePath)
+	rm.textureTimes[key] = fileModified(file)
 	return tex
 }
 
@@ -147,19 +149,28 @@ Returns:
 */
 ResourceManager_ReloadChangedTextures :: proc(rm: ^ResourceManager) -> (reloaded: int) {
 	for path, texture in rm.textures {
-		modified := fileModified(path)
+		file, sheet := asepriteSheetFile(path)
+		modified := fileModified(file)
 		if modified == 0 || modified == rm.textureTimes[path] do continue
 		rm.textureTimes[path] = modified
 		surface: ^sdl.Surface
-		if Aseprite_IsFile(path) {
-			ase, err := Aseprite_Load(path)
+		if Aseprite_IsFile(file) {
+			ase, err := Aseprite_Load(file)
 			if err != .None {
 				log.warnf("Reloading %s: %v", path, err)
 				continue
 			}
-			pixels := Aseprite_FramePixels(ase, 0, context.temp_allocator)
-			if ase.width > 0 && ase.height > 0 {
-				view := sdl.CreateSurfaceFrom(i32(ase.width), i32(ase.height), .RGBA32, raw_data(pixels), i32(ase.width * 4))
+			pixels: []u8
+			width, height := ase.width, ase.height
+			if sheet {
+				columns, rows: int
+				pixels, columns, rows = Aseprite_SheetPixels(ase, context.temp_allocator)
+				width, height = columns * ase.width, rows * ase.height
+			} else {
+				pixels = Aseprite_FramePixels(ase, 0, context.temp_allocator)
+			}
+			if width > 0 && height > 0 {
+				view := sdl.CreateSurfaceFrom(i32(width), i32(height), .RGBA32, raw_data(pixels), i32(width * 4))
 				if view != nil {
 					surface = sdl.DuplicateSurface(view)
 					sdl.DestroySurface(view)

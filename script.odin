@@ -56,7 +56,7 @@ from an `@(init)` procedure, so linking the package in is enough:
 Exported fields are the ones tagged `export:""`; they show in the editor's inspector and are
 saved in the scene. Supported types: f32, f64, int, i32, bool, string, [2]f32, enums,
 sdl.Color (`#rrggbb`), and the asset handles of assets.odin (`TextureAsset`, `SoundAsset`,
-`FontAsset`, `DataAsset`, `ComponentAsset`, `MusicAsset`), and pointers to nodes (`^e.Node`,
+`FontAsset`, `DataAsset`, `ComponentAsset`, `MusicAsset`, `AnimationAsset`), and pointers to nodes (`^e.Node`,
 `^e.Sprite`, `^e.CharacterMover`...). Tag options, space-separated inside the quotes:
 `default=<value>` (else the type's zero value; white for colors, the first value for enums),
 `min=<n>`, `max=<n>`, and `kind=scene` for a string naming a scene (`kind=<DataType>` for a
@@ -181,6 +181,8 @@ ScriptFieldType :: enum {
 	// A pointer to a node (`^e.Sprite`...): the value is a path (`Node_FindPath`), resolved
 	// before `ready`
 	Node,
+	// An `AnimationAsset` (an animation set's path)
+	Animation,
 }
 
 // An exported field of a script
@@ -411,7 +413,7 @@ Script_SetField :: proc(self: rawptr, field: ScriptField, text: string, allocato
 		case "false", "0", "": (cast(^bool)at)^ = false
 		case: return false
 		}
-	case .String, .Texture, .Sound, .Font, .Data, .Component, .Music:
+	case .String, .Texture, .Sound, .Font, .Data, .Component, .Music, .Animation:
 		// The handles are a struct holding a path: laid out like a string
 		(cast(^string)at)^ = strings.clone(text, allocator)
 	case .Node:
@@ -582,6 +584,7 @@ exportedFields :: proc(T: typeid) -> []ScriptField {
 		case f.type.id == DataAsset: field.type = .Data
 		case f.type.id == ComponentAsset: field.type = .Component
 		case f.type.id == MusicAsset: field.type = .Music
+		case f.type.id == AnimationAsset: field.type = .Animation
 		case reflect.is_enum(base):
 			field.type = .Enum
 			field.enumNames = reflect.enum_field_names(f.type.id)

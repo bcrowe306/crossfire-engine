@@ -15,6 +15,8 @@ AnimationPlayMode :: enum {
 	Reverse,
 	// startFrame -> endFrame -> startFrame. One full there-and-back counts as one loop
 	PingPong,
+	// endFrame -> startFrame -> endFrame (Aseprite's "Ping-pong Reverse")
+	PingPongReverse,
 }
 
 /*
@@ -43,8 +45,13 @@ Animation :: struct {
 	fps: f32,
 	// Restart after the last frame instead of ending
 	loop: bool,
+	// Times it plays before it ends, when it doesn't loop (0 or 1: once; Aseprite's tag repeats)
+	repeat: int,
 	// How it steps through its frames
 	playMode: AnimationPlayMode,
+	// Seconds each frame shows (relative frames: 0 is startFrame), overriding `fps` for the frames
+	// it covers (Aseprite frames each have their own duration). Owned, with `allocator`
+	durations: []f32,
 
 	// Number of frames this animation plays: endFrame - startFrame + 1
 	totalFrames: proc(animation: ^Animation) -> int,
@@ -75,6 +82,42 @@ Animation_TotalFrames :: proc(animation: ^Animation) -> int {
 }
 
 /*
+How long a frame of an animation shows: its duration when the animation has one for it, else
+1 / fps.
+
+Inputs:
+- animation: Any animation
+- frame: A frame relative to its startFrame
+
+Returns:
+- Seconds (0: it holds, for an fps of 0 or less without a duration)
+*/
+Animation_FrameDuration :: proc(animation: ^Animation, frame: int) -> f32 {
+	if frame >= 0 && frame < len(animation.durations) && animation.durations[frame] > 0 do return animation.durations[frame]
+	return animation.fps > 0 ? 1 / animation.fps : 0
+}
+
+/*
+Sets how long each frame shows, overriding fps for those frames.
+
+Inputs:
+- animation: Any animation
+- durations: Seconds per frame, relative to its startFrame (copied; empty: back to fps)
+
+Example:
+	// Given: animation: ^e.Animation
+	e.Animation_SetDurations(animation, {0.1, 0.1, 0.3})
+*/
+Animation_SetDurations :: proc(animation: ^Animation, durations: []f32) {
+	delete(animation.durations, animation.allocator)
+	animation.durations = nil
+	if len(durations) > 0 {
+		animation.durations = make([]f32, len(durations), animation.allocator)
+		copy(animation.durations, durations)
+	}
+}
+
+/*
 Frees an animation created by one of the Create* procedures. Animations added to an
 AnimationPlayer are freed by `AnimationPlayer_Destroy`; don't free them yourself.
 
@@ -85,6 +128,7 @@ Animation_Destroy :: proc(animation: ^Animation) {
 	if animation == nil do return
 	allocator := animation.allocator
 	if animation.destroyData != nil do animation.destroyData(animation)
+	delete(animation.durations, allocator)
 	delete(animation.name, allocator)
 	free(animation, allocator)
 }

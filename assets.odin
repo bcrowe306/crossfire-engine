@@ -75,6 +75,13 @@ ComponentAsset :: struct {
 	path: string,
 }
 
+// An animation asset (an `.anim.xml` file, or an Aseprite file: its tags): animations AnimatedSprite
+// nodes share (`AnimatedSprite_UseAnimations`, animation_sets.odin)
+AnimationAsset :: struct {
+	// The file's path, relative to the project folder ("" for none)
+	path: string,
+}
+
 // An LDtk project in the project (`.ldtk`: ldtk.odin): its levels go in scenes as LDtkLevel nodes
 LDtkAsset :: struct {
 	// The .ldtk file's path, relative to the project folder ("" for none)

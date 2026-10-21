@@ -114,7 +114,8 @@ parse_animated_sprite_animations :: proc(t: ^testing.T) {
 	testing.expect_value(t, hero.spacing, 2)
 	testing.expect_value(t, hero.autoplay, "jump")
 	testing.expect_value(t, len(hero.animations), 2)
-	testing.expect_value(t, hero.animations[0], AnimationData{"walk", 0, 3, 10, true, .Forward})
+	walk := hero.animations[0]
+	testing.expect(t, walk.name == "walk" && walk.start == 0 && walk.end == 3 && walk.fps == 10 && walk.loop && walk.playMode == .Forward && len(walk.durations) == 0, "walk")
 	testing.expect_value(t, hero.animations[1].end, -1) // Missing: to the last cell
 	testing.expect_value(t, hero.animations[1].playMode, AnimationPlayMode.PingPong)
 	testing.expect(t, !hero.animations[1].loop, "loop defaults to off")

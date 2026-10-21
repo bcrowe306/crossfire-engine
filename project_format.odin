@@ -94,7 +94,10 @@ the grid, `spacing` between cells), numbered left to right, top to bottom from 0
 `<animation>` elements are named ranges of cells (`start`, `end` inclusive; `end` -1 is the last
 cell), each with its `fps`, `loop` and `playMode`; `autoplay` names the one it plays from the start
 (else the first). Without `<animation>` elements it plays one animation, "default": every cell, at
-the node's `fps`, `loop` and `playMode` (the format before version 7).
+the node's `fps`, `loop` and `playMode` (the format before version 7). An animation's `durations`
+(milliseconds per frame) override its fps, and `repeat` plays a non-looping one that often.
+With `animations="assets/hero.aseprite"` (an animation asset: an `.anim.xml` file or an Aseprite
+file, `AnimationSetData`) it plays the asset's sheet and animations instead of its own.
 
 ParticleEmitter nodes (particles.odin) keep their settings in a `<particles>` child element: one
 attribute per `ParticleSettings` field that differs from `DEFAULT_PARTICLE_SETTINGS`, named like
@@ -131,7 +134,10 @@ Version history:
   editor's `<grid width height majorEvery opacity majorOpacity/>` (`GridSettings`; games ignore
   it); the project's sound output format (`audioFrequency`, `audioChannels`: `AudioOutputSettings`,
   0 for the device's own; stereo 48 kHz without them); scenes' own settings (`SceneSettings`: `screenLayers`, `background`, `gravityX` /
-  `gravityY` on the root element). Version 12 files are valid version 13 files.
+  `gravityY` on the root element); animation assets (`.anim.xml` files, kind "Animation", and
+  Aseprite files: animation_sets.odin), AnimatedSprite `animations`, `<animation>` `durations`
+  and `repeat`, the `PingPongReverse` play mode; LDtkLevel `oneWayValues`, `areaValues` and
+  `<entity make script noScript>`. Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
 - 11: the project's `renderer`. Version 10 files are valid version 11 files.
@@ -366,8 +372,13 @@ SceneNodeData :: struct {
 	spacing: f32,
 	// AnimatedSprite: its `<animation>` child elements, in order
 	animations: [dynamic]AnimationData,
-	// AnimatedSprite: the animation it plays from the start ("" or unknown: the first)
+	// AnimatedSprite: the animation it plays from the start ("" or unknown: the first; with an
+	// animation asset, "" is the asset's own)
 	autoplay: string,
+	// AnimatedSprite: `animations="assets/hero.anim.xml"`, an animation asset (an `.anim.xml` file,
+	// or an Aseprite file: its tags) whose sheet and animations it plays instead of its own
+	// (format 13; animation_sets.odin)
+	animationSet: string,
 	// Menu: its `<item>` child elements, top to bottom
 	items: [dynamic]MenuItemData,
 	// Any kind: the script attached to the node (`<script name="...">`; "" for none)
@@ -479,9 +490,13 @@ SceneNodeData :: struct {
 }
 
 /*
-An AnimatedSprite's animation: a named range of its sheet's cells.
+An AnimatedSprite's animation (or an animation asset's): a named range of its sheet's cells.
 
 	<animation name="walk" start="0" end="3" fps="10" loop="true" playMode="Forward"/>
+	<animation name="hit" start="4" end="6" durations="100 60 200" repeat="2"/>
+
+`durations` (milliseconds per frame, format 13) override fps for the frames they cover; `repeat`
+plays a non-looping animation that many times.
 */
 AnimationData :: struct {
 	// The name scripts play it by (missing: "default")
@@ -496,6 +511,106 @@ AnimationData :: struct {
 	loop: bool,
 	// Forward (default), or another `AnimationPlayMode`
 	playMode: AnimationPlayMode,
+	// Seconds each frame shows (`durations`, milliseconds in the file; empty: 1 / fps each)
+	durations: [dynamic]f32,
+	// Times a non-looping animation plays (0 or 1: once)
+	repeat: int,
+}
+
+/*
+An animation asset: a sheet and named animations over its cells, which AnimatedSprite nodes (and
+scripts: `AnimatedSprite_SetAnimations`) share. An `.anim.xml` file (asset kind "Animation"):
+
+	<?xml version="1.0" encoding="UTF-8"?>
+	<animations formatVersion="13" texture="assets/hero.png" columns="8" rows="2" autoplay="idle">
+		<animation name="idle" start="0" end="3" fps="6" loop="true"/>
+		<animation name="run" start="8" end="15" fps="12" loop="true"/>
+	</animations>
+
+An Aseprite file is one too, read by `AnimationSet_FromAseprite`: its frames on a sheet, a
+animation per tag.
+*/
+AnimationSetData :: struct {
+	// The sheet: an image path relative to the project folder (an Aseprite sheet's ends in
+	// ASEPRITE_SHEET_SUFFIX)
+	texture: string,
+	// The sheet's grid
+	columns, rows: int,
+	// Pixels around the grid, and between cells
+	margin, spacing: f32,
+	// The animation played first ("": the first)
+	autoplay: string,
+	// Its animations, in order
+	animations: [dynamic]AnimationData,
+}
+
+/*
+Reads an `.anim.xml` file.
+
+Inputs:
+- text: The XML
+- allocator: For the result's strings and lists
+
+Returns:
+- The animation set (free it with `AnimationSetData_Destroy`), and .None or what went wrong
+*/
+ParseAnimationSet :: proc(text: string, allocator := context.allocator) -> (set: AnimationSetData, err: ProjectError) {
+	doc := parseXML(text) or_return
+	defer xml.destroy(doc)
+	if doc.elements[0].ident != "animations" do return {}, .Wrong_Root
+	checkVersion(doc, 0) or_return
+	context.allocator = allocator
+	set.texture = cloneAttr(doc, 0, "texture", "")
+	set.columns = max(attrInt(doc, 0, "columns", 1), 1)
+	set.rows = max(attrInt(doc, 0, "rows", 1), 1)
+	set.margin = attrF32(doc, 0, "margin", 0)
+	set.spacing = attrF32(doc, 0, "spacing", 0)
+	set.autoplay = cloneAttr(doc, 0, "autoplay", "")
+	set.animations = make([dynamic]AnimationData)
+	for child in childElements(doc, 0) do if doc.elements[child].ident == "animation" {
+		append(&set.animations, parseAnimation(doc, child))
+	}
+	return set, .None
+}
+
+/*
+Frees an animation set's strings and lists. Must use the allocator it was made with.
+
+Inputs:
+- set: The set
+- allocator: Its allocator
+*/
+AnimationSetData_Destroy :: proc(set: ^AnimationSetData, allocator := context.allocator) {
+	context.allocator = allocator
+	delete(set.texture)
+	delete(set.autoplay)
+	for &a in set.animations {
+		delete(a.name)
+		delete(a.durations)
+	}
+	delete(set.animations)
+	set^ = {}
+}
+
+// An `<animation>` element (a node's, or an animation set's)
+@(private="file")
+parseAnimation :: proc(doc: ^xml.Document, element: xml.Element_ID) -> AnimationData {
+	a := AnimationData{
+		name = cloneAttr(doc, element, "name", "default"),
+		start = max(attrInt(doc, element, "start", 0), 0),
+		end = attrInt(doc, element, "end", -1),
+		fps = attrF32(doc, element, "fps", DEFAULT_SCENE_NODE.fps),
+		loop = attrBool(doc, element, "loop", false),
+		playMode = attrEnum(doc, element, "playMode", AnimationPlayMode.Forward),
+		repeat = max(attrInt(doc, element, "repeat", 0), 0),
+	}
+	if value, found := xml.find_attribute_val_by_key(doc, element, "durations"); found {
+		a.durations = make([dynamic]f32)
+		for part in strings.fields(value, context.temp_allocator) {
+			if ms, ok := strconv.parse_f32(part); ok && ms >= 0 do append(&a.durations, ms / 1000)
+		}
+	}
+	return a
 }
 
 // A script field's value in a scene file: `<prop name="speed" value="250"/>`
@@ -978,9 +1093,13 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.points)
 		delete(node.bodyA)
 		delete(node.bodyB)
-		for a in node.animations do delete(a.name)
+		for a in node.animations {
+			delete(a.name)
+			delete(a.durations)
+		}
 		delete(node.animations)
 		delete(node.autoplay)
+		delete(node.animationSet)
 		delete(node.component)
 		delete(node.sound)
 		delete(node.bus)
@@ -1180,6 +1299,7 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.spacing = attrF32(doc, element, "spacing", 0)
 	node.animations = make([dynamic]AnimationData)
 	node.autoplay = cloneAttr(doc, element, "autoplay", "")
+	node.animationSet = cloneAttr(doc, element, "animations", "")
 	node.component = cloneAttr(doc, element, "component", "")
 	node.sound = cloneAttr(doc, element, "sound", "")
 	node.bus = cloneAttr(doc, element, "bus", "")
@@ -1269,14 +1389,7 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		case "node":
 			parseNode(doc, child, index, scene)
 		case "animation":
-			append(&scene.nodes[index].animations, AnimationData{
-				name = cloneAttr(doc, child, "name", "default"),
-				start = max(attrInt(doc, child, "start", 0), 0),
-				end = attrInt(doc, child, "end", -1),
-				fps = attrF32(doc, child, "fps", DEFAULT_SCENE_NODE.fps),
-				loop = attrBool(doc, child, "loop", false),
-				playMode = attrEnum(doc, child, "playMode", AnimationPlayMode.Forward),
-			})
+			append(&scene.nodes[index].animations, parseAnimation(doc, child))
 		case "particles":
 			// Unknown or bad attributes keep the default
 			for a in doc.elements[child].attribs do ParticleSettings_Set(&scene.nodes[index].particles, a.key, a.val)

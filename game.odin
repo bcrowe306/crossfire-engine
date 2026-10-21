@@ -100,6 +100,9 @@ Game :: struct {
 	audioPlayers: [dynamic]^AudioPlayer,
 	// Components read so far, by path (nil: couldn't be read); in the game's memory (project_loader.odin)
 	components: map[string]^SceneData,
+	// Animation sets read so far, by path (nil: couldn't be read); in the game's memory
+	// (animation_sets.odin)
+	animationSets: map[string]^AnimationSetData,
 	// LDtk projects read so far, by path (nil: couldn't be read); each in its own arena (ldtk_nodes.odin)
 	ldtk: map[string]^LDtkProject,
 	// Development runs: the LDtk files' modification times when read, by path
@@ -234,6 +237,7 @@ Game_Destroy :: proc(game: ^Game) {
 	Input_Destroy(&game.input)
 	// Their memory is the game's arena, freed below
 	game.components = nil
+	game.animationSets = nil
 	game.sceneFiles = nil
 	Game_ForgetLDtk(game)
 	Audio_DestroyBuses(game)

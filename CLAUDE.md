@@ -146,6 +146,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `aseprite.odin` | **Aseprite files** (`.aseprite` / `.ase`): `Aseprite_Load` / `Aseprite_Parse` into plain data (`Aseprite`: layers, frames and durations, cels, tags, slices, tilesets, user data and properties; every image as RGBA) in its own arena (`Aseprite_Destroy`); `Aseprite_FramePixels` (a frame composited: visibility, opacity, z-index, the 19 blend modes, tilemap layers with flips), `Aseprite_SheetPixels` / `SheetGrid`, `Aseprite_TilePixels`, `Aseprite_CreateTexture`; the resource manager loads them as textures (frame 0, nearest filtering) |
 | `inflate.odin` | `Inflate_Exact`: a strict zlib inflater for untrusted data (exact size, no reading past the input, Adler-32 checked) |
 | `aseprite_test.odin`, `testdata/aseprite/` | Tests on Aseprite's own test sprites (MIT, from its `tests/` folder; LICENSE.txt beside them): its z-order test's colors, groups, tags, linked cels, indexed transparency, tilemaps and flips, user data, slices; damaged files; textures drawn; the inflater |
+| `animation_sets.odin` | **Animation assets**: `AnimationSetData` (`.anim.xml`, `ParseAnimationSet`), `AnimationSet_FromAseprite` (an Aseprite file's tags), `Game_LoadAnimationSet` (`Game.animationSets`), `AnimatedSprite_SetAnimations`, `AnimatedSprite_UseAnimations` (scripts), `Asset_Animations`, `ASEPRITE_SHEET_SUFFIX` |
+| `animation_sets_test.odin` | Tests: frame durations, repeats, reverse ping-pong, clearing; Aseprite tags as animations (directions, repeats); `.anim.xml` files; scene files' AnimatedSprites playing an Aseprite file; switching sets from code |
 | `pack.odin` | **The data pack**: a game's files appended to its own executable (`Pack_Append`; the footer's `ODINPAK1`), read back by `Pack_Open` at start (the project is then `PACK_ROOT`); `Pack_Bytes` / `Pack_Has`, a `Pack` value for tools and tests (`Pack_OpenFile`) |
 | `pack_test.odin` | Tests: a pack appended to a file and read back by path |
 | `sdl_static.odin` | Links the static SDL (tools/build_sdl_static.sh) when it's built: `SDL_STATIC`, `SDL_LINKED_STATICALLY` |
@@ -522,6 +524,16 @@ savedFields).
 - Z-index reorders cels among their siblings (NOTE.5 of the spec, per group). Groups composite
   apart only when the file says so (header flag 2) and they have an opacity or blend mode.
 - Textures from Aseprite files get nearest filtering (pixel art).
+
+**Animation assets** (animation_sets.odin; its doc comment has the details):
+- An `Animation` has optional per-frame `durations` (seconds; `Animation_FrameDuration`,
+  `Animation_SetDurations`) overriding fps, and `repeat` (plays a non-looping one that often:
+  `AnimationPlayer.cycles`). `PingPongReverse` is Aseprite's "Ping-pong Reverse".
+- An Aseprite file is an animation set as it is: its texture is `<path>#sheet`
+  (ASEPRITE_SHEET_SUFFIX), which the resource manager makes from `Aseprite_SheetPixels` (and
+  reloads like any texture); a tag without a repeat count loops, as Aseprite's preview plays it.
+- Sets are read once per game (`Game.animationSets`, its arena), like components; editors put
+  their in-memory sets there before building.
 
 **Images saved while running** (`ResourceManager_ReloadChangedTextures`, resource_manager.odin):
 the resource manager keeps each texture file's modification time (`textureTimes`); development

@@ -85,6 +85,8 @@ AnimationPlayer :: struct {
 	elapsed: f32,
 	// +1 or -1: direction frames are currently moving (PingPong flips it)
 	direction: int,
+	// Times the current animation has played through (for its `repeat`)
+	cycles: int,
 
 	// data: int, the new relative frame. Also sent when an animation starts on its first frame
 	onFrameChanged: EventSubject `event:"The animation's frame changed (data: the frame)" data:"frame := data.(int)"`,
@@ -230,7 +232,8 @@ AnimationPlayer_PlayByIndex :: proc(player: ^AnimationPlayer, index: int, restar
 	player.playing = true
 	player.finished = false
 	player.elapsed = 0
-	if animation.playMode == .Reverse {
+	player.cycles = 0
+	if animation.playMode == .Reverse || animation.playMode == .PingPongReverse {
 		player.frame = animation->totalFrames() - 1
 		player.direction = -1
 	} else {
@@ -243,6 +246,26 @@ AnimationPlayer_PlayByIndex :: proc(player: ^AnimationPlayer, index: int, restar
 	player.onAnimationStarted->notify(player, index)
 	player.onFrameChanged->notify(player, player.frame)
 	return true
+}
+
+/*
+Removes every animation (freeing them) and stops: nothing plays until animations are added again.
+
+Inputs:
+- player: The player
+*/
+AnimationPlayer_Clear :: proc(player: ^AnimationPlayer) {
+	for animation in player.animations do Animation_Destroy(animation)
+	clear(&player.animations)
+	clear(&player.names)
+	player.current = -1
+	player.previous = -1
+	player.frame = 0
+	player.playing = false
+	player.finished = false
+	player.elapsed = 0
+	player.cycles = 0
+	player.direction = 1
 }
 
 /*
@@ -277,8 +300,10 @@ AnimationPlayer_Stop :: proc(player: ^AnimationPlayer) {
 	player.playing = false
 	player.finished = false
 	player.elapsed = 0
-	player.direction = animation.playMode == .Reverse ? -1 : 1
-	rewound := animation.playMode == .Reverse ? animation->totalFrames() - 1 : 0
+	player.cycles = 0
+	backwards := animation.playMode == .Reverse || animation.playMode == .PingPongReverse
+	player.direction = backwards ? -1 : 1
+	rewound := backwards ? animation->totalFrames() - 1 : 0
 	if rewound != player.frame {
 		player.frame = rewound
 		player.onFrameChanged->notify(player, player.frame)
@@ -317,13 +342,15 @@ Example:
 AnimationPlayer_Update :: proc(player: ^AnimationPlayer, deltaTime: f64) {
 	if !player.playing || player.current < 0 do return
 	animation := player.animations[player.current]
-	if animation.fps <= 0 do return
+	if Animation_FrameDuration(animation, player.frame) <= 0 do return
 
-	frameTime := 1 / animation.fps
 	player.elapsed += f32(deltaTime) * max(player.speed, 0)
 
-	// A long frame (or high speed) can cover several animation frames at once
-	for player.elapsed >= frameTime {
+	// A long frame (or high speed) can cover several animation frames at once; each frame has
+	// its own duration when the animation has durations
+	for {
+		frameTime := Animation_FrameDuration(animation, player.frame)
+		if frameTime <= 0 || player.elapsed < frameTime do break
 		player.elapsed -= frameTime
 		playing := player.current
 		advanceFrame(player, animation)
@@ -466,7 +493,7 @@ advanceFrame :: proc(player: ^AnimationPlayer, animation: ^Animation) {
 
 	// A single frame animation completes a cycle every frame, whatever the mode
 	if last == 0 {
-		if !animation.loop { endAnimation(player); return }
+		if !playsOn(player, animation) { endAnimation(player); return }
 		player.onAnimationLooped->notify(player, player.current)
 		return
 	}
@@ -474,13 +501,13 @@ advanceFrame :: proc(player: ^AnimationPlayer, animation: ^Animation) {
 	switch animation.playMode {
 	case .Forward:
 		if next > last {
-			if !animation.loop { endAnimation(player); return }
+			if !playsOn(player, animation) { endAnimation(player); return }
 			next = 0
 			wrapped = true
 		}
 	case .Reverse:
 		if next < 0 {
-			if !animation.loop { endAnimation(player); return }
+			if !playsOn(player, animation) { endAnimation(player); return }
 			next = last
 			wrapped = true
 		}
@@ -491,17 +518,36 @@ advanceFrame :: proc(player: ^AnimationPlayer, animation: ^Animation) {
 			player.direction = -1
 			next = last - 1
 		} else if next < 0 {
-			if !animation.loop { endAnimation(player); return }
+			if !playsOn(player, animation) { endAnimation(player); return }
 			player.direction = 1
 			next = 1
 		}
-		wrapped = next == 0 && player.direction == -1 && animation.loop
+		wrapped = next == 0 && player.direction == -1 && (animation.loop || player.cycles + 1 < max(animation.repeat, 1))
+	case .PingPongReverse:
+		// The same from the end: end -> start -> end
+		if next < 0 {
+			player.direction = 1
+			next = 1
+		} else if next > last {
+			if !playsOn(player, animation) { endAnimation(player); return }
+			player.direction = -1
+			next = last - 1
+		}
+		wrapped = next == last && player.direction == 1 && (animation.loop || player.cycles + 1 < max(animation.repeat, 1))
 	}
 
 	changed := next != player.frame
 	player.frame = next
 	if wrapped do player.onAnimationLooped->notify(player, player.current)
 	if changed && player.playing do player.onFrameChanged->notify(player, player.frame)
+}
+
+// Whether an animation goes on at the end of a cycle: it loops, or it has repeats left
+@(private="file")
+playsOn :: proc(player: ^AnimationPlayer, animation: ^Animation) -> bool {
+	if animation.loop do return true
+	player.cycles += 1
+	return player.cycles < max(animation.repeat, 1)
 }
 
 @(private="file")
