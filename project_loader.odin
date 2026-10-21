@@ -18,6 +18,14 @@ Sprite :: struct {
 	using node: Node,
 	// The image it draws (the resource manager's; nil draws nothing)
 	texture: ^sdl.Texture,
+	// Its Aseprite file, when the image is one (full path, node arena; "" otherwise): its slices
+	source: string,
+	// The slice whose pivot is drawn at the origin ("": the middle; aseprite_nodes.odin)
+	pivotSlice: string,
+	// A 9-patch slice it draws stretched to `nineSize` ("": the whole image)
+	nineSlice: string,
+	// The 9-patch's size (0: the slice's own)
+	nineSize: [2]f32,
 }
 
 /*
@@ -30,6 +38,14 @@ AnimatedSprite :: struct {
 	using node: Node,
 	// Its animations and the one playing (updated with the node; allocated in the node's arena)
 	animation: AnimationPlayer,
+	// Its Aseprite file, when its sheet is one (full path, node arena; "" otherwise): its slices
+	source: string,
+	// Its cells are the file's frames (an Aseprite file's animations), so slices follow them
+	sourceFrames: bool,
+	// The slice whose pivot is drawn at the origin, frame by frame ("": the middle)
+	pivotSlice: string,
+	// The Aseprite layers it draws ("": every visible one; node arena)
+	layers: string,
 }
 
 /*
@@ -405,7 +421,12 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			sprite := CreateNode(scene, Sprite)
 			sprite.draw = Sprite_draw
 			sprite.getBounds = Sprite_getBounds
-			sprite.texture = loadAsset(rm, projectDir, node.texture)
+			sprite.texture = loadAsset(rm, projectDir, asepriteLayersKey(node.texture, Aseprite_IsFile(node.texture) ? node.asepriteLayers : ""))
+			spriteAllocator := Node_GetAllocator(sprite)
+			if Aseprite_IsFile(node.texture) do sprite.source = strings.clone(JoinPath(projectDir, node.texture), spriteAllocator)
+			sprite.pivotSlice = strings.clone(node.pivotSlice, spriteAllocator)
+			sprite.nineSlice = strings.clone(node.nineSlice, spriteAllocator)
+			sprite.nineSize = node.nineSize
 			n = sprite
 
 		case .AnimatedSprite:
@@ -415,8 +436,12 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			sprite.getBounds = AnimatedSprite_getBounds
 			allocator := Node_GetAllocator(sprite)
 			AnimationPlayer_Init(&sprite.animation, allocator)
+			sprite.pivotSlice = strings.clone(node.pivotSlice, allocator)
+			sprite.layers = strings.clone(node.asepriteLayers, allocator)
 			// An animation asset's sheet and animations, else its own
-			texture := node.animationSet != "" ? nil : loadAsset(rm, projectDir, node.texture)
+			ownAseprite := node.animationSet == "" && Aseprite_IsFile(node.texture)
+			texture := node.animationSet != "" ? nil : loadAsset(rm, projectDir, asepriteLayersKey(node.texture, ownAseprite ? node.asepriteLayers : ""))
+			if ownAseprite do sprite.source = strings.clone(JoinPath(projectDir, node.texture), allocator)
 			if node.animationSet != "" {
 				if set, ok := Game_LoadAnimationSet(scene.game, node.animationSet); ok do AnimatedSprite_SetAnimations(sprite, set, projectDir, node.autoplay)
 			} else if texture != nil {
@@ -425,8 +450,11 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 						node.fps, node.loop, playMode = node.playMode, margin = node.margin, spacing = node.spacing, allocator = allocator))
 				}
 				for a in node.animations {
-					AnimationPlayer_Add(&sprite.animation, CreateSpriteSheetAnimation(a.name, texture, node.columns, node.rows,
-						a.fps, a.loop, a.start, a.end, a.playMode, node.margin, node.spacing, allocator))
+					animation := CreateSpriteSheetAnimation(a.name, texture, node.columns, node.rows, a.fps, a.loop, a.start, a.end, a.playMode, node.margin, node.spacing, allocator)
+					animation.repeat = a.repeat
+					if len(a.durations) > 0 do Animation_SetDurations(animation, a.durations[:])
+					if len(a.events) > 0 do Animation_SetEvents(animation, a.events[:])
+					AnimationPlayer_Add(&sprite.animation, animation)
 				}
 				// The autoplay animation, else the first
 				if node.autoplay == "" || !AnimationPlayer_Play(&sprite.animation, node.autoplay) do AnimationPlayer_Play(&sprite.animation, 0)
@@ -471,6 +499,12 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			shape.disabled = node.disabled
 			shape.oneWay = node.oneWay
 			append(&shape.points, ..node.points[:])
+			// Following an Aseprite slice of its sprite, frame by frame (aseprite_nodes.odin)
+			if node.slice != "" {
+				shape.slice = strings.clone(node.slice, Node_GetAllocator(shape))
+				shape.shape = .Rectangle
+				shape.update = sliceShapeUpdate
+			}
 			n = shape
 		case .RayCast:
 			ray := CreateRayCast(scene, node.target)
@@ -564,38 +598,8 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 }
 
 @(private)
-Sprite_draw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
-	sprite := cast(^Sprite)node
-	if sprite.texture == nil do return
-	size := [2]f32{f32(sprite.texture.w), f32(sprite.texture.h)}
-	DrawTexture(renderer, sprite.texture, {-size.x * 0.5, -size.y * 0.5, size.x, size.y})
-}
-
-@(private)
-Sprite_getBounds :: proc(node: ^Node) -> (sdl.FRect, bool) {
-	sprite := cast(^Sprite)node
-	if sprite.texture == nil do return {}, false
-	w, h := f32(sprite.texture.w), f32(sprite.texture.h)
-	return {-w * 0.5, -h * 0.5, w, h}, true
-}
-
-@(private)
-AnimatedSprite_getBounds :: proc(node: ^Node) -> (sdl.FRect, bool) {
-	size := AnimationPlayer_FrameSize(&(cast(^AnimatedSprite)node).animation)
-	if size == {} do return {}, false
-	return {-size.x * 0.5, -size.y * 0.5, size.x, size.y}, true
-}
-
-@(private)
 AnimatedSprite_update :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 	AnimationPlayer_Update(&(cast(^AnimatedSprite)node).animation, deltaTime)
-}
-
-@(private)
-AnimatedSprite_draw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
-	sprite := cast(^AnimatedSprite)node
-	size := AnimationPlayer_FrameSize(&sprite.animation)
-	AnimationPlayer_Draw(&sprite.animation, renderer, {-size.x * 0.5, -size.y * 0.5, size.x, size.y})
 }
 
 // Menu buttons from scene files: "scene:<Name>" switches scene, "quit" quits

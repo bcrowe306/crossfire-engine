@@ -2,6 +2,7 @@ package crossfire
 
 import "core:log"
 import "core:mem"
+import "core:strings"
 import sdl "vendor:sdl3"
 
 /*
@@ -100,6 +101,9 @@ AnimationPlayer :: struct {
 	onAnimationLooped: EventSubject `event:"A looping animation wrapped around (data: its index)" data:"index := data.(int)"`,
 	// data: int, index of the animation. Sent by AnimationPlayer_Stop
 	onAnimationStopped: EventSubject `event:"The animation was stopped (data: its index)" data:"index := data.(int)"`,
+	// data: string, an event of the frame that shows (one notification per event; Aseprite cels'
+	// text or `event` property: `Animation.events`). Valid during the notification
+	onFrameEvent: EventSubject `event:"A frame with an event shows (data: the event's name)" data:"name := data.(string)"`,
 
 	// Allocator of its lists and event listeners (`AnimationPlayer_Init`)
 	allocator: mem.Allocator,
@@ -127,6 +131,7 @@ AnimationPlayer_Init :: proc(player: ^AnimationPlayer, allocator := context.allo
 	EventSubject_Init(&player.onAnimationEnded, allocator)
 	EventSubject_Init(&player.onAnimationLooped, allocator)
 	EventSubject_Init(&player.onAnimationStopped, allocator)
+	EventSubject_Init(&player.onFrameEvent, allocator)
 }
 
 /*
@@ -245,6 +250,7 @@ AnimationPlayer_PlayByIndex :: proc(player: ^AnimationPlayer, index: int, restar
 	if changed do player.onAnimationChanged->notify(player, index)
 	player.onAnimationStarted->notify(player, index)
 	player.onFrameChanged->notify(player, player.frame)
+	sendFrameEvents(player, animation)
 	return true
 }
 
@@ -540,6 +546,22 @@ advanceFrame :: proc(player: ^AnimationPlayer, animation: ^Animation) {
 	player.frame = next
 	if wrapped do player.onAnimationLooped->notify(player, player.current)
 	if changed && player.playing do player.onFrameChanged->notify(player, player.frame)
+	// A frame's events every time it shows (a one-frame loop's too)
+	if player.playing do sendFrameEvents(player, animation)
+}
+
+// The events of the frame that shows, one notification each
+@(private="file")
+sendFrameEvents :: proc(player: ^AnimationPlayer, animation: ^Animation) {
+	if player.frame < 0 || player.frame >= len(animation.events) || animation.events[player.frame] == "" do return
+	playing := player.current
+	for name in strings.split(animation.events[player.frame], ",", context.temp_allocator) {
+		trimmed := strings.trim_space(name)
+		if trimmed == "" do continue
+		Event_Notify(&player.onFrameEvent, player, trimmed)
+		// A listener switched animations: the rest belong to a frame no longer showing
+		if player.current != playing do return
+	}
 }
 
 // Whether an animation goes on at the end of a cycle: it loops, or it has repeats left

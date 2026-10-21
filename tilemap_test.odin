@@ -237,6 +237,24 @@ tilemaps_draw_collide_and_answer :: proc(t: ^testing.T) {
 	testing.expect_value(t, at(surface, 14, 5), [3]u8{255, 0, 0})
 	testing.expect_value(t, at(surface, 13, 1), [3]u8{0, 0, 0})
 
+	// A tile changed from code: drawn at once, the bodies on the next update (a one-way tile made
+	// solid: the solid tiles of row 0 merge into one wider shape)
+	column, row, inGrid := TileMap_CellAt(level, "Ground", {9, 1})
+	testing.expect(t, inGrid && column == 2 && row == 0, "the cell under a point")
+	testing.expect(t, TileMap_SetTile(level, "Ground", 2, 0, 1), "set")
+	tile, _, _ = TileMap_TileAt(level, "Ground", {9, 1})
+	testing.expect_value(t, tile, u32(1))
+	Scene_Update(scene, nil, 0)
+	// The old body leaves with the next queue pass
+	Scene_ProcessQueues(scene)
+	collision = Scene_FindNode(scene, "Level/Collision")
+	if collision != nil {
+		testing.expect_value(t, len(collision.children), 2)
+		oneWay := 0
+		for c in collision.children do if (cast(^CollisionShape)c).oneWay do oneWay += 1
+		testing.expect_value(t, oneWay, 0)
+	}
+
 	// A development run: the file saved again (two tiles left) is read again and the node rebuilt
 	game.devKeys = true
 	_ = os.write_entire_file(JoinPath(dir, "level.aseprite"), tilemapFile({1, 0, 0, 0, 0, 0, 0, 2}))

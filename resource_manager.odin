@@ -113,13 +113,14 @@ ResourceManager_loadTexture :: proc(rm: ^ResourceManager, filePath: string) -> ^
 
 	tex: ^sdl.Texture
 	file, part, index := asepriteTextureKey(filePath)
+	_, layers := asepriteKeyLayers(filePath)
 	if Aseprite_IsFile(file) {
 		ase, err := Aseprite_Load(file)
 		if err != .None {
 			log.errorf("Error loading texture: %s, %v", filePath, err)
 			return nil
 		}
-		pixels, width, height := asepritePartPixels(ase, part, index)
+		pixels, width, height := asepritePartPixels(ase, part, index, layers)
 		if width > 0 && height > 0 {
 			if surface := sdl.CreateSurfaceFrom(i32(width), i32(height), .RGBA32, raw_data(pixels), i32(width * 4)); surface != nil {
 				tex = sdl.CreateTextureFromSurface(rm.renderer, surface)
@@ -158,6 +159,7 @@ Returns:
 ResourceManager_ReloadChangedTextures :: proc(rm: ^ResourceManager) -> (reloaded: int) {
 	for path, texture in rm.textures {
 		file, part, index := asepriteTextureKey(path)
+		_, layers := asepriteKeyLayers(path)
 		modified := fileModified(file)
 		if modified == 0 || modified == rm.textureTimes[path] do continue
 		rm.textureTimes[path] = modified
@@ -168,7 +170,7 @@ ResourceManager_ReloadChangedTextures :: proc(rm: ^ResourceManager) -> (reloaded
 				log.warnf("Reloading %s: %v", path, err)
 				continue
 			}
-			pixels, width, height := asepritePartPixels(ase, part, index)
+			pixels, width, height := asepritePartPixels(ase, part, index, layers)
 			if width > 0 && height > 0 {
 				view := sdl.CreateSurfaceFrom(i32(width), i32(height), .RGBA32, raw_data(pixels), i32(width * 4))
 				if view != nil {

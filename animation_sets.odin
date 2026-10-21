@@ -43,11 +43,21 @@ AnimationSet_FromAseprite :: proc(ase: ^Aseprite, path: string, allocator := con
 	clip :: proc(ase: ^Aseprite, name: string, from, to: int, direction: AsepriteDirection, repeat: int) -> AnimationData {
 		a := AnimationData{name = strings.clone(name), start = from, end = to}
 		a.durations = make([dynamic]f32)
+		a.events = make([dynamic]string)
 		total := 0
+		anyEvent := false
 		for f in from..=to {
 			ms := f >= 0 && f < len(ase.frames) ? ase.frames[f].duration : 100
 			append(&a.durations, f32(ms) / 1000)
 			total += ms
+			// Its cels' text and `event` properties (aseprite_nodes.odin)
+			events := Aseprite_FrameEvents(ase, f)
+			append(&a.events, strings.clone(events))
+			if events != "" do anyEvent = true
+		}
+		if !anyEvent {
+			for event in a.events do delete(event)
+			clear(&a.events)
 		}
 		// fps for whatever reads only it: the frames' average
 		a.fps = total > 0 ? f32(to - from + 1) * 1000 / f32(total) : DEFAULT_SCENE_NODE.fps
@@ -123,12 +133,18 @@ AnimatedSprite_SetAnimations :: proc(sprite: ^AnimatedSprite, set: ^AnimationSet
 	player := &sprite.animation
 	if player.allocator.procedure == nil do AnimationPlayer_Init(player, allocator)
 	AnimationPlayer_Clear(player)
-	texture := loadAsset(&sprite.scene.game.resourceManager, projectDir, set.texture)
+	// An Aseprite file's sheet: the sprite's layers of it, and its slices follow its frames
+	file, part, _ := asepriteTextureKey(set.texture)
+	fromAseprite := Aseprite_IsFile(file)
+	texture := loadAsset(&sprite.scene.game.resourceManager, projectDir, asepriteLayersKey(set.texture, fromAseprite ? sprite.layers : ""))
 	if texture == nil do return false
+	sprite.source = fromAseprite ? strings.clone(JoinPath(projectDir, file), allocator) : ""
+	sprite.sourceFrames = fromAseprite && part == .Sheet
 	for a in set.animations {
 		animation := CreateSpriteSheetAnimation(a.name, texture, set.columns, set.rows, a.fps, a.loop, a.start, a.end, a.playMode, set.margin, set.spacing, allocator)
 		animation.repeat = a.repeat
 		if len(a.durations) > 0 do Animation_SetDurations(animation, a.durations[:])
+		if len(a.events) > 0 do Animation_SetEvents(animation, a.events[:])
 		AnimationPlayer_Add(player, animation)
 	}
 	first := autoplay != "" ? autoplay : set.autoplay
@@ -190,8 +206,10 @@ AsepriteTexturePart :: enum {
 }
 
 // "assets/hero.aseprite#sheet" -> "assets/hero.aseprite", .Sheet; "x.aseprite#tileset1" -> .Tileset, 1
+// (a `?layers=` part is left out: asepriteKeyLayers)
 @(private)
 asepriteTextureKey :: proc(key: string) -> (file: string, part: AsepriteTexturePart, index: int) {
+	key, _ := asepriteKeyLayers(key)
 	if strings.has_suffix(key, ASEPRITE_SHEET_SUFFIX) do return key[:len(key) - len(ASEPRITE_SHEET_SUFFIX)], .Sheet, 0
 	if at := strings.last_index(key, ASEPRITE_TILESET_SUFFIX); at >= 0 {
 		digits := key[at + len(ASEPRITE_TILESET_SUFFIX):]
@@ -205,15 +223,19 @@ asepriteTextureKey :: proc(key: string) -> (file: string, part: AsepriteTextureP
 	return key, .Frame, 0
 }
 
-// The pixels of a part of an Aseprite file (temp allocated), and their size; nil when it has none
+// The pixels of a part of an Aseprite file (temp allocated), and their size; nil when it has none.
+// `layers`: the names a key's `?layers=` gives ("": every visible layer)
 @(private)
-asepritePartPixels :: proc(ase: ^Aseprite, part: AsepriteTexturePart, index: int) -> (pixels: []u8, width, height: int) {
+asepritePartPixels :: proc(ase: ^Aseprite, part: AsepriteTexturePart, index: int, layers := "") -> (pixels: []u8, width, height: int) {
+	only := Aseprite_LayersNamed(ase, layers)
+	// Named layers that aren't there draw nothing (not everything)
+	if layers != "" && len(only) == 0 do only = []int{-1}
 	switch part {
 	case .Frame:
-		return Aseprite_FramePixels(ase, 0, context.temp_allocator), ase.width, ase.height
+		return Aseprite_FramePixels(ase, 0, context.temp_allocator, only), ase.width, ase.height
 	case .Sheet:
 		columns, rows: int
-		pixels, columns, rows = Aseprite_SheetPixels(ase, context.temp_allocator)
+		pixels, columns, rows = Aseprite_SheetPixels(ase, context.temp_allocator, only)
 		return pixels, columns * ase.width, rows * ase.height
 	case .Tileset:
 		if index < 0 || index >= len(ase.tilesets) || ase.tilesets[index].pixels == nil do return nil, 0, 0

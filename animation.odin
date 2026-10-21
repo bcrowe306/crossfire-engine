@@ -52,6 +52,9 @@ Animation :: struct {
 	// Seconds each frame shows (relative frames: 0 is startFrame), overriding `fps` for the frames
 	// it covers (Aseprite frames each have their own duration). Owned, with `allocator`
 	durations: []f32,
+	// Each frame's events, comma-separated ("" for none), sent by its player's `onFrameEvent` when
+	// the frame shows (relative frames; owned, with `allocator`)
+	events: []string,
 
 	// Number of frames this animation plays: endFrame - startFrame + 1
 	totalFrames: proc(animation: ^Animation) -> int,
@@ -118,6 +121,26 @@ Animation_SetDurations :: proc(animation: ^Animation, durations: []f32) {
 }
 
 /*
+Sets each frame's events, which the player sends with `onFrameEvent` as the frame shows.
+
+Inputs:
+- animation: Any animation
+- events: Per frame (relative to its startFrame), comma-separated names ("" for none); copied
+
+Example:
+	// Given: animation: ^e.Animation
+	e.Animation_SetEvents(animation, {"", "step", "", "step,dust"})
+*/
+Animation_SetEvents :: proc(animation: ^Animation, events: []string) {
+	for event in animation.events do delete(event, animation.allocator)
+	delete(animation.events, animation.allocator)
+	animation.events = nil
+	if len(events) == 0 do return
+	animation.events = make([]string, len(events), animation.allocator)
+	for event, i in events do animation.events[i] = strings.clone(event, animation.allocator)
+}
+
+/*
 Frees an animation created by one of the Create* procedures. Animations added to an
 AnimationPlayer are freed by `AnimationPlayer_Destroy`; don't free them yourself.
 
@@ -129,6 +152,8 @@ Animation_Destroy :: proc(animation: ^Animation) {
 	allocator := animation.allocator
 	if animation.destroyData != nil do animation.destroyData(animation)
 	delete(animation.durations, allocator)
+	for event in animation.events do delete(event, allocator)
+	delete(animation.events, allocator)
 	delete(animation.name, allocator)
 	free(animation, allocator)
 }

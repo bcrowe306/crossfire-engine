@@ -26,8 +26,13 @@ data properties. Painting tilemaps in the editor will write the same data.
   Solid and one-way tiles become one StaticBody, "Collision", their rectangles merged (one-way
   shapes have `oneWay`); area tiles an Area per name ("Area" without one). The bodies get the
   node's `collisionLayer`, `collisionMask`, `friction` and `restitution`.
-- **Code:** `TileMap_TileAt` (the tile under a point), `TileMap_TileProperty`,
-  `TileMap_TileCollision`.
+- **Animated** (`animate`, `tag`): it plays the file's frames (or a tag's) at their durations,
+  each layer showing its cel in that frame (water, torches); collision stays on `frame`'s tiles,
+  so bodies aren't rebuilt as it plays.
+- **Code:** `TileMap_TileAt` (the tile under a point), `TileMap_CellAt` (the cell),
+  `TileMap_TileProperty`, `TileMap_TileCollision`, and `TileMap_SetTile` (a broken block, a door:
+  drawn at once, an animated layer in every frame; its bodies rebuilt on the next update, so a
+  script holding one of them must look it up again).
 - **Development runs** (`Game.devKeys`) read a saved file again and rebuild the node's layers and
   collision (twice a second).
 */
@@ -42,6 +47,11 @@ TileMapSettings :: struct {
 	layers: string,
 	// `tileCollision`: tiles with collision properties become bodies (default true)
 	collision: bool,
+	// `animate`: plays the file's frames (or `tag`'s) at their durations; collision stays on
+	// `frame`'s tiles
+	animate: bool,
+	// `tag`: the tag it plays ("": every frame)
+	tag: string,
 }
 
 // A TileMap node's settings by default
@@ -74,6 +84,14 @@ TileMapNode :: struct {
 	built: [dynamic]^Node,
 	// Its tile layers, bottom first
 	tileLayers: [dynamic]^TileMapLayer,
+	// Its bodies (rebuilt when `TileMap_SetTile` changes collision: `collisionDirty`)
+	bodies: [dynamic]^Node,
+	collisionDirty: bool,
+	// The file's frames it plays (`animate`: every frame, or its tag's; else just `frame`), the one
+	// showing (index in `frames`) and how long it has shown
+	frames: []int,
+	shown: int,
+	clock: f64,
 	// Files replaced by rebuilds: freed once their layers are gone (the next update)
 	retired: [dynamic]^Aseprite,
 }
@@ -93,11 +111,23 @@ TileMapLayer :: struct {
 	// The layer in the file (index in `Aseprite.layers`), and its name
 	layerIndex: int,
 	layerName: string,
-	// Its grid: tiles across and down, and the tile values (the file's)
+	// Its grid as it shows now: tiles across and down, and the tile values (the file's)
 	cells: [2]int,
 	tiles: []u32,
 	// The tileset (in the file)
 	tileset: ^AsepriteTileset,
+	// Its cel in the TileMap's `frame`: what collision comes from (nil when it has none there)
+	base: ^AsepriteCel,
+	// Its cel and tiles in each frame the TileMap plays (by index in `TileMapNode.frames`)
+	frames: []TileMapLayerFrame,
+	// The layer's and its cels' opacity
+	opacity: u8,
+}
+
+// A layer's cel in one frame, and its tiles to draw (filled in place: never more than its cells)
+TileMapLayerFrame :: struct {
+	cel: ^AsepriteCel,
+	quads: [dynamic]TileQuad,
 }
 
 /*
@@ -200,6 +230,8 @@ tileMapBuildNode :: proc(scene: ^Scene, data: ^SceneNodeData, projectDir: string
 	node.physics = {data.collisionLayer, data.collisionMask, data.friction, data.restitution}
 	node.built = make([dynamic]^Node, allocator)
 	node.tileLayers = make([dynamic]^TileMapLayer, allocator)
+	node.bodies = make([dynamic]^Node, allocator)
+	node.settings.tag = strings.clone(data.tilemap.tag, allocator)
 	node.retired = make([dynamic]^Aseprite, allocator)
 	node.getBounds = tileMapBounds
 	node.update = tileMapUpdate
@@ -233,7 +265,19 @@ buildTileMap :: proc(node: ^TileMapNode) {
 		if trimmed := strings.trim_space(name); trimmed != "" do append(&wanted, trimmed)
 	}
 	full := JoinPath(node.projectDir, node.settings.file)
-	frame := clamp(node.settings.frame, 0, max(len(ase.frames) - 1, 0))
+	base := clamp(node.settings.frame, 0, max(len(ase.frames) - 1, 0))
+	// The frames it plays: its tag's, else every one; not animated: its frame
+	frames := make([dynamic]int, allocator)
+	if node.settings.animate && len(ase.frames) > 1 {
+		from, to := 0, len(ase.frames) - 1
+		if tag := node.settings.tag != "" ? Aseprite_FindTag(ase, node.settings.tag) : nil; tag != nil do from, to = clamp(tag.from, 0, to), clamp(tag.to, 0, to)
+		for f in from..=to do append(&frames, f)
+	}
+	if len(frames) == 0 do append(&frames, base)
+	node.frames = frames[:]
+	node.shown, node.clock = 0, 0
+	for f, i in node.frames do if f == base do node.shown = i
+
 	for layer, i in ase.layers {
 		if layer.type != .Tilemap || layer.tileset < 0 || layer.tileset >= len(ase.tilesets) do continue
 		if len(wanted) > 0 {
@@ -243,29 +287,28 @@ buildTileMap :: proc(node: ^TileMapNode) {
 		} else if !Aseprite_LayerShown(ase, i) {
 			continue
 		}
-		cel := Aseprite_Cel(ase, frame, i)
-		if cel == nil || cel.tiles == nil do continue
+		// A cel in some frame it plays, or in its frame
+		baseCel := Aseprite_Cel(ase, base, i)
+		any := baseCel != nil
+		for f in node.frames do if Aseprite_Cel(ase, f, i) != nil do any = true
+		if !any do continue
 		tileset := &ase.tilesets[layer.tileset]
 		l := CreateNode(scene, TileMapLayer)
-		l.name = strings.clone(layer.name, Node_GetAllocator(l))
+		layerAllocator := Node_GetAllocator(l)
+		l.name = strings.clone(layer.name, layerAllocator)
 		l.layerName = l.name
 		l.layerIndex = i
-		l.cells = {cel.width, cel.height}
-		l.tiles = cel.tiles
 		l.tileset = tileset
+		l.opacity = layer.opacity
+		l.base = baseCel
 		l.tileSize = {f32(tileset.tileWidth), f32(tileset.tileHeight)}
-		l.size = {f32(cel.width) * l.tileSize.x, f32(cel.height) * l.tileSize.y}
 		l.texture = scene.game.resourceManager->loadTexture(fmt.tprintf("%s%s%d", full, ASEPRITE_TILESET_SUFFIX, layer.tileset))
-		alpha := f32(cel.opacity) / 255 * f32(layer.opacity) / 255
-		quads := make([dynamic]TileQuad, 0, len(cel.tiles), Node_GetAllocator(l))
-		for tile, at in cel.tiles {
-			id := int(tile & ASEPRITE_TILE_ID)
-			if id == 0 || id >= tileset.count do continue
-			column, row := at % cel.width, at / cel.width
-			append(&quads, TileQuad{px = {f32(column), f32(row)} * l.tileSize, src = {0, f32(id) * l.tileSize.y}, flips = tile & ~ASEPRITE_TILE_ID, alpha = alpha})
+		l.frames = make([]TileMapLayerFrame, len(node.frames), layerAllocator)
+		for f, at in node.frames {
+			cel := Aseprite_Cel(ase, f, i)
+			l.frames[at] = {cel = cel, quads = make([dynamic]TileQuad, 0, cel != nil ? len(cel.tiles) : 0, layerAllocator)}
+			fillQuads(l, &l.frames[at])
 		}
-		l.quads = quads[:]
-		l.position = {f32(cel.x), f32(cel.y)}
 		l.layer = node.layer
 		l.draw = tileMapLayerDraw
 		l.destroy = proc(node: ^Node) { dropTileBatchCache(&(cast(^TileMapLayer)node).batch) }
@@ -277,8 +320,100 @@ buildTileMap :: proc(node: ^TileMapNode) {
 		append(&node.built, l)
 		append(&node.tileLayers, l)
 	}
+	showFrame(node, node.shown)
 	if node.settings.collision do buildTileCollision(node)
-	_ = allocator
+}
+
+// A frame's tiles as quads, refilled in place (a cel has no more tiles than its cells)
+@(private="file")
+fillQuads :: proc(l: ^TileMapLayer, frame: ^TileMapLayerFrame) {
+	clear(&frame.quads)
+	cel := frame.cel
+	if cel == nil || cel.tiles == nil do return
+	alpha := f32(cel.opacity) / 255 * f32(l.opacity) / 255
+	for tile, at in cel.tiles {
+		id := int(tile & ASEPRITE_TILE_ID)
+		if id == 0 || id >= l.tileset.count do continue
+		column, row := at % cel.width, at / cel.width
+		append(&frame.quads, TileQuad{px = {f32(column), f32(row)} * l.tileSize, src = {0, f32(id) * l.tileSize.y}, flips = tile & ~ASEPRITE_TILE_ID, alpha = alpha})
+	}
+}
+
+// Shows a frame it plays (by index in `frames`): every layer's tiles and place from its cel there
+@(private="file")
+showFrame :: proc(node: ^TileMapNode, index: int) {
+	node.shown = index
+	for l in node.tileLayers {
+		frame := &l.frames[index]
+		l.quads = frame.quads[:]
+		if cel := frame.cel; cel != nil {
+			l.cells = {cel.width, cel.height}
+			l.tiles = cel.tiles
+			l.position = {f32(cel.x), f32(cel.y)}
+		} else {
+			l.cells, l.tiles = {}, nil
+		}
+		l.size = {f32(l.cells.x) * l.tileSize.x, f32(l.cells.y) * l.tileSize.y}
+		dropTileBatchCache(&l.batch)
+	}
+}
+
+/*
+The tile cell under a point of the world, in a layer as it shows now.
+
+Inputs:
+- node: The TileMap
+- layer: The layer's name
+- position: A point in the world
+
+Returns:
+- The column and row, and false when the point is off the layer's grid (or there's no such layer)
+*/
+TileMap_CellAt :: proc(node: ^TileMapNode, layer: string, position: [2]f32) -> (column, row: int, ok: bool) {
+	for l in node.tileLayers {
+		if l.layerName != layer do continue
+		local := Transform2D_Apply(Transform2D_Inverse(Node_GetWorldTransform(l)), position)
+		column, row = int(local.x / l.tileSize.x), int(local.y / l.tileSize.y)
+		return column, row, local.x >= 0 && local.y >= 0 && column < l.cells.x && row < l.cells.y
+	}
+	return 0, 0, false
+}
+
+/*
+Changes a tile: drawn at once, collision rebuilt on the node's next update (a broken block, a
+door opening). An animated layer gets it in every frame it plays, so it stays.
+
+Inputs:
+- node: The TileMap
+- layer: The layer's name
+- column, row: The cell (in the layer's grid, as `TileMap_CellAt` gives it)
+- tile: The tile value (an index in the layer's tileset, with flip bits; 0 empties it)
+
+Returns:
+- false when there's no such layer or cell
+
+Example:
+	// Given: level: ^e.TileMapNode, hit: [2]f32
+	if column, row, ok := e.TileMap_CellAt(level, "Ground", hit); ok do e.TileMap_SetTile(level, "Ground", column, row, 0)
+*/
+TileMap_SetTile :: proc(node: ^TileMapNode, layer: string, column, row: int, tile: u32) -> bool {
+	for l in node.tileLayers {
+		if l.layerName != layer do continue
+		changed := false
+		set :: proc(cel: ^AsepriteCel, column, row: int, tile: u32) -> bool {
+			if cel == nil || cel.tiles == nil || column < 0 || row < 0 || column >= cel.width || row >= cel.height do return false
+			cel.tiles[row * cel.width + column] = tile
+			return true
+		}
+		if set(l.base, column, row, tile) do changed = true
+		for &frame in l.frames do if set(frame.cel, column, row, tile) do changed = true
+		if !changed do return false
+		for &frame in l.frames do fillQuads(l, &frame)
+		showFrame(node, node.shown)
+		node.collisionDirty = node.settings.collision
+		return true
+	}
+	return false
 }
 
 // The bodies from the tiles' collision properties: solid and one-way tiles in one StaticBody,
@@ -295,14 +430,18 @@ buildTileCollision :: proc(node: ^TileMapNode) {
 		body.restitution = node.physics.restitution
 		Node_AddChild(node, body)
 		append(&node.built, body)
+		append(&node.bodies, body)
 	}
+	// From each layer's cel in the TileMap's `frame` (an animated map's collision doesn't move)
 	Want :: struct { kind: TileCollisionKind, area: string }
 	matches :: proc(l: ^TileMapLayer, want: Want, column, row: int) -> bool {
-		kind, area := TileMap_TileCollision(l.tileset, l.tiles[row * l.cells.x + column])
+		kind, area := TileMap_TileCollision(l.tileset, l.base.tiles[row * l.base.width + column])
 		return kind == want.kind && (want.kind != .Area || area == want.area)
 	}
 	shapes :: proc(scene: ^Scene, node: ^TileMapNode, parent: ^Node, l: ^TileMapLayer, want: Want) -> int {
-		w, h := l.cells.x, l.cells.y
+		if l.base == nil || l.base.tiles == nil do return 0
+		w, h := l.base.width, l.base.height
+		origin := [2]f32{f32(l.base.x), f32(l.base.y)}
 		used := make([]bool, w * h, context.temp_allocator)
 		made := 0
 		for y in 0 ..< h do for x in 0 ..< w {
@@ -317,7 +456,7 @@ buildTileCollision :: proc(node: ^TileMapNode) {
 			for j in 0 ..< height do for i in 0 ..< width do used[(y + j) * w + x + i] = true
 			shape := CreateCollisionShape(scene, .Rectangle)
 			shape.size = {f32(width) * l.tileSize.x, f32(height) * l.tileSize.y}
-			shape.position = l.position + {(f32(x) + f32(width) * 0.5) * l.tileSize.x, (f32(y) + f32(height) * 0.5) * l.tileSize.y}
+			shape.position = origin + {(f32(x) + f32(width) * 0.5) * l.tileSize.x, (f32(y) + f32(height) * 0.5) * l.tileSize.y}
 			shape.layer = node.layer
 			shape.oneWay = want.kind == .One_Way
 			Node_AddChild(parent, shape)
@@ -336,7 +475,7 @@ buildTileCollision :: proc(node: ^TileMapNode) {
 	if made == 0 do Scene_RemoveNode(scene, body.id)
 	// Area tiles: an Area per name
 	names := make([dynamic]string, context.temp_allocator)
-	for l in node.tileLayers do for tile in l.tiles {
+	for l in node.tileLayers do if l.base != nil do for tile in l.base.tiles {
 		kind, area := TileMap_TileCollision(l.tileset, tile)
 		if kind != .Area do continue
 		known := false
@@ -375,13 +514,32 @@ tileMapBounds :: proc(node: ^Node) -> (sdl.FRect, bool) {
 	return {lo.x, lo.y, hi.x - lo.x, hi.y - lo.y}, true
 }
 
-// Development runs: a file saved since is read again and the node rebuilt
+// Plays an animated map's frames, rebuilds bodies after tile changes; development runs read a file
+// saved since again and rebuild the node
 @(private="file")
 tileMapUpdate :: proc(node: ^Node, _: []sdl.Event, deltaTime: f64) {
 	t := cast(^TileMapNode)node
 	// The layers a rebuild replaced were removed before this update: their file can go
 	for old in t.retired do Aseprite_Destroy(old)
 	clear(&t.retired)
+	// Tiles changed (TileMap_SetTile): its bodies again
+	if t.collisionDirty {
+		t.collisionDirty = false
+		for b in t.bodies do Scene_RemoveNode(t.scene, b.id)
+		clear(&t.bodies)
+		buildTileCollision(t)
+	}
+	// Animated: the next frame once this one has shown its duration
+	if len(t.frames) > 1 && t.ase != nil {
+		t.clock += deltaTime
+		for {
+			f := t.frames[t.shown]
+			d := f < len(t.ase.frames) ? f64(t.ase.frames[f].duration) / 1000 : 0.1
+			if d <= 0 || t.clock < d do break
+			t.clock -= d
+			showFrame(t, (t.shown + 1) % len(t.frames))
+		}
+	}
 	if !t.scene.game.devKeys || t.settings.file == "" do return
 	t.watchTimer -= deltaTime
 	if t.watchTimer > 0 do return
@@ -411,6 +569,8 @@ TileMap_Rebuild :: proc(node: ^TileMapNode, ase: ^Aseprite) {
 	for n in node.built do Scene_RemoveNode(node.scene, n.id)
 	clear(&node.built)
 	clear(&node.tileLayers)
+	clear(&node.bodies)
+	node.collisionDirty = false
 	// The old file goes when its layers do (they point into it): on the next update
 	if node.ase != nil do append(&node.retired, node.ase)
 	node.ase = ase

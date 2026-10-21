@@ -103,6 +103,9 @@ Game :: struct {
 	// Animation sets read so far, by path (nil: couldn't be read); in the game's memory
 	// (animation_sets.odin)
 	animationSets: map[string]^AnimationSetData,
+	// Aseprite files read for their slices and events, by full path (aseprite_nodes.odin; each
+	// in its own arena)
+	aseprites: map[string]AsepriteEntry,
 	// LDtk projects read so far, by path (nil: couldn't be read); each in its own arena (ldtk_nodes.odin)
 	ldtk: map[string]^LDtkProject,
 	// Development runs: the LDtk files' modification times when read, by path
@@ -237,6 +240,7 @@ Game_Destroy :: proc(game: ^Game) {
 	Input_Destroy(&game.input)
 	// Their memory is the game's arena, freed below
 	game.components = nil
+	Game_ForgetAseprites(game)
 	game.animationSets = nil
 	game.sceneFiles = nil
 	Game_ForgetLDtk(game)
@@ -386,6 +390,7 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 		if game.textureWatchTimer <= 0 {
 			game.textureWatchTimer = LDTK_WATCH_SECONDS
 			ResourceManager_ReloadChangedTextures(&game.resourceManager)
+			Game_ReloadChangedAseprites(game)
 		}
 	}
 

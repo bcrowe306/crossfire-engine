@@ -179,3 +179,53 @@ do
   save(spr, "noise")
 end
 print("cases written")
+
+-- 8. Features games use: a hitbox slice that moves (and hides), a pivot slice, a 9-patch slice,
+-- frame events (a cel's text and `event` property on a hidden layer), Body and Sword layers
+do
+  local spr = Sprite(16, 16)
+  spr.layers[1].name = "Body"
+  fill(spr.cels[1].image, function(x, y) return (x >= 4 and x < 12 and y >= 2) and rgba(200, 120, 60, 255) or rgba(0, 0, 0, 0) end)
+  local sword = spr:newLayer() sword.name = "Sword"
+  local events = spr:newLayer() events.name = "events" events.isVisible = false
+  for f = 2, 3 do spr:newFrame() end
+  for f = 1, 3 do
+    spr.frames[f].duration = 0.1
+    local img = Image(16, 16)
+    fill(img, function(x, y) return (y == 8 and x >= 8 + f) and rgba(220, 220, 255, 255) or rgba(0, 0, 0, 0) end)
+    spr:newCel(sword, f, img, Point(0, 0))
+  end
+  local c2 = spr:newCel(events, 2, Image(1, 1), Point(0, 0)) c2.data = "step"
+  local c3 = spr:newCel(events, 3, Image(1, 1), Point(0, 0)) c3.properties.event = "hit"
+  local tag = spr:newTag(1, 3) tag.name = "attack"
+  -- (Aseprite's Lua sets a slice's first key only: slices that move are in its own
+  -- slices-moving.aseprite, testdata/aseprite)
+  local hit = spr:newSlice(Rectangle(10, 6, 4, 4)) hit.name = "hitbox"
+  local feet = spr:newSlice(Rectangle(4, 12, 8, 4)) feet.name = "feet" feet.pivot = Point(4, 4)
+  local panel = spr:newSlice(Rectangle(0, 0, 16, 16)) panel.name = "panel" panel.center = Rectangle(4, 4, 8, 8)
+  save(spr, "features")
+end
+
+-- 9. An animated tilemap: two frames, the water tile swapping, with a tag
+do
+  local spr = Sprite(8, 4, ColorMode.RGB)
+  app.command.NewLayer{ tilemap = true, gridBounds = Rectangle{ 0, 0, 4, 4 } }
+  local mapLay = app.layer
+  mapLay.name = "Water"
+  spr:deleteLayer(spr.layers[1])
+  local a = spr:newTile(mapLay.tileset, 1) fill(a.image, function(x, y) return rgba(0, 0, 255, 255) end)
+  local b = spr:newTile(mapLay.tileset, 2) fill(b.image, function(x, y) return rgba(0, 200, 255, 255) end)
+  spr:newFrame()
+  spr.frames[1].duration = 0.2
+  spr.frames[2].duration = 0.3
+  for f = 1, 2 do
+    local map = Image{ width = 2, height = 1, colorMode = ColorMode.TILEMAP }
+    spr:newCel(mapLay, f, map, Point(0, 0))
+    map = mapLay:cel(f).image
+    map:drawPixel(0, 0, f)
+    map:drawPixel(1, 0, 3 - f)
+  end
+  local tag = spr:newTag(1, 2) tag.name = "flow"
+  save(spr, "tilemap_animated")
+end
+print("feature cases written")

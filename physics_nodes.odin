@@ -217,6 +217,9 @@ CollisionShape :: struct {
 	// below or the side they pass through (`CharacterMover.dropThrough` falls through it).
 	// Change it in code with `PhysicsBody_RebuildShapes`
 	oneWay: bool,
+	// An Aseprite slice of its sprite it takes its rectangle from, frame by frame ("" for none:
+	// aseprite_nodes.odin)
+	slice: string,
 	// The Box2D shape (internal)
 	shapeId: b2.ShapeId,
 }

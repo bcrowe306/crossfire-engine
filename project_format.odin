@@ -136,8 +136,10 @@ Version history:
   0 for the device's own; stereo 48 kHz without them); scenes' own settings (`SceneSettings`: `screenLayers`, `background`, `gravityX` /
   `gravityY` on the root element); animation assets (`.anim.xml` files, kind "Animation", and
   Aseprite files: animation_sets.odin), AnimatedSprite `animations`, `<animation>` `durations`
-  and `repeat`, the `PingPongReverse` play mode; `TileMap` nodes (`tilemap`, `frame`, `layers`,
-  `tileCollision`: tilemap.odin); LDtkLevel `oneWayValues`, `areaValues` and
+  and `repeat` and `events`, the `PingPongReverse` play mode; `TileMap` nodes (`tilemap`, `frame`,
+  `layers`, `tileCollision`, `animate`, `tag`: tilemap.odin); Sprite and AnimatedSprite `layers`
+  and `pivotSlice`, Sprite `nineSlice`, `nineWidth`, `nineHeight`, CollisionShape `slice`
+  (aseprite_nodes.odin); LDtkLevel `oneWayValues`, `areaValues` and
   `<entity make script noScript>`. Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
@@ -384,6 +386,20 @@ SceneNodeData :: struct {
 	// or an Aseprite file: its tags) whose sheet and animations it plays instead of its own
 	// (format 13; animation_sets.odin)
 	animationSet: string,
+	// Sprite, AnimatedSprite with an Aseprite image: `layers="Body,Sword"`, the layers drawn (by
+	// name; a group's name brings its layers), "" for every visible one (format 13;
+	// aseprite_nodes.odin)
+	asepriteLayers: string,
+	// Sprite, AnimatedSprite: `pivotSlice`, an Aseprite slice whose pivot goes on the node's origin
+	// (frame by frame; "" for the image's middle)
+	pivotSlice: string,
+	// Sprite: `nineSlice`, a 9-patch Aseprite slice drawn stretched to `nineWidth` x `nineHeight`
+	nineSlice: string,
+	// Sprite: the 9-patch's size in pixels
+	nineSize: [2]f32,
+	// CollisionShape: `slice`, an Aseprite slice of its sprite whose rectangle it takes, frame by
+	// frame (a hitbox; off where the slice is hidden; aseprite_nodes.odin)
+	slice: string,
 	// Menu: its `<item>` child elements, top to bottom
 	items: [dynamic]MenuItemData,
 	// Any kind: the script attached to the node (`<script name="...">`; "" for none)
@@ -523,6 +539,9 @@ AnimationData :: struct {
 	durations: [dynamic]f32,
 	// Times a non-looping animation plays (0 or 1: once)
 	repeat: int,
+	// Each frame's events (`events="step;;hit,shake"`: frames apart by ';', a frame's events by
+	// ','; "" for none): an Aseprite file's from its cels' text or `event` property
+	events: [dynamic]string,
 }
 
 /*
@@ -595,6 +614,8 @@ AnimationSetData_Destroy :: proc(set: ^AnimationSetData, allocator := context.al
 	for &a in set.animations {
 		delete(a.name)
 		delete(a.durations)
+		for event in a.events do delete(event)
+		delete(a.events)
 	}
 	delete(set.animations)
 	set^ = {}
@@ -617,6 +638,10 @@ parseAnimation :: proc(doc: ^xml.Document, element: xml.Element_ID) -> Animation
 		for part in strings.fields(value, context.temp_allocator) {
 			if ms, ok := strconv.parse_f32(part); ok && ms >= 0 do append(&a.durations, ms / 1000)
 		}
+	}
+	if value, found := xml.find_attribute_val_by_key(doc, element, "events"); found {
+		a.events = make([dynamic]string)
+		for part in strings.split(value, ";", context.temp_allocator) do append(&a.events, strings.clone(strings.trim_space(part)))
 	}
 	return a
 }
@@ -1105,10 +1130,17 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		for a in node.animations {
 			delete(a.name)
 			delete(a.durations)
+			for event in a.events do delete(event)
+			delete(a.events)
 		}
 		delete(node.animations)
 		delete(node.autoplay)
 		delete(node.animationSet)
+		delete(node.asepriteLayers)
+		delete(node.pivotSlice)
+		delete(node.nineSlice)
+		delete(node.slice)
+		delete(node.tilemap.tag)
 		delete(node.component)
 		delete(node.sound)
 		delete(node.bus)
@@ -1311,6 +1343,11 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.animations = make([dynamic]AnimationData)
 	node.autoplay = cloneAttr(doc, element, "autoplay", "")
 	node.animationSet = cloneAttr(doc, element, "animations", "")
+	node.asepriteLayers = cloneAttr(doc, element, "layers", "")
+	node.pivotSlice = cloneAttr(doc, element, "pivotSlice", "")
+	node.nineSlice = cloneAttr(doc, element, "nineSlice", "")
+	node.nineSize = {attrF32(doc, element, "nineWidth", 0), attrF32(doc, element, "nineHeight", 0)}
+	node.slice = cloneAttr(doc, element, "slice", "")
 	node.component = cloneAttr(doc, element, "component", "")
 	node.sound = cloneAttr(doc, element, "sound", "")
 	node.bus = cloneAttr(doc, element, "bus", "")
@@ -1372,6 +1409,8 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		frame = max(attrInt(doc, element, "frame", 0), 0),
 		layers = cloneAttr(doc, element, "layers", ""),
 		collision = attrBool(doc, element, "tileCollision", DEFAULT_TILEMAP_SETTINGS.collision),
+		animate = attrBool(doc, element, "animate", false),
+		tag = cloneAttr(doc, element, "tag", ""),
 	}
 	dl := DEFAULT_LDTK_LEVEL_SETTINGS
 	node.ldtk = {

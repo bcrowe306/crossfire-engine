@@ -149,6 +149,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `aseprite_test.odin`, `testdata/aseprite/` | Tests on Aseprite's own test sprites (MIT, from its `tests/` folder; LICENSE.txt beside them): its z-order test's colors, groups, tags, linked cels, indexed transparency, tilemaps and flips, user data, slices; damaged files; textures drawn; the inflater |
 | `animation_sets.odin` | **Animation assets**: `AnimationSetData` (`.anim.xml`, `ParseAnimationSet`), `AnimationSet_FromAseprite` (an Aseprite file's tags), `Game_LoadAnimationSet` (`Game.animationSets`), `AnimatedSprite_SetAnimations`, `AnimatedSprite_UseAnimations` (scripts), `Asset_Animations`, `ASEPRITE_SHEET_SUFFIX` |
 | `animation_sets_test.odin` | Tests: frame durations, repeats, reverse ping-pong, clearing; Aseprite tags as animations (directions, repeats); `.anim.xml` files; scene files' AnimatedSprites playing an Aseprite file; switching sets from code |
+| `aseprite_nodes.odin` | **Aseprite in a running game**: `Game_LoadAseprite` (files kept for slices and events; `Game_ReloadChangedAseprites`), `Aseprite_SliceAt`, `Aseprite_FrameEvents`, `Aseprite_LayersNamed`; sprites' pivot slices (`Sprite_Origin`) and 9-patches, CollisionShapes following slices (hitboxes), layer-filtered texture keys (`?layers=`); Sprite / AnimatedSprite drawing |
+| `aseprite_nodes_test.odin` | Tests (on Aseprite's files): frame events through `animation.onFrameEvent`, layers drawn, pivot and 9-patch slices, hitboxes following a moving slice (mirrored, hidden), animated tilemaps and tiles set while they play |
 | `tilemap.odin` | **TileMap nodes**: an Aseprite file's tilemap layers (`TileMapSettings`: `tilemap`, `frame`, `layers`, `tileCollision`), a `TileMapLayer` per layer drawn in one batch, collision from tile properties (`TileMap_TileCollision`: StaticBody "Collision" for solid and one-way tiles, an Area per area name), `TileMap_TileAt`, `TileMap_TileProperty`, `TileMap_Rebuild`, reloading saved files in development runs |
 | `tile_batch.odin` | `TileBatch` / `TileQuad`: tiles of one texture with Aseprite's flips drawn as one `RenderGeometry`, culled to the screen; the software renderer's cache (as LDtk's layers) |
 | `tilemap_test.odin` | Tests: an Aseprite file written by the test (tilemap layer, tile properties, a flipped tile): collision kinds, the built layer and bodies (merged shapes, one-way, an Area), lookups, pixels and flips, a development run reloading the saved file |
@@ -554,6 +556,27 @@ layers' tiles point into it); a rebuild keeps the old file until the next update
 (the resource manager's `asepriteTextureKey`), so they reload in place too. Painting tilemaps
 in the editor will write the same data (later). LDtk's tile layers still draw with their own
 code (square tiles, no diagonal flips); moving them onto `TileBatch` is a possible cleanup.
+
+**Aseprite in a running game** (aseprite_nodes.odin; its doc comment has the details):
+- Slices, events and layers are looked up through `Game_LoadAseprite` (the game keeps each file;
+  nothing holds a file's pointer, so `Game_ReloadChangedAseprites` swaps them freely).
+- A sprite's picture is drawn with `Sprite_Origin` at the node's origin (its pivot slice's pivot,
+  else its middle); bounds follow. An AnimatedSprite playing an Aseprite file's tags shows its
+  frames (`sourceFrames`), so slices and pivots follow its frame.
+- Hitboxes: a CollisionShape's `slice` makes it a Rectangle updated by `sliceShapeUpdate` from the
+  sprite found by `sliceSprite` (an ancestor, or a child of one), through the sprite's world
+  transform into the shape's parent's (a mirrored sprite mirrors it); it rebuilds its body's
+  shapes only when the rectangle or its being hidden changes.
+- Events: `Animation.events` (per frame, comma-separated; `AnimationData.events`, the format's
+  `events="a;;b"`) go out through the player's `onFrameEvent` (data: string) every time the frame
+  shows, its first frame included. Aseprite's cels' text and `event` property, on any layer.
+- Layers: texture keys end in `?layers=A,B` (`asepriteKeyLayers`); a group's name brings its
+  layers; names that aren't there draw nothing.
+- TileMaps animate from per-frame quad lists filled once (`TileMapLayerFrame`, refilled in place
+  by `TileMap_SetTile`, never past a cel's cells), so playing and editing don't grow the node's
+  arena; collision comes from `TileMapLayer.base` (the `frame` cel).
+- Aseprite's Lua sets only a slice's first key: moving slices are tested with its own
+  slices-moving.aseprite.
 
 **Images saved while running** (`ResourceManager_ReloadChangedTextures`, resource_manager.odin):
 the resource manager keeps each texture file's modification time (`textureTimes`); development
