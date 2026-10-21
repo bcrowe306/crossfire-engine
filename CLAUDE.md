@@ -145,6 +145,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `ldtk_test.odin` | Tests: a hand-written project (one level in the file, one apart): every field kind, IntGrid, tiles' flips, definitions, paths outliving the frame; built: layer order, merged collision, the script's fields from LDtk, allLevels in a linear world, scene files |
 | `aseprite.odin` | **Aseprite files** (`.aseprite` / `.ase`): `Aseprite_Load` / `Aseprite_Parse` into plain data (`Aseprite`: layers, frames and durations, cels, tags, slices, tilesets, user data and properties; every image as RGBA) in its own arena (`Aseprite_Destroy`); `Aseprite_FramePixels` (a frame composited: visibility, opacity, z-index, the 19 blend modes, tilemap layers with flips), `Aseprite_SheetPixels` / `SheetGrid`, `Aseprite_TilePixels`, `Aseprite_CreateTexture`; the resource manager loads them as textures (frame 0, nearest filtering) |
 | `inflate.odin` | `Inflate_Exact`: a strict zlib inflater for untrusted data (exact size, no reading past the input, Adler-32 checked) |
+| `aseprite_conformance_test.odin`, `testdata/aseprite/conformance/`, `tools/aseprite_conformance.sh` | The engine against Aseprite itself: files Aseprite wrote and its exports of every frame (PNG) and of frames and tags (JSON); each frame byte for byte |
 | `aseprite_test.odin`, `testdata/aseprite/` | Tests on Aseprite's own test sprites (MIT, from its `tests/` folder; LICENSE.txt beside them): its z-order test's colors, groups, tags, linked cels, indexed transparency, tilemaps and flips, user data, slices; damaged files; textures drawn; the inflater |
 | `animation_sets.odin` | **Animation assets**: `AnimationSetData` (`.anim.xml`, `ParseAnimationSet`), `AnimationSet_FromAseprite` (an Aseprite file's tags), `Game_LoadAnimationSet` (`Game.animationSets`), `AnimatedSprite_SetAnimations`, `AnimatedSprite_UseAnimations` (scripts), `Asset_Animations`, `ASEPRITE_SHEET_SUFFIX` |
 | `animation_sets_test.odin` | Tests: frame durations, repeats, reverse ping-pong, clearing; Aseprite tags as animations (directions, repeats); `.anim.xml` files; scene files' AnimatedSprites playing an Aseprite file; switching sets from code |
@@ -513,10 +514,17 @@ outlives it (node_events_test checks one subscription after repeated visits). `E
 savedFields).
 
 **Aseprite** (aseprite.odin; its doc comment has the details):
-- Read with Aseprite's published format (docs/ase-file-specs.md in its repository). **None of
-  Aseprite's program code is used** (it isn't open source): compositing follows the W3C
-  Compositing and Blending spec, which Aseprite's modes follow; checked against Aseprite's own
-  z-order test (its expected colors) and every sprite of its test suite.
+- Read with Aseprite's published format (docs/ase-file-specs.md in its repository).
+  **Compositing is Aseprite's own** (its blend_funcs.cpp blenders with the "new blending" default,
+  its RenderPlan order, MUL_UN8 / DIV_UN8 arithmetic: ported; the user allowed it for this
+  educational project, 2026-10-21, and will settle the license before any release), and **it's
+  byte-exact**: `aseprite_matches_aseprite` compares every frame of
+  `testdata/aseprite/conformance` (made by Aseprite 1.3.17 itself: make.lua, every blend mode,
+  groups and z-index, indexed, grayscale, background, tags of every direction with repeats,
+  tilemaps with all 8 flips, user data, slices, a noisy image) with Aseprite's PNG exports, and
+  durations and tags with its JSON. `tools/aseprite_conformance.sh` makes them again (needs
+  Aseprite). Tile flips are Aseprite's: X, then Y, then the diagonal swap (TileMap nodes draw
+  them the same: checked against its export).
 - **Untrusted input:** every read is bounds-checked; sizes over `ASEPRITE_MAX_SIZE` are refused;
   images inflate through `Inflate_Exact` (inflate.odin), not `core:compress/zlib`, which reads
   zeros past its input and grows its output without limit: damaged files took a minute each and

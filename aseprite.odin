@@ -24,10 +24,15 @@ drawn in Aseprite play in the engine.
 - **User data**: text, a color and properties (`AsepriteValue`) of the sprite, layers, cels,
   tags, slices, tilesets and tiles. Only the user's own properties are kept (not extensions').
 
-`Aseprite_FramePixels` composites a frame the way Aseprite shows it: the visible layers bottom up
-(groups hidden hide their layers; reference layers are left out), each cel's and layer's opacity,
-the 19 blend modes of the W3C compositing spec (which Aseprite's follow; results may differ from
-Aseprite's by a rounding step), tilemap layers drawn from their tileset with each tile's flips.
+`Aseprite_FramePixels` composites a frame exactly as Aseprite exports it (checked byte for byte
+against Aseprite 1.3.17's own exports: aseprite_matches_aseprite): Aseprite's render plan (layers
+numbered in tree order, groups flattened unless the file says to composite them, sorted by number
+plus each cel's z-index), hidden layers and those in hidden groups left out, reference layers too,
+cel opacity times layer opacity, Aseprite's 19 blend modes with its integer arithmetic and its
+default "new blending" (blend_funcs.cpp, ported), tilemap layers drawn from their tileset with each
+tile's flips. Aseprite 1.3.17 never writes the compose-groups flag (its compose-groups preference
+only changes its own canvas), so files are flattened as its exports are; the composited path, for
+files that do set it, couldn't be checked against Aseprite.
 `Aseprite_SheetPixels` lays every frame out on a grid (an animation's sheet). Textures from
 Aseprite files use nearest filtering: they're pixel art.
 
