@@ -470,9 +470,11 @@ SceneNodeData :: struct {
 	// `fadeIn`, `fadeOut` (missing ones from DEFAULT_AUDIO_SETTINGS)
 	audio: AudioSettings,
 	// LDtkLevel: `ldtk` (the .ldtk file), `level`, `allLevels`, `intGridCollision`,
-	// `collisionValues`, `spawnEntities`, `background`, `smoothTiles`, and `<entity name="..."
-	// component="..."/>` children; the generated collision uses `collisionLayer`, `collisionMask`,
-	// `friction`, `restitution` (ldtk_nodes.odin)
+	// `collisionValues` (solid), `oneWayValues`, `areaValues` (format 13), `spawnEntities`,
+	// `background`, `smoothTiles`, and `<entity name="..." component="..." make="..." script="..."
+	// noScript="true"/>` children (`make` and the script ones format 13: LDtkEntityRule); the
+	// generated collision uses `collisionLayer`, `collisionMask`, `friction`, `restitution`
+	// (ldtk_nodes.odin)
 	ldtk: LDtkLevelSettings,
 }
 
@@ -1240,16 +1242,23 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		allLevels = attrBool(doc, element, "allLevels", dl.allLevels),
 		collisionLayer = cloneAttr(doc, element, "intGridCollision", ""),
 		collisionValues = make([dynamic]int),
+		oneWayValues = make([dynamic]int),
+		areaValues = make([dynamic]int),
 		spawnEntities = attrBool(doc, element, "spawnEntities", dl.spawnEntities),
 		background = attrBool(doc, element, "background", dl.background),
 		smoothTiles = attrBool(doc, element, "smoothTiles", dl.smoothTiles),
 		entityComponents = make([dynamic]LDtkEntityComponent),
 	}
-	if value, found := xml.find_attribute_val_by_key(doc, element, "collisionValues"); found {
+	values :: proc(doc: ^xml.Document, element: xml.Element_ID, key: string, into: ^[dynamic]int) {
+		value, found := xml.find_attribute_val_by_key(doc, element, key)
+		if !found do return
 		for part in strings.fields(value, context.temp_allocator) {
-			if v, ok := strconv.parse_int(part); ok do append(&node.ldtk.collisionValues, v)
+			if v, ok := strconv.parse_int(part); ok do append(into, v)
 		}
 	}
+	values(doc, element, "collisionValues", &node.ldtk.collisionValues)
+	values(doc, element, "oneWayValues", &node.ldtk.oneWayValues)
+	values(doc, element, "areaValues", &node.ldtk.areaValues)
 
 	index := len(scene.nodes)
 	append(&scene.nodes, node)
@@ -1272,8 +1281,11 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 			for a in doc.elements[child].attribs do ParticleSettings_Set(&scene.nodes[index].particles, a.key, a.val)
 		case "entity":
 			append(&scene.nodes[index].ldtk.entityComponents, LDtkEntityComponent{
-				cloneAttr(doc, child, "name", ""),
-				cloneAttr(doc, child, "component", ""),
+				entity = cloneAttr(doc, child, "name", ""),
+				component = cloneAttr(doc, child, "component", ""),
+				make = attrEnum(doc, child, "make", LDtkEntityMake.Auto),
+				script = cloneAttr(doc, child, "script", ""),
+				noScript = attrBool(doc, child, "noScript", false),
 			})
 		case "item":
 			append(&scene.nodes[index].items, MenuItemData{

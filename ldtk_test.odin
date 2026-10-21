@@ -426,9 +426,73 @@ ldtk_build_rules_for_editors :: proc(t: ^testing.T) {
 	testing.expect(t, LDtk_IsCollisionValue({1, 2}, 2) && !LDtk_IsCollisionValue({1, 2}, 3), "the listed ones")
 	settings: LDtkLevelSettings
 	settings.entityComponents = make([dynamic]LDtkEntityComponent, context.temp_allocator)
-	append(&settings.entityComponents, LDtkEntityComponent{"Coin", "components/coin.component.xml"}, LDtkEntityComponent{"Hero", ""})
+	append(&settings.entityComponents, LDtkEntityComponent{entity = "Coin", component = "components/coin.component.xml"}, LDtkEntityComponent{entity = "Hero"})
 	testing.expect_value(t, LDtk_EntityComponent(&settings, "Coin"), "components/coin.component.xml")
 	testing.expect_value(t, LDtk_EntityComponent(&settings, "Hero"), "")
 	testing.expect(t, !LDtk_HasSpawner("NobodyRegisteredThis"), "no spawner")
+	free_all(context.temp_allocator)
+}
+
+@(test)
+ldtk_entity_rules_and_collision_kinds :: proc(t: ^testing.T) {
+	registerCoin()
+	dir := writeFixture("engine_test_ldtk_rules")
+	defer os.remove_all(dir)
+	game: Game
+	game.projectDir = dir
+	defer Game_ForgetLDtk(&game)
+	defer if game.arenaReady do MemoryArena_Destroy(&game.arena)
+	scene := new(Scene)
+	Scene_Init(scene)
+	scene.game = &game
+	scene.physicsPaused = true
+	defer { Scene_Destroy(scene); free(scene) }
+	// The ladder (value 2) an Area, the stone solid; the coin a bare rectangle, the lever skipped
+	data, err := ParseScene(`<scene formatVersion="13" name="S">
+		<node kind="LDtkLevel" name="Level" ldtk="game.ldtk" level="Level_0" intGridCollision="Walls" areaValues="2">
+			<entity name="Coin" make="Rectangle" noScript="true"/>
+			<entity name="Lever" make="Skip"/>
+		</node>
+		<node kind="LDtkLevel" name="Platforms" ldtk="game.ldtk" level="Level_0" intGridCollision="Walls" oneWayValues="2" spawnEntities="false"/>
+	</scene>`)
+	defer SceneData_Destroy(&data)
+	testing.expect_value(t, err, ProjectError.None)
+	rules := data.nodes[0].ldtk.entityComponents[:]
+	testing.expect(t, len(rules) == 2 && rules[0].make == .Rectangle && rules[0].noScript && rules[1].make == .Skip, "rules read")
+	testing.expect_value(t, data.nodes[0].ldtk.areaValues[0], 2)
+	created := Scene_Build(scene, &data, dir)
+	Scene_ProcessQueues(scene)
+
+	coins := LDtk_FindEntityNodes(cast(^LDtkLevelNode)created[0], "Coin")
+	testing.expect(t, len(coins) == 1 && Node_Is(coins[0], LDtkEntityNode) && coins[0].script.info == nil, "a rectangle, no script")
+	testing.expect_value(t, len(LDtk_FindEntityNodes(cast(^LDtkLevelNode)created[0], "Lever")), 0)
+	// The stone solid, the ladder an Area named after it
+	ladder := Scene_FindNode(scene, "Level/Level_0/ladder")
+	testing.expect(t, ladder != nil && Node_Is(ladder, Area) && len(ladder.children) == 1, "the ladder's Area")
+	solid := Scene_FindNode(scene, "Level/Level_0/Collision")
+	testing.expect(t, solid != nil && len(solid.children) > 0, "the stone's body")
+	for shape in solid.children do testing.expect(t, !(cast(^CollisionShape)shape).oneWay, "solid")
+	// One-way: under the same body, flagged
+	platforms := Scene_FindNode(scene, "Platforms/Level_0/Collision")
+	oneWay := 0
+	if platforms != nil do for shape in platforms.children do if (cast(^CollisionShape)shape).oneWay do oneWay += 1
+	testing.expect_value(t, oneWay, 1)
+	testing.expect(t, Scene_FindNode(scene, "Platforms/Level_0/ladder") == nil, "no Area there")
+
+	// The rules resolved, as editors show them
+	settings := &data.nodes[0].ldtk
+	testing.expect_value(t, LDtk_EntityMade(settings, "Coin"), LDtkEntityMake.Rectangle)
+	testing.expect_value(t, LDtk_EntityMade(settings, "Lever"), LDtkEntityMake.Skip)
+	testing.expect_value(t, LDtk_EntityMade(settings, "Other"), LDtkEntityMake.Rectangle)
+	name, chosen := LDtk_EntityScript(settings, "Other", false)
+	testing.expect(t, name == "Other" && !chosen, "named like it")
+	name, _ = LDtk_EntityScript(settings, "Coin", false)
+	testing.expect_value(t, name, "")
+	testing.expect_value(t, LDtk_CollisionKind(settings, 1), LDtkCollisionKind.Solid)
+	testing.expect_value(t, LDtk_CollisionKind(settings, 2), LDtkCollisionKind.Area)
+	// An older file's mapping: the component
+	old := LDtkLevelSettings{entityComponents = make([dynamic]LDtkEntityComponent, context.temp_allocator)}
+	append(&old.entityComponents, LDtkEntityComponent{entity = "Coin", component = "components/coin.component.xml"})
+	testing.expect_value(t, LDtk_EntityMade(&old, "Coin"), LDtkEntityMake.Component)
 	free_all(context.temp_allocator)
 }

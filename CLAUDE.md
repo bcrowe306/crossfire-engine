@@ -431,10 +431,16 @@ in stereo whatever's asked (audio_test.odin checks the rate).
 - Tile layers draw as one `RenderGeometry` through the draw transform and tint; tilesets get
   nearest filtering unless `smoothTiles`. IntGrid layers without tiles draw their values' colors.
 - **The build rules are public for editors** (and used by the build itself, so they can't drift):
-  `LDtk_PlacedLevels` (which levels a node builds and where), `LDtk_EntityComponent` (its
-  doc lists the entity rules: mapped component, else a spawner, else its rectangle; then the
-  script named like the type if what was built has none), `LDtk_HasSpawner`,
-  `LDtk_IsCollisionValue`, `LDtk_FieldMatches`.
+  `LDtk_PlacedLevels` (which levels a node builds and where), `LDtk_EntityRule` / `EntityMade` /
+  `EntityScript` / `EntityComponent` (what an entity type becomes and runs), `LDtk_HasSpawner`,
+  `LDtk_CollisionKind`, `LDtk_IsCollisionValue`, `LDtk_FieldMatches`.
+- **Entity rules** (`LDtkEntityRule`, scene files' `<entity name make component script
+  noScript/>`; `make` an `LDtkEntityMake`: Auto, Component, Code, Rectangle, Skip): the zero
+  rule is Auto everything, so older files (name and component only) mean what they did. Writers
+  leave Auto attributes out. **Collision kinds** per IntGrid value (`LDtkCollisionKind`: None,
+  Solid, One_Way, Area): `oneWayValues`, `areaValues`, and `collisionValues` (solid; empty: every
+  other value, as before; `"0"` alone: none). Areas are named after the value's LDtk identifier
+  (`Area<value>` without one). ldtk_entity_rules_and_collision_kinds tests both.
 - Script fields from LDtk fields: names match ignoring case and underscores; points become the
   pixel middle of their cell; arrays, tiles and references are left to code (`LDtk_EntityOf`).
 - **Parallax** is LDtk's (its Camera.hx): offset camera-in-level × factor (− half the layer ×
@@ -668,7 +674,9 @@ comment. What was needed, and why:
     editor's viewport doesn't); `Game_PlaySound` still plays any sound from code, loaded on first use.
 - **Format version 13** adds every node's `processMode`, `blendMode`, `zIndex`, `ySort` and
   `groups` (comma-separated); a component instance keeps its root's values unless it sets them.
-  CollisionShape `oneWay`; assets of kind "Translation" and the project's `locale`; the
+  CollisionShape `oneWay`; LDtkLevel `oneWayValues`, `areaValues` and `<entity>`'s `make`,
+  `script`, `noScript` (absent: Auto, so older files are unchanged); assets of kind
+  "Translation" and the project's `locale`; the
   project's `icon` (the game window's: `Game_SetWindowIcon`; without one `Application_Setup`
   sets the Crossfire logo, `logo/crossfire.png` built in by the platform layer). Checked with a
   window: SDL takes it on X11; Hyprland's Wayland has no xdg-toplevel-icon, so there it's

@@ -1,6 +1,7 @@
 package crossfire
 
 import "core:c"
+import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:mem"
@@ -20,22 +21,29 @@ file, like a component's.
 	    Collisions (LDtkTileLayer)      without tiles are drawn in their value's color
 	    Entities (Node)                 an entity layer: one node per entity, at its pivot
 	      Player ...
-	    Collision (StaticBody)          IntGrid cells as rectangles (intGridCollision)
+	    Collision (StaticBody)          IntGrid cells as rectangles (intGridCollision): solid and one-way
+	    Spikes (Area)                   an area value's cells (areaValues), named after the value
 
 - **Layers** are made back to front, so LDtk's top layer draws last (on top). Every node is on
   the LDtkLevel node's render layer. Hidden layers (LDtk's eye) are made hidden.
-- **Entities**, in order of preference, become: an instance of the component the node maps the
-  entity to (`<entity name="Player" component="components/player.component.xml"/>`); what code
-  registered for it (`LDtk_RegisterEntity`); else an `LDtkEntityNode` (draws the entity's tile
-  if it has one from an image tileset; outlined in the editor). A script named like the entity
-  (`Player`) is attached to it when it has none. **The entity's fields set the script's
+- **Entities**, by their type's rule (`<entity name make component script noScript/>`,
+  `LDtkEntityRule`; none: Auto), become: Auto, in order of preference, an instance of the
+  component the rule maps (`<entity name="Player" component="components/player.component.xml"/>`),
+  what code registered for it (`LDtk_RegisterEntity`), else an `LDtkEntityNode` (draws the
+  entity's tile if it has one from an image tileset; outlined in the editor); or what `make`
+  says: `Component`, `Code` (its rectangle, warned, if nothing registered it), `Rectangle`, or
+  `Skip` (not made). A script is attached when what was made has none: the rule's `script`, else
+  (Auto) the one named like the entity (`Player`); `noScript="true"` attaches none. **The entity's fields set the script's
   exported fields** with the same name (case and underscores ignored): ints, floats, bools,
   strings, enums (by value name), colors, points (the pixel middle of their cell). Code finds the
   entity's data with `LDtk_EntityOf(node)`.
-- **Collision**: with `intGridCollision` naming an IntGrid layer, its cells (those in
-  `collisionValues`, or every non-empty one) become one StaticBody per level, its rectangles
-  merged (greedy: runs along rows, then down) so a wall is one shape, not a shape per cell. The
-  body gets the node's `collisionLayer`, `collisionMask`, `friction` and `restitution`.
+- **Collision**: with `intGridCollision` naming an IntGrid layer, each value is a kind
+  (`LDtk_CollisionKind`): one-way (`oneWayValues`), an area (`areaValues`), solid (in
+  `collisionValues`, or every other non-empty value when that's empty), or nothing. Solid and
+  one-way cells become one StaticBody per level (one-way shapes have `oneWay`), each area value
+  an Area named after the value, their rectangles merged (greedy: runs along rows, then down)
+  so a wall is one shape, not a shape per cell. The body and areas get the node's
+  `collisionLayer`, `collisionMask`, `friction` and `restitution`.
 - **allLevels** builds every level of the level's world at its place in it (Free and GridVania:
   worldX, worldY; linear layouts: one after the other), for worlds that scroll from level to
   level.
@@ -84,24 +92,69 @@ LDtkLevelSettings :: struct {
 	// The IntGrid layer whose cells become collision ("" for none), and which values (none: every
 	// non-empty cell)
 	collisionLayer: string,
-	// `collisionValues="1 3"`: the IntGrid values that collide (empty: every non-empty cell)
+	// `collisionValues="1 3"`: the IntGrid values that are solid (empty: every non-empty cell
+	// that isn't one-way or an area; "0" alone: none, 0 being LDtk's empty cell)
 	collisionValues: [dynamic]int,
+	// `oneWayValues="2"`: values that are one-way platforms (bodies pass up through them)
+	oneWayValues: [dynamic]int,
+	// `areaValues="4"`: values that become Areas (triggers: onCollisionEnter / Exit), one per value,
+	// named after the value in LDtk ("Spikes")
+	areaValues: [dynamic]int,
 	// Make nodes for entities
 	spawnEntities: bool,
 	// Draw the level's background color and image
 	background: bool,
 	// Linear filtering for tilesets (off: nearest, for pixel art)
 	smoothTiles: bool,
-	// Components entities become, by entity identifier
+	// What entities become and run, by entity identifier (`<entity>` elements; types without one
+	// follow the Auto rules)
 	entityComponents: [dynamic]LDtkEntityComponent,
 }
 
-// An entity identifier and the component its entities become
+/*
+What an entity type becomes and which script its entities run (`<entity name="Coin"
+component=".." make=".." script=".." noScript="true"/>`, attributes only when not the default).
+The first files had only a component: that still means the component.
+*/
 LDtkEntityComponent :: struct {
 	// The entity's identifier in LDtk ("Player")
 	entity: string,
-	// The component file, relative to the project folder
+	// The component file, relative to the project folder (`make` Component; Auto with one too)
 	component: string,
+	// What its entities become (Auto: the component when set, else code, else the rectangle)
+	make: LDtkEntityMake,
+	// The script they run: "" for the one named like the entity (when what's made has none)
+	script: string,
+	// No script, not even the one named like the entity
+	noScript: bool,
+}
+
+// Another name for LDtkEntityComponent: what an entity type becomes and runs
+LDtkEntityRule :: LDtkEntityComponent
+
+// What an entity type's nodes are
+LDtkEntityMake :: enum {
+	// The mapped component, else what code registered (`LDtk_RegisterEntity`), else the rectangle
+	Auto,
+	// The rule's component
+	Component,
+	// What code registered (`LDtk_RegisterEntity`); the rectangle when nothing did
+	Code,
+	// Its rectangle (and tile), whatever is mapped or registered
+	Rectangle,
+	// Nothing: entities of the type aren't made
+	Skip,
+}
+
+// What an IntGrid value of the collision layer becomes
+LDtkCollisionKind :: enum {
+	None,
+	// Solid collision (a StaticBody's rectangles)
+	Solid,
+	// One-way platforms: solid from above only (`CollisionShape.oneWay`)
+	One_Way,
+	// An Area: reports bodies entering and leaving (triggers)
+	Area,
 }
 
 // The settings an LDtkLevel node starts with
@@ -123,9 +176,12 @@ LDtkLevelSettings_Destroy :: proc(settings: ^LDtkLevelSettings, allocator := con
 	delete(settings.level)
 	delete(settings.collisionLayer)
 	delete(settings.collisionValues)
+	delete(settings.oneWayValues)
+	delete(settings.areaValues)
 	for m in settings.entityComponents {
 		delete(m.entity)
 		delete(m.component)
+		delete(m.script)
 	}
 	delete(settings.entityComponents)
 	settings^ = {}
@@ -455,8 +511,12 @@ cloneSettings :: proc(settings: LDtkLevelSettings, allocator: mem.Allocator) -> 
 	result.collisionLayer = strings.clone(settings.collisionLayer)
 	result.collisionValues = make([dynamic]int)
 	append(&result.collisionValues, ..settings.collisionValues[:])
+	result.oneWayValues = make([dynamic]int)
+	append(&result.oneWayValues, ..settings.oneWayValues[:])
+	result.areaValues = make([dynamic]int)
+	append(&result.areaValues, ..settings.areaValues[:])
 	result.entityComponents = make([dynamic]LDtkEntityComponent)
-	for m in settings.entityComponents do append(&result.entityComponents, LDtkEntityComponent{strings.clone(m.entity), strings.clone(m.component)})
+	for m in settings.entityComponents do append(&result.entityComponents, LDtkEntityComponent{strings.clone(m.entity), strings.clone(m.component), m.make, strings.clone(m.script), m.noScript})
 	return result
 }
 
@@ -521,7 +581,7 @@ reloadLevelNode :: proc(root: ^LDtkLevelNode, project: ^LDtkProject) {
 		append(&view.children, ..others[:])
 		if root.settings.collisionLayer != "" {
 			if l := LDtk_FindLayer(level, root.settings.collisionLayer); l != nil && len(l.intGrid) > 0 {
-				buildCollision(view, l, root.settings.collisionValues[:], root.collision)
+				buildCollision(view, l, &root.settings, root.collision, root.project)
 			}
 		}
 	}
@@ -669,7 +729,7 @@ buildLevel :: proc(root: ^LDtkLevelNode, level: ^LDtkLevel, position: [2]f32, da
 
 	if settings.collisionLayer != "" {
 		if l := LDtk_FindLayer(level, settings.collisionLayer); l != nil && len(l.intGrid) > 0 {
-			buildCollision(view, l, root.settings.collisionValues[:], root.collision)
+			buildCollision(view, l, &root.settings, root.collision, root.project)
 		} else if l == nil {
 			log.warnf("LDtk: level %s has no layer '%s' for collision", level.identifier, settings.collisionLayer)
 		}
@@ -731,17 +791,20 @@ updateTileLayer :: proc(root: ^LDtkLevelNode, tiles: ^LDtkTileLayer, l: ^LDtkLay
 spawnEntity :: proc(root: ^LDtkLevelNode, group: ^Node, level: ^LDtkLevel, layer: ^LDtkLayer, entity: ^LDtkEntity, settings: ^LDtkLevelSettings, projectDir: string, attachScripts: bool, depth: int) {
 	scene := root.scene
 	n: ^Node
-	// A component mapped to it
-	if component := LDtk_EntityComponent(settings, entity.identifier); component != "" {
+	made := LDtk_EntityMade(settings, entity.identifier)
+	if made == .Skip do return
+	// The component it's mapped to
+	if made == .Component {
 		instance := DEFAULT_SCENE_NODE
 		instance.kind = .Component
-		instance.component = component
+		instance.component = LDtk_EntityComponent(settings, entity.identifier)
 		instance.name = entity.identifier
 		n = buildNodes(scene, {instance}, projectDir, context.temp_allocator, attachScripts, depth + 1)[0]
 	}
 	// Code that makes it
-	if n == nil {
+	if made == .Code {
 		if spawn, found := ldtkSpawners[entity.identifier]; found do n = spawn(scene, entity)
+		else do log.warnf("LDtk: %s is made by code, but nothing registered it (e.LDtk_RegisterEntity): its rectangle instead", entity.identifier)
 	}
 	// Its rectangle (and tile)
 	if n == nil {
@@ -776,10 +839,13 @@ spawnEntity :: proc(root: ^LDtkLevelNode, group: ^Node, level: ^LDtkLevel, layer
 	defer Event_Notify(&root.onEntitySpawned, root, rawptr(n))
 
 	if !attachScripts do return
-	// A script named like the entity, its fields from the entity's
+	// The rule's script, else one named like the entity; its fields from the entity's
 	if n.script.info == nil {
-		if info := Script_Find(entity.identifier); info != nil {
+		name, _ := LDtk_EntityScript(settings, entity.identifier, false)
+		if info := name != "" ? Script_Find(name) : nil; info != nil {
 			Node_AttachScript(n, info, entityProps(info, entity, layer.gridSize))
+		} else if rule := LDtk_EntityRule(settings, entity.identifier); rule.script != "" {
+			log.warnf("LDtk: %s's script %s isn't registered (are the scripts built?)", entity.identifier, rule.script)
 		}
 	} else {
 		for prop in entityProps(n.script.info, entity, layer.gridSize) {
@@ -820,8 +886,90 @@ Returns:
 - The component its type is mapped to, or "" for none
 */
 LDtk_EntityComponent :: proc(settings: ^LDtkLevelSettings, identifier: string) -> string {
-	for m in settings.entityComponents do if m.entity == identifier && m.component != "" do return m.component
-	return ""
+	rule := LDtk_EntityRule(settings, identifier)
+	if rule.make != .Auto && rule.make != .Component do return ""
+	return rule.component
+}
+
+/*
+An entity type's rule: what its entities become and run (zero, Auto everything, when the node
+has none for it).
+
+Inputs:
+- settings: The level node's settings
+- identifier: The entity type
+
+Returns:
+- The rule (its strings are the settings')
+*/
+LDtk_EntityRule :: proc(settings: ^LDtkLevelSettings, identifier: string) -> LDtkEntityRule {
+	for m in settings.entityComponents do if m.entity == identifier do return m
+	return {entity = identifier}
+}
+
+/*
+What an entity type's nodes are, its rule resolved: Auto becomes the mapped component, else Code
+when code registered it (`LDtk_HasSpawner`: never in an editor), else Rectangle; a Component rule
+without a component is a Rectangle.
+
+Inputs:
+- settings: The level node's settings
+- identifier: The entity type
+
+Returns:
+- Component, Code, Rectangle or Skip
+*/
+LDtk_EntityMade :: proc(settings: ^LDtkLevelSettings, identifier: string) -> LDtkEntityMake {
+	rule := LDtk_EntityRule(settings, identifier)
+	switch rule.make {
+	case .Auto:
+		if rule.component != "" do return .Component
+		if LDtk_HasSpawner(identifier) do return .Code
+		return .Rectangle
+	case .Component:
+		return rule.component != "" ? .Component : .Rectangle
+	case .Code, .Rectangle, .Skip:
+		return rule.make
+	}
+	return .Rectangle
+}
+
+/*
+The script an entity type's nodes run: the rule's, else (Auto) the one named like the type, but
+only when what's made has no script of its own (a component's root may).
+
+Inputs:
+- settings: The level node's settings
+- identifier: The entity type
+- builtHasScript: What's made has a script already
+
+Returns:
+- The script's name ("" for none) and whether the rule names it (false: named like the entity)
+*/
+LDtk_EntityScript :: proc(settings: ^LDtkLevelSettings, identifier: string, builtHasScript: bool) -> (name: string, chosen: bool) {
+	rule := LDtk_EntityRule(settings, identifier)
+	if rule.noScript || builtHasScript do return "", false
+	if rule.script != "" do return rule.script, true
+	return identifier, false
+}
+
+/*
+What an IntGrid value of the collision layer becomes: one-way or an area when listed so, solid
+when listed solid, or (no solid values listed) every other non-empty value.
+
+Inputs:
+- settings: The level node's settings
+- value: The cell's value
+
+Returns:
+- Its kind (None for 0)
+*/
+LDtk_CollisionKind :: proc(settings: ^LDtkLevelSettings, value: int) -> LDtkCollisionKind {
+	if value == 0 do return .None
+	for v in settings.oneWayValues do if v == value do return .One_Way
+	for v in settings.areaValues do if v == value do return .Area
+	if LDtk_IsCollisionValue(settings.collisionValues[:], value) do return .Solid
+	return .None
 }
 
 /*
@@ -879,41 +1027,68 @@ LDtk_FieldMatches :: proc(scriptField, ldtkField: string) -> bool {
 
 // The cells of an IntGrid layer as rectangles under a StaticBody (merged: runs along rows, then down)
 @(private="file")
-buildCollision :: proc(view: ^LDtkLevelView, layer: ^LDtkLayer, values: []int, physics: LDtkCollisionBody) {
+buildCollision :: proc(view: ^LDtkLevelView, layer: ^LDtkLayer, settings: ^LDtkLevelSettings, physics: LDtkCollisionBody, project: ^LDtkProject = nil) {
 	scene := view.scene
 	w, h := layer.cells.x, layer.cells.y
 	if w <= 0 || h <= 0 do return
-	solid :: proc(layer: ^LDtkLayer, values: []int, x, y: int) -> bool {
-		return LDtk_IsCollisionValue(values, LDtk_IntGridAt(layer, x, y))
+	// The cells of one kind (Area: of one value), merged into rectangles: runs along rows, then down
+	Want :: struct { kind: LDtkCollisionKind, value: int }
+	cellIs :: proc(layer: ^LDtkLayer, settings: ^LDtkLevelSettings, want: Want, x, y: int) -> bool {
+		v := LDtk_IntGridAt(layer, x, y)
+		kind := LDtk_CollisionKind(settings, v)
+		// One-way and solid cells merge with their own kind only
+		return kind == want.kind && (want.kind != .Area || v == want.value)
 	}
-	used := make([]bool, w * h, context.temp_allocator)
-	body := CreateStaticBody(scene)
-	body.name = strings.clone("Collision", Node_GetAllocator(body))
-	body.position = layer.offset
-	body.layer = view.layer
-	body.collisionLayer = physics.layer
-	body.collisionMask = physics.mask
-	body.friction = physics.friction
-	body.restitution = physics.restitution
-	Node_AddChild(view, body)
-	grid := f32(layer.gridSize)
-	for y in 0 ..< h {
-		for x in 0 ..< w {
-			if used[y * w + x] || !solid(layer, values, x, y) do continue
-			width := 1
-			for x + width < w && !used[y * w + x + width] && solid(layer, values, x + width, y) do width += 1
-			height := 1
-			grow: for y + height < h {
-				for i in 0 ..< width do if used[(y + height) * w + x + i] || !solid(layer, values, x + i, y + height) do break grow
-				height += 1
+	shapes :: proc(scene: ^Scene, view: ^LDtkLevelView, parent: ^Node, layer: ^LDtkLayer, settings: ^LDtkLevelSettings, want: Want, w, h: int) -> int {
+		used := make([]bool, w * h, context.temp_allocator)
+		grid := f32(layer.gridSize)
+		made := 0
+		for y in 0 ..< h {
+			for x in 0 ..< w {
+				if used[y * w + x] || !cellIs(layer, settings, want, x, y) do continue
+				width := 1
+				for x + width < w && !used[y * w + x + width] && cellIs(layer, settings, want, x + width, y) do width += 1
+				height := 1
+				grow: for y + height < h {
+					for i in 0 ..< width do if used[(y + height) * w + x + i] || !cellIs(layer, settings, want, x + i, y + height) do break grow
+					height += 1
+				}
+				for j in 0 ..< height do for i in 0 ..< width do used[(y + j) * w + x + i] = true
+				shape := CreateCollisionShape(scene, .Rectangle)
+				shape.size = {f32(width) * grid, f32(height) * grid}
+				shape.position = {(f32(x) + f32(width) * 0.5) * grid, (f32(y) + f32(height) * 0.5) * grid}
+				shape.layer = view.layer
+				shape.oneWay = want.kind == .One_Way
+				Node_AddChild(parent, shape)
+				made += 1
 			}
-			for j in 0 ..< height do for i in 0 ..< width do used[(y + j) * w + x + i] = true
-			shape := CreateCollisionShape(scene, .Rectangle)
-			shape.size = {f32(width) * grid, f32(height) * grid}
-			shape.position = {(f32(x) + f32(width) * 0.5) * grid, (f32(y) + f32(height) * 0.5) * grid}
-			shape.layer = view.layer
-			Node_AddChild(body, shape)
 		}
+		return made
+	}
+	setUp :: proc(body: ^PhysicsBody, name: string, view: ^LDtkLevelView, layer: ^LDtkLayer, physics: LDtkCollisionBody) {
+		body.name = strings.clone(name, Node_GetAllocator(body))
+		body.position = layer.offset
+		body.layer = view.layer
+		body.collisionLayer = physics.layer
+		body.collisionMask = physics.mask
+		body.friction = physics.friction
+		body.restitution = physics.restitution
+		Node_AddChild(view, body)
+	}
+	// Solid and one-way cells: one StaticBody, "Collision"
+	body := CreateStaticBody(scene)
+	setUp(body, "Collision", view, layer, physics)
+	shapes(scene, view, body, layer, settings, {.Solid, 0}, w, h)
+	shapes(scene, view, body, layer, settings, {.One_Way, 0}, w, h)
+	// Each area value: an Area named after it in LDtk ("Spikes"; else "Area<value>")
+	for value in settings.areaValues {
+		name := fmt.tprintf("Area%d", value)
+		if def := project != nil ? LDtk_FindLayerDef(project, layer.identifier) : nil; def != nil {
+			for v in def.intGridValues do if v.value == value && v.identifier != "" do name = v.identifier
+		}
+		area := CreateArea(scene)
+		setUp(area, name, view, layer, physics)
+		if shapes(scene, view, area, layer, settings, {.Area, value}, w, h) == 0 do Scene_RemoveNode(scene, area.id)
 	}
 }
 
