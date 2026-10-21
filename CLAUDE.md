@@ -143,6 +143,9 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `ldtk.odin` | **LDtk projects** (ldtk.io): `LDtk_Load` / `LDtk_Parse` into plain data (`LDtkProject`: worlds, levels, layers top-most first, tiles, IntGrid, entities and their `LDtkValue` fields, tilesets, layer/entity/enum definitions) in the project's own arena (`LDtk_Destroy`); lookups (`LDtk_FindLevel`, `LDtk_FindLayer`, `LDtk_IntGridAt`, `LDtk_FieldValue`), `LDtk_ValueText`, `LDtk_Dependencies` |
 | `ldtk_nodes.odin` | **LDtkLevel nodes**: `LDtkLevelSettings` (scene files), `LDtkLevelNode` / `LDtkLevelView` / `LDtkTileLayer` (one batched RenderGeometry per layer) / `LDtkEntityNode`; entities as mapped components, `LDtk_RegisterEntity` spawners or rectangles, scripts named like them with their fields; merged IntGrid collision; `Game_LoadLDtk` / `Game_ForgetLDtk`, `LDtk_FindEntityNodes`, `LDtk_EntityOf`, `LDtk_IntGridAtPosition` |
 | `ldtk_test.odin` | Tests: a hand-written project (one level in the file, one apart): every field kind, IntGrid, tiles' flips, definitions, paths outliving the frame; built: layer order, merged collision, the script's fields from LDtk, allLevels in a linear world, scene files |
+| `aseprite.odin` | **Aseprite files** (`.aseprite` / `.ase`): `Aseprite_Load` / `Aseprite_Parse` into plain data (`Aseprite`: layers, frames and durations, cels, tags, slices, tilesets, user data and properties; every image as RGBA) in its own arena (`Aseprite_Destroy`); `Aseprite_FramePixels` (a frame composited: visibility, opacity, z-index, the 19 blend modes, tilemap layers with flips), `Aseprite_SheetPixels` / `SheetGrid`, `Aseprite_TilePixels`, `Aseprite_CreateTexture`; the resource manager loads them as textures (frame 0, nearest filtering) |
+| `inflate.odin` | `Inflate_Exact`: a strict zlib inflater for untrusted data (exact size, no reading past the input, Adler-32 checked) |
+| `aseprite_test.odin`, `testdata/aseprite/` | Tests on Aseprite's own test sprites (MIT, from its `tests/` folder; LICENSE.txt beside them): its z-order test's colors, groups, tags, linked cels, indexed transparency, tilemaps and flips, user data, slices; damaged files; textures drawn; the inflater |
 | `pack.odin` | **The data pack**: a game's files appended to its own executable (`Pack_Append`; the footer's `ODINPAK1`), read back by `Pack_Open` at start (the project is then `PACK_ROOT`); `Pack_Bytes` / `Pack_Has`, a `Pack` value for tools and tests (`Pack_OpenFile`) |
 | `pack_test.odin` | Tests: a pack appended to a file and read back by path |
 | `sdl_static.odin` | Links the static SDL (tools/build_sdl_static.sh) when it's built: `SDL_STATIC`, `SDL_LINKED_STATICALLY` |
@@ -503,6 +506,22 @@ its nodes until entered again), and is unsubscribed in the node's onExit, since 
 outlives it (node_events_test checks one subscription after repeated visits). `EventData` has
 `string` (valid during the notification). **Saves skip EventSubject fields** (save.odin's
 savedFields).
+
+**Aseprite** (aseprite.odin; its doc comment has the details):
+- Read with Aseprite's published format (docs/ase-file-specs.md in its repository). **None of
+  Aseprite's program code is used** (it isn't open source): compositing follows the W3C
+  Compositing and Blending spec, which Aseprite's modes follow; checked against Aseprite's own
+  z-order test (its expected colors) and every sprite of its test suite.
+- **Untrusted input:** every read is bounds-checked; sizes over `ASEPRITE_MAX_SIZE` are refused;
+  images inflate through `Inflate_Exact` (inflate.odin), not `core:compress/zlib`, which reads
+  zeros past its input and grows its output without limit: damaged files took a minute each and
+  crashed an optimized build. aseprite_broken_files_are_errors damages a file 200 ways.
+- Pixels are converted to RGBA once the whole file is read (the palette can come after a cel);
+  linked cels take their linked cel's pixels then. Tile values are normalized to
+  `ASEPRITE_TILE_ID` / `FLIP_X` / `FLIP_Y` / `FLIP_D` whatever the file's masks.
+- Z-index reorders cels among their siblings (NOTE.5 of the spec, per group). Groups composite
+  apart only when the file says so (header flag 2) and they have an opacity or blend mode.
+- Textures from Aseprite files get nearest filtering (pixel art).
 
 **Particles** (particles.odin; its doc comment has the details):
 - A `ParticleEmitter`'s `settings` is a plain value (no pointers): scene files store it as a

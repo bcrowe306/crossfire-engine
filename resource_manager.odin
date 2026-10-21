@@ -99,14 +99,26 @@ ResourceManager_Init :: proc(rm: ^ResourceManager, renderer: ^sdl.Renderer, mixe
 	rm.defaultFont = rm->loadFont(DEFAULT_FONT, DEFAULT_FONT_SIZE)
 }
 
-// Loads any image format supported by SDL_image (png, jpg, bmp, webp, ...)
+// Loads any image format supported by SDL_image (png, jpg, bmp, webp, ...), and Aseprite files
+// (their first frame, every visible layer; aseprite.odin)
 @(private)
 ResourceManager_loadTexture :: proc(rm: ^ResourceManager, filePath: string) -> ^sdl.Texture {
 	if tex, ok := rm.textures[filePath]; ok {
 		return tex
 	}
 
-	tex := Platform_LoadTexture(rm.renderer, filePath)
+	tex: ^sdl.Texture
+	if Aseprite_IsFile(filePath) {
+		ase, err := Aseprite_Load(filePath)
+		if err != .None {
+			log.errorf("Error loading texture: %s, %v", filePath, err)
+			return nil
+		}
+		tex = Aseprite_CreateTexture(rm.renderer, ase)
+		Aseprite_Destroy(ase)
+	} else {
+		tex = Platform_LoadTexture(rm.renderer, filePath)
+	}
 	if tex == nil {
 		log.errorf("Error loading texture: %s, %s", filePath, sdl.GetError())
 		return nil
