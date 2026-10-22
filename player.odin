@@ -127,6 +127,7 @@ Player_Setup :: proc(options: PlayerOptions, app: ^Application) -> bool {
 	game.scaleMode = playerProject.scaleMode
 	if options.physicsDebug do playerProject.physics.debugDraw = true
 	game.devKeys = options.dev
+	if options.live do LiveLink_Start(game)
 	quitAfter = options.quitAfter
 	game.build = proc(game: ^Game) {
 		if !Game_LoadProject(game, &playerProject, projectDir) {
@@ -171,6 +172,8 @@ PlayerOptions :: struct {
 	physicsDebug: bool,
 	// Developer keys (`Game.devKeys`); the editor's Play passes it, exports never run with it
 	dev: bool,
+	// `--live`: answer an editor's live view on stdin / stdout (live.odin); the editor's Play
+	live: bool,
 	// A project folder was named on the command line (otherwise an exported game finds its own)
 	folderGiven: bool,
 	// `--renderer <name>`: draw with this one, whatever the project says ("" for the project's)
@@ -235,6 +238,8 @@ Player_ParseArgs :: proc(args: []string) -> (PlayerOptions, bool) {
 			options.physicsDebug = true
 		case "--dev":
 			options.dev = true
+		case "--live":
+			options.live = true
 		case "--scene":
 			if i + 1 >= len(args) do return options, false
 			options.scene = args[i + 1]

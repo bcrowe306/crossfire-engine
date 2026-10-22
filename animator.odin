@@ -597,6 +597,64 @@ Animator_ReadProperty :: proc(node: ^Node, property: string, allocator := contex
 }
 
 /*
+Sets a node's property from text: what tools that edit a running game use (the editor's live
+view). The properties are the Animator's (`ANIMATOR_PROPERTIES` the node's type has, and
+"script.<field>" for its script's exported fields).
+
+Inputs:
+- node: The node
+- property: The property ("position", "script.speed")
+- text: The value as text ("10, 20", "#ff8000", "true")
+
+Returns:
+- false when the node has no such property or the text isn't a value of it
+
+Example:
+	// Given: hero: ^e.Node
+	e.Node_WriteProperty(hero, "position", "100, 200")
+*/
+Node_WriteProperty :: proc(node: ^Node, property: string, text: string) -> bool {
+	kind, known := Animator_PropertyKind(property)
+	if strings.has_prefix(property, ANIMATOR_SCRIPT_PREFIX) {
+		field, found := scriptField(node, property)
+		if !found do return false
+		kind, known = Animator_ScriptFieldKind(field.type)
+	}
+	if !known do return false
+	if _, has := readProperty(node, property); !has do return false
+	value, ok := Animator_ParseValue(kind, text, context.temp_allocator)
+	if !ok do return false
+	writeProperty(node, property, value)
+	return true
+}
+
+/*
+The properties a node has (as `Node_WriteProperty` and `Animator_ReadProperty` take them): the
+built-in ones its type has, then its script's fields (node fields left out).
+
+Inputs:
+- node: The node
+- allocator: For the list
+
+Returns:
+- The property names
+*/
+Node_Properties :: proc(node: ^Node, allocator := context.allocator) -> []string {
+	list := make([dynamic]string, allocator)
+	for p in ANIMATOR_PROPERTIES do if Animator_TypeHasProperty(node.type, p) {
+		// The single axes repeat the pairs
+		if p.name == "position.x" || p.name == "position.y" || p.name == "scale.x" || p.name == "scale.y" do continue
+		append(&list, p.name)
+	}
+	if node.script.info != nil {
+		for field in node.script.info.fields do if field.type != .Node {
+			append(&list, strings.concatenate({ANIMATOR_SCRIPT_PREFIX, field.name}, allocator))
+		}
+	}
+	return list[:]
+}
+
+/*
 Sorts every track's keys by time (stable): call it after changing keys' times.
 
 Inputs:

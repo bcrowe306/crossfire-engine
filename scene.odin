@@ -398,7 +398,11 @@ Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 	// Scripts get `ready` once, before their first update, when every node is in the scene
 	Scene_ReadyScripts(scene)
 	// Physics steps before nodes update: they see this frame's positions and collisions
-	if !scene.paused do Physics_Update(scene, deltaTime)
+	if !scene.paused {
+		physicsStart := sdl.GetPerformanceCounter()
+		Physics_Update(scene, deltaTime)
+		if scene.game != nil && scene.game.currentScene == scene do profileAdd(&scene.game.profile.physics, physicsStart)
+	}
 
 	for node in scene.nodes {
 		if !Node_CanProcess(node) do continue
@@ -500,6 +504,9 @@ Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transfo
 		for layer in RenderLayer do if layer not_in scene.screenLayers do lastLit = int(layer)
 	}
 	litDone := false
+	drawn := 0
+	for &items in layers do drawn += len(items)
+	if scene.game != nil && scene.game.currentScene == scene do scene.game.profile.drawn = drawn
 	for &items, layer in layers {
 		if lastLit >= 0 && !litDone && int(layer) > lastLit {
 			Lighting_Apply(scene, renderer, view)

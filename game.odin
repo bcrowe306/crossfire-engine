@@ -103,6 +103,10 @@ Game :: struct {
 	// Animation sets read so far, by path (nil: couldn't be read); in the game's memory
 	// (animation_sets.odin)
 	animationSets: map[string]^AnimationSetData,
+	// The live link with an editor (live.odin; nil unless the player runs with `--live`)
+	live: ^LiveLink,
+	// How long the parts of recent frames took (live.odin)
+	profile: GameProfile,
 	// UI themes read so far, by path (nil: couldn't be read); in the game's memory (ui_theme.odin)
 	themes: map[string]^ThemeData,
 	// The project's UI theme (project.xml's `uiTheme`; "": the default), used by controls with none
@@ -225,6 +229,7 @@ Inputs:
 - game: The game to destroy
 */
 Game_Destroy :: proc(game: ^Game) {
+	LiveLink_Destroy(game)
 	// The scene that's playing exits first, then every scene's nodes go (their scripts' destroy
 	// hooks can still reach the globals), then the globals
 	if game.currentScene != nil {
@@ -398,6 +403,12 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 		}
 	}
 
+	// An editor's live link: its commands, and a paused game's frames (a step runs 1/60 s)
+	if game.live != nil {
+		if !LiveLink_Process(game, realDeltaTime) do return
+		if game.live.paused do deltaTime = 1.0 / 60
+	}
+	start := sdl.GetPerformanceCounter()
 	// Globals first: the scene's nodes see what they changed this frame
 	Globals_Update(game, events, deltaTime)
 
@@ -405,6 +416,8 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 	if game.currentScene != nil && game.currentScene.update != nil {
 		game.currentScene->update(events, deltaTime)
 	}
+	profileAdd(&game.profile.update, start)
+	if game.currentScene != nil do game.profile.nodes = len(game.currentScene.nodes)
 }
 
 
@@ -545,6 +558,8 @@ Inputs:
 - game: The game
 */
 Game_Draw :: proc(game: ^Game) {
+	start := sdl.GetPerformanceCounter()
+	defer profileAdd(&game.profile.draw, start)
 	if game.currentScene != nil && game.currentScene.draw != nil {
 		game.currentScene->draw(game.renderer)
 	}
