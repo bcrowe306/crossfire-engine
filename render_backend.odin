@@ -102,7 +102,18 @@ Returns:
 Application_CreateRenderer :: proc(window: ^sdl.Window, backend: RenderBackend) -> ^sdl.Renderer {
 	// The browser has WebGL only
 	driver := PLATFORM_WEB ? nil : RENDER_BACKENDS[backend].driver
+	// Shaders are SPIR-V and MSL (shaders.odin): on Windows the GPU renderer is asked for Vulkan
+	// (its default there is Direct3D 12, which takes neither)
+	when ODIN_OS == .Windows {
+		if backend == .GPU do _ = sdl.SetHint(sdl.HINT_GPU_DRIVER, "vulkan")
+	}
 	renderer := sdl.CreateRenderer(window, driver)
+	when ODIN_OS == .Windows {
+		if renderer == nil && backend == .GPU {
+			_ = sdl.ResetHint(sdl.HINT_GPU_DRIVER)
+			renderer = sdl.CreateRenderer(window, driver)
+		}
+	}
 	if renderer == nil && driver != nil {
 		log.warnf("Renderer %s isn't available (%s): letting SDL choose", RENDER_BACKENDS[backend].label, sdl.GetError())
 		renderer = sdl.CreateRenderer(window, nil)

@@ -121,6 +121,8 @@ Node :: struct {
 	processMode: ProcessMode,
 	// How its drawing combines with what's under it
 	blendMode: BlendMode,
+	// Its shader and its parameters (shaders.odin; nil none): `Node_SetShader`
+	shader: ^ShaderMaterial,
 	// Draw order within its layer: higher draws later (on top). Equal values keep tree order
 	zIndex: i32,
 	// Its children draw sorted by their world y (lower first: things further down the screen
@@ -306,6 +308,8 @@ Node_Destroy :: proc(node: ^Node) {
 	if node == nil do return
 	if node.script.info != nil && node.script.info.destroy != nil do node.script.info.destroy(node.script.data)
 	if node.destroy != nil do node.destroy(node)
+	// Its shader's render states are SDL's
+	if node.shader != nil do shaderMaterialDestroy(node.shader)
 
 	// The arena lives inside its own memory, so destroy a copy: freeing the blocks would
 	// otherwise also free the Arena struct while arena_destroy is still using it

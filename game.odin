@@ -136,6 +136,10 @@ Game :: struct {
 	projectDir: string,
 	// Seconds left of a hitstop (Game_HitStop): scenes and globals get a delta time of 0
 	hitStop: f64,
+	// Seconds the game has run (scaled like scenes' time; stopped by hitstops): shaders' `time`
+	time: f64,
+	// The shaders loaded, by path (shaders.odin; in the game's arena)
+	shaders: map[string]^ShaderProgram,
 	// Multiplies the time scenes and globals see: 0.5 is slow motion, 2 double speed
 	// (`Game_SetTimeScale`). 0 counts as 1, so a game that never sets it runs normally; to stop
 	// time, pause the scene (`Scene_SetPaused`)
@@ -255,6 +259,8 @@ Game_Destroy :: proc(game: ^Game) {
 	game.nextScenePtr = nil
 	SceneFlow_Destroy(game)
 	Globals_Destroy(game)
+	// The nodes' shader states went with them; the shaders' GPU code goes before the renderer
+	shadersDestroy(game)
 	steamStop(game)
 	Input_Destroy(&game.input)
 	// Their memory is the game's arena, freed below
@@ -401,6 +407,7 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 		game.hitStop -= realDeltaTime
 		deltaTime = 0
 	}
+	game.time += deltaTime
 	if scene := game.currentScene; scene != nil && scene.camera != nil do Camera2D_UpdateShake(scene.camera, realDeltaTime)
 
 	// Development runs: LDtk files saved since are read again (ldtk_nodes.odin), and images

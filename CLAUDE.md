@@ -20,6 +20,8 @@ import e "odin_sdl_engine"   // or "../odin_sdl_engine" from a sibling package
 ```bash
 tools/build_box2d.sh [<emsdk>]              # once: build Box2D into box2d/lib/ (with an emsdk: the web library too)
 tools/build_sdl_static.sh                   # once: SDL3 + _image/_ttf/_mixer as static libraries (Linux, macOS; needs CMake)
+tools/build_shader_tools.sh                 # once, after the static SDL: glslang + SDL_shadercross into shader_tools/<os>_<arch>/
+odin run tools/compile_shaders -collection:engine=.   # after editing shaders/builtin/*.frag: their .frag.shader files (commit both)
 odin check . -no-entry-point -vet-unused    # type-check the library (it has no main)
 odin test . -vet-unused -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true   # unit tests; a leak or bad free fails the test
 odin check player -vet-unused               # type-check the player program
@@ -135,6 +137,11 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `nodes_test.odin` | Tests: process modes and pausing (physics too), the time scale (hitstops in real time), groups, z-index / y-sort / blend order, format 13 attributes parsed and built |
 | `component_test.odin` | Tests: component files, instances in scene files (names, transforms, under parents, nested), `Scene_Instantiate` |
 | `input.odin` | **Input**: keyboard, mouse and gamepad state (`Input_IsKeyPressed`, `Input_IsMouseButtonJustPressed`, `Input_GetMousePosition`, `Input_GetGamepadAxis`...) through the engine's own `Key`, `MouseButton`, `GamepadButton`, `GamepadAxis`; **actions** like Godot's input map (`Input_IsActionPressed` / `JustPressed` / `JustReleased`, `Input_GetActionStrength`, `Input_GetAxis`, `Input_GetVector`); bindings' text format; `Game.input`, updated first in `Game_Update` |
+| `shaders.odin` | **Shaders**: `ShaderBundle` (a compiled `.frag.shader`: SPIR-V, MSL, params), `Shader_ParseParams` (a GLSL `Params` block: std140 offsets, comment tags), `Game_LoadShader` (`Game.shaders`; `builtin:<name>` from shaders/builtin), `ShaderMaterial` (`Node.shader`: `Node_SetShader` / `SetShaderParam` / `SetShaderParamText` / `ResetShaderParams`), `Renderer_SupportsShaders`, the draw hooks (`shaderDrawBegin` / `End`), the hit flash fallback |
+| `screen_effects.odin` | **ScreenEffect nodes**: the scene drawn into a picture, then through each effect (`Scene.screenEffects`, two ping-pong targets in `Scene.effects`), with or without the screen layers |
+| `shader_compile.odin` | Compiling GLSL with the shader tools (`ShaderTools_Find`, `Shader_Compile`, `Shader_CompileFile`: `<file>.frag.shader` beside it); native only |
+| `shaders/builtin/`, `tools/compile_shaders/`, `tools/build_shader_tools.sh` | The seven built-in effects (GLSL and their committed `.frag.shader`), the program compiling them, and the script building glslang + SDL_shadercross from `third_party/` |
+| `shaders_test.odin` | Tests: params and std140 offsets, bundles, built-ins load; a node's shader, Animator tracks, scene files; drawing with an offscreen GPU renderer (skipped without a GPU): the hit flash, a screen effect with and without the screen layers, hidden; the hit flash without the GPU renderer; compiling (skipped without the tools) |
 | `touch.odin` | **Touch input and on-screen controls**: `Touch` (`Input_GetTouches` / `GetTouchCount` / `IsTouchScreen`: fingers in game coordinates, pressed / released / claimed), `VirtualJoystick` and `TouchButton` nodes (`TouchControl`: `TouchControlSettings`, actions; `CreateVirtualJoystick`, `CreateTouchButton`, `VirtualJoystick_GetVector`, `TouchButton_IsPressed`), pushing input actions |
 | `players.odin` | **Local multiplayer**: `Player` (a device: the keyboard or a gamepad by SDL id), `PlayersState` (`InputState.players`: settings, joining, events), `Players_StartJoining` / `Join` / `Leave` / `Count` / `Get`, per-player actions (`Player_IsActionPressed` / `GetVector` / `Rumble` / `DeviceName`), `SplitScreen_Rect`; project.xml's `<players>` |
 | `players_test.odin` | Tests: joining with pads and the keyboard (once each, up to the most), each player reading only its device, unplugging and plugging back, leaving and renumbering, actions added later, the join action, the keyboard off, split-screen rectangles |
@@ -440,6 +447,24 @@ device, then every other device, and logs what it got ("Audio: <device>, 48000 H
 and what failed. The device is the machine's choice: the player's `--audio-device <name>`
 (`--list-audio-devices` prints them), the editor's Settings for Play. SDL's dummy device mixes
 in stereo whatever's asked (audio_test.odin checks the rate).
+
+**Shaders** (shaders.odin; its doc comment has the details): SDL 3.4 runs custom fragment shaders
+only on its GPU renderer (`SDL_CreateGPURenderState`), which swaps the shader into **every** draw
+while a state is set, shapes too (they bind no texture: wrong). So the state is set only around
+textured draws: `DrawTexture`, text, tile batches, LDtk tiles, textured particles call
+`shaderDrawBegin` / `shaderDrawEnd` with the draw state's `material` (`drawOrder` passes a
+node's shader down to its children unless they have their own; a ScreenEffect's isn't passed).
+A render state per material per renderer (SDL keeps uniforms per state, so nodes don't share);
+uniforms only when the shader uses its block (`uniformBuffers` from shadercross's reflection:
+an unused block is dropped). Shaders are GLSL 450 compiled by glslang to SPIR-V and by
+SDL_shadercross (no DXC) to MSL (entry point `main0`); no DXIL, so on Windows the GPU renderer
+is asked for Vulkan (`HINT_GPU_DRIVER`). Auto picks the GPU renderer for projects with
+`shaders="true"` (the player). `Game_Destroy` releases the GPU shaders before the renderer goes
+(`Game_ReleaseShaders` for previews). **Screen effects**: drawn into a target of the logical
+size (or the output's); an opaque game background starts the picture and the result replaces
+the screen, else (editors' previews draw their backdrop first) it starts transparent and blends
+over. Built-ins are `#load`ed `.frag.shader` files: rebuild them with tools/compile_shaders
+after editing their GLSL. Checked with Vulkan validation (no errors).
 
 **Local players** (players.odin): they live in `InputState.players` and are worked out at the end
 of `Input_Update` (only once someone joined or joining is on), which finds its game with

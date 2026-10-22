@@ -70,7 +70,9 @@ DrawTextWrapped :: proc(rm: ^ResourceManager, pos: sdl.FPoint, text: string, fon
 	if wrapWidth > 0 {
 		ttf.SetTextWrapWidth(ttfText, c.int(wrapWidth))
 	}
+	on := shaderDrawBegin(rm.renderer, {})
 	ttf.DrawRendererText(ttfText, pos.x, pos.y)
+	shaderDrawEnd(rm.renderer, on)
 }
 
 /*

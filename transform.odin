@@ -361,6 +361,9 @@ DrawState :: struct {
 	transform: Transform2D,
 	tint: sdl.Color,
 	blend: BlendMode,
+	// The drawing node's shader (shaders.odin; nil none) and the time it sees: kept by SetDrawState
+	material: ^ShaderMaterial,
+	time: f32,
 	// Set up (thread-local storage starts zeroed: a zero transform would draw nothing)
 	ready: bool,
 }
@@ -404,7 +407,9 @@ Example:
 	e.SetDrawState(e.TRANSFORM2D_IDENTITY)
 */
 SetDrawState :: proc(transform: Transform2D, tint := sdl.Color{255, 255, 255, 255}, blend := BlendMode.Blend) {
-	drawState()^ = {transform = transform, tint = tint, blend = blend, ready = true}
+	ds := drawState()
+	// The node's shader stays: nodes' own drawing sets the transform again (particles)
+	ds^ = {transform = transform, tint = tint, blend = blend, material = ds.material, time = ds.time, ready = true}
 }
 
 /*

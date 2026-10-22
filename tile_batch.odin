@@ -103,7 +103,9 @@ drawTileBatch :: proc(batch: ^TileBatch, renderer: ^sdl.Renderer, base: sdl.FCol
 	vertices, indices := tileGeometry(batch, base, lo, hi, software, true)
 	if len(vertices) == 0 do return
 	sdl.SetTextureBlendMode(batch.texture, GetDrawBlend())
+	on := shaderDrawBegin(renderer, {f32(batch.texture.w), f32(batch.texture.h)})
 	sdl.RenderGeometry(renderer, batch.texture, raw_data(vertices), c.int(len(vertices)), raw_data(indices), c.int(len(indices)))
+	shaderDrawEnd(renderer, on)
 }
 
 // Frees a batch's cache (made again when next drawn: after its tiles or texture change)

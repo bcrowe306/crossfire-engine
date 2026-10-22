@@ -945,7 +945,10 @@ particleEmitterDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	SetDrawState(base, tint)
 	if len(indices) == 0 do return
 	if useTexture do sdl.SetTextureBlendMode(emitter.texture, GetDrawBlend())
+	// A shader colors textured particles only (shapes have no picture to sample)
+	on := useTexture && shaderDrawBegin(renderer, {f32(emitter.texture.w), f32(emitter.texture.h)})
 	sdl.RenderGeometry(renderer, useTexture ? emitter.texture : nil, raw_data(vertices), c.int(len(vertices)), raw_data(indices), c.int(len(indices)))
+	shaderDrawEnd(renderer, on)
 }
 
 @(private="file")

@@ -17,3 +17,14 @@
 	path = third_party/SDL_mixer
 	url = https://github.com/libsdl-org/SDL_mixer
 	shallow = true
+[submodule "third_party/glslang"]
+	path = third_party/glslang
+	url = https://github.com/KhronosGroup/glslang
+	shallow = true
+[submodule "third_party/SPIRV-Cross"]
+	path = third_party/SPIRV-Cross
+	url = https://github.com/KhronosGroup/SPIRV-Cross
+	shallow = true
+[submodule "third_party/SDL_shadercross"]
+	path = third_party/SDL_shadercross
+	url = https://github.com/libsdl-org/SDL_shadercross

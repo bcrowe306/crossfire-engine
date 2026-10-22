@@ -16,3 +16,5 @@ dist/
 sdl/lib/
 sdl/build/
 docs/build/
+# The shader compilers, built by tools/build_shader_tools.sh
+shader_tools/

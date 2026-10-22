@@ -160,7 +160,10 @@ Version history:
   `.material.xml`: physics_material.odin); buses' `<effect>` children (audio_effects.odin) and a
   MusicPlayer's `<layer>` children (music_layers.odin); VirtualJoystick and TouchButton nodes
   (touch.odin); the project's `steamAppId`, `steamCloud` and `<achievement>` children
-  (steam.odin); `<players max keyboard joinAction/>` (players.odin). Version 12 files are valid version 13 files.
+  (steam.odin); `<players max keyboard joinAction/>` (players.odin); every node's `shader` and
+  `<shaderParam name value/>` children, ScreenEffect nodes (`effectScreenLayers`), assets of
+  kind "Shader" (`.frag`, compiled beside them as `.frag.shader`) and the project's `shaders`
+  (shaders.odin, screen_effects.odin). Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
 - 11: the project's `renderer`. Version 10 files are valid version 11 files.
@@ -263,6 +266,8 @@ SceneNodeKind :: enum {
 	// button pressing one
 	VirtualJoystick,
 	TouchButton,
+	// A shader over the whole scene: CRT, bloom, color grading (format 13; screen_effects.odin)
+	ScreenEffect,
 }
 
 /*
@@ -348,6 +353,7 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.Animator       = {"Animates other nodes' properties over time with keyframes: cutscenes, moving platforms, UI, effects", .Graphics},
 	.VirtualJoystick = {"An on-screen stick for touch screens, pushing input actions (moving left, right, up, down)", .UI},
 	.TouchButton    = {"An on-screen round button for touch screens, pressing an input action (jump, fire)", .UI},
+	.ScreenEffect   = {"A shader over the whole scene as drawn: CRT, bloom, color grading (GPU renderer)", .Graphics},
 }
 
 /*
@@ -616,6 +622,12 @@ SceneNodeData :: struct {
 	// VirtualJoystick, TouchButton: the input actions it presses, comma-separated (a joystick's
 	// left, right, up, down; a button's one): `touchActions`
 	touchActions: string,
+	// Any node: its shader (`shader`: "builtin:outline" or a project path; "" none) and its
+	// parameters' values (`<shaderParam name value/>` children): shaders.odin
+	shader: string,
+	shaderParams: [dynamic]ScriptPropData,
+	// ScreenEffect: the effect covers the screen layers too (`effectScreenLayers`, default true)
+	effectScreenLayers: bool,
 }
 
 /*
@@ -925,8 +937,11 @@ ProjectData :: struct {
 	achievements: [dynamic]SteamAchievementData,
 	// Local players (players.odin): `<players max="4" keyboard="true" joinAction="join"/>`
 	players: PlayerSettings,
-	// The renderer games draw with (`renderer="Vulkan"`, format 11; Auto: SDL's choice)
+	// The renderer games draw with (`renderer="Vulkan"`, format 11; Auto: SDL's choice, or the
+	// GPU renderer when the project uses shaders)
 	renderer: RenderBackend,
+	// Some scene uses a shader (`shaders="true"`, written by editors): Auto then means GPU
+	usesShaders: bool,
 	// The game's window (`fullscreen`, `vsync`, `highDPI`, format 13)
 	window: WindowSettings,
 	// The game window's icon: an image path relative to the project (`icon="assets/icon.png"`,
@@ -1030,6 +1045,7 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		size = {attrF32(doc, 0, "width", 1280), attrF32(doc, 0, "height", 720)},
 		scaleMode = attrEnum(doc, 0, "scaleMode", ScaleMode.Letterbox),
 		renderer = attrEnum(doc, 0, "renderer", RenderBackend.Auto),
+		usesShaders = attrBool(doc, 0, "shaders", false),
 		window = {
 			fullscreen = attrBool(doc, 0, "fullscreen", DEFAULT_WINDOW_SETTINGS.fullscreen),
 			vsync = attrBool(doc, 0, "vsync", DEFAULT_WINDOW_SETTINGS.vsync),
@@ -1340,6 +1356,9 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		StateMachineSettings_Destroy(&node.stateMachine)
 		delete(node.viewCamera)
 		delete(node.touchActions)
+		delete(node.shader)
+		for p in node.shaderParams { delete(p.name); delete(p.value) }
+		delete(node.shaderParams)
 	}
 	delete(scene.nodes)
 	delete(scene.name)
@@ -1675,6 +1694,8 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		opacity = clamp(attrF32(doc, element, "touchOpacity", dt.opacity), 0, 1),
 	}
 	node.touchActions = cloneAttr(doc, element, "touchActions", "")
+	node.shader = cloneAttr(doc, element, "shader", "")
+	node.effectScreenLayers = attrBool(doc, element, "effectScreenLayers", true)
 	dn := DEFAULT_NAV_SETTINGS
 	node.nav = {
 		cellSize = max(attrF32(doc, element, "cellSize", dn.cellSize), 1),
@@ -1766,6 +1787,9 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 			parseNode(doc, child, index, scene)
 		case "animation":
 			append(&scene.nodes[index].animations, parseAnimation(doc, child))
+		case "shaderParam":
+			// One of its shader's parameters (shaders.odin)
+			append(&scene.nodes[index].shaderParams, ScriptPropData{cloneAttr(doc, child, "name", ""), cloneAttr(doc, child, "value", "")})
 		case "layer":
 			// A MusicPlayer's layer (music_layers.odin)
 			append(&scene.nodes[index].musicLayers, MusicLayerData{

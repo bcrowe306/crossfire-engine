@@ -62,6 +62,9 @@ Scene :: struct {
 	unbuilt: bool,
 	// UI controls' focus and layout passes (ui_controls.odin)
 	ui: SceneUI,
+	// ScreenEffect nodes (screen_effects.odin), in the order they were added, and their pictures
+	screenEffects: [dynamic]^ScreenEffect,
+	effects: ScreenEffectTargets,
 	// 2D lighting (lighting.odin): `Scene_SetLighting`
 	lighting: SceneLighting,
 	// Camera zones' bounds (camera_tools.odin)
@@ -190,6 +193,7 @@ Scene_Destroy :: proc(scene: ^Scene) {
 	debugDestroy(scene)
 	// Destroy, not free_all: free_all keeps the first block, which leaked once the scene was freed
 	Lighting_Destroy(scene)
+	screenEffectsDestroy(scene)
 	MemoryArena_Destroy(&scene.arena)
 }
 
@@ -498,7 +502,8 @@ Inputs:
 */
 Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D, screenLayersUseView := false, positionOnlyScale: f32 = 1) {
 	scene.ui.stamp += 1
-	defer SetDrawState(TRANSFORM2D_IDENTITY)
+	defer { SetDrawState(TRANSFORM2D_IDENTITY); drawState().material = nil }
+	shaderTime := scene.game != nil ? f32(scene.game.time) : 0
 	// Shapes blend with the node's blend mode; afterwards normal alpha blending again
 	defer if renderer != nil do sdl.SetRenderDrawBlendMode(renderer, sdl.BLENDMODE_BLEND)
 
@@ -514,10 +519,30 @@ Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transfo
 	drawn := 0
 	for &items in layers do drawn += len(items)
 	if scene.game != nil && scene.game.currentScene == scene do scene.game.profile.drawn = drawn
+	// Screen effects (screen_effects.odin): the layers up to `effectsEnd` go into a picture, which
+	// is then drawn through them; screen layers after the world's when they're left out
+	effects := screenEffectsActive(scene, renderer)
+	effectsEnd := len(RenderLayer) - 1
+	if len(effects) > 0 {
+		include := true
+		for fx in effects do if !fx.includeScreenLayers do include = false
+		if !include {
+			effectsEnd = -1
+			for layer in RenderLayer do if layer not_in scene.screenLayers do effectsEnd = int(layer)
+		}
+		size := screenEffectsSize(renderer)
+		if effectsEnd < 0 || size.x <= 0 || !screenEffectsBegin(scene, renderer, size) do effects = nil
+	}
 	for &items, layer in layers {
 		if lastLit >= 0 && !litDone && int(layer) > lastLit {
+			drawState().material = nil
 			Lighting_Apply(scene, renderer, view)
 			litDone = true
+		}
+		if len(effects) > 0 && int(layer) == effectsEnd + 1 {
+			drawState().material = nil
+			screenEffectsEnd(scene, renderer, effects, shaderTime)
+			effects = nil
 		}
 		base := layer in scene.screenLayers && !screenLayersUseView ? TRANSFORM2D_IDENTITY : view
 		for item in items {
@@ -527,13 +552,16 @@ Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transfo
 				transform = {x = {positionOnlyScale, 0}, y = {0, positionOnlyScale}, origin = transform.origin}
 			}
 			SetDrawState(transform, item.tint, node.blendMode)
+			drawState().material, drawState().time = item.material, shaderTime
 			if renderer != nil do sdl.SetRenderDrawBlendMode(renderer, SDLBlendMode(node.blendMode))
 			if node.draw != nil do node.draw(node, renderer)
 			// A script draws after its node, in the same local space
 			if item.scriptDraw != nil do item.scriptDraw(node.script.data, renderer)
 		}
 	}
+	drawState().material = nil
 	if lastLit >= 0 && !litDone do Lighting_Apply(scene, renderer, view)
+	if len(effects) > 0 do screenEffectsEnd(scene, renderer, effects, shaderTime)
 	if scene.physics != nil && scene.physics.settings.debugDraw do Physics_DrawDebug(scene, renderer, view)
 	if len(scene.debugShapes) > 0 do debugDrawShapes(scene, renderer, view)
 }
@@ -561,6 +589,8 @@ DrawItem :: struct {
 	world: Transform2D,
 	tint: sdl.Color,
 	scriptDraw: proc(self: rawptr, renderer: ^sdl.Renderer),
+	// Its shader, or the nearest ancestor's (shaders.odin)
+	material: ^ShaderMaterial,
 }
 
 /*
@@ -574,18 +604,22 @@ drawOrder :: proc(scene: ^Scene) -> [RenderLayer][dynamic]DrawItem {
 	layers: [RenderLayer][dynamic]DrawItem
 	for &items in layers do items = make([dynamic]DrawItem, 0, 64, context.temp_allocator)
 	zIndexed := false
-	visit :: proc(layers: ^[RenderLayer][dynamic]DrawItem, zIndexed: ^bool, node: ^Node, parentWorld: Transform2D, parentTint: sdl.Color) {
+	visit :: proc(layers: ^[RenderLayer][dynamic]DrawItem, zIndexed: ^bool, node: ^Node, parentWorld: Transform2D, parentTint: sdl.Color, parentMaterial: ^ShaderMaterial) {
 		if !node.inScene || !node.visible do return
 		// Smoothed for dynamic bodies (physics_debug.odin)
 		world := Transform2D_Multiply(parentWorld, Node_GetRenderLocalTransform(node))
 		tint := multiplyColor(parentTint, node.tint)
 		scriptDraw := node.script.info != nil ? node.script.info.draw : nil
+		// A shader colors the node's children too, unless they have their own; a ScreenEffect's
+		// is the screen's
+		material := parentMaterial
+		if node.shader != nil && !Node_Is(node, ScreenEffect) do material = node.shader
 		if node.draw != nil || scriptDraw != nil {
-			append(&layers[node.layer], DrawItem{node, world, tint, scriptDraw})
+			append(&layers[node.layer], DrawItem{node, world, tint, scriptDraw, material})
 			if node.zIndex != 0 do zIndexed^ = true
 		}
 		if !node.ySort || len(node.children) < 2 {
-			for child in node.children do visit(layers, zIndexed, child, world, tint)
+			for child in node.children do visit(layers, zIndexed, child, world, tint, material)
 			return
 		}
 		// By their world y: further down the screen draws later
@@ -593,10 +627,10 @@ drawOrder :: proc(scene: ^Scene) -> [RenderLayer][dynamic]DrawItem {
 		sorted := make([]Sorted, len(node.children), context.temp_allocator)
 		for child, i in node.children do sorted[i] = {child, Transform2D_Apply(world, child.position).y}
 		slice.stable_sort_by(sorted, proc(a, b: Sorted) -> bool { return a.y < b.y })
-		for s in sorted do visit(layers, zIndexed, s.node, world, tint)
+		for s in sorted do visit(layers, zIndexed, s.node, world, tint, material)
 	}
 	for node in scene.nodes {
-		if node.parent == nil do visit(&layers, &zIndexed, node, TRANSFORM2D_IDENTITY, {255, 255, 255, 255})
+		if node.parent == nil do visit(&layers, &zIndexed, node, TRANSFORM2D_IDENTITY, {255, 255, 255, 255}, nil)
 	}
 	if zIndexed {
 		for &items in layers do slice.stable_sort_by(items[:], proc(a, b: DrawItem) -> bool { return a.node.zIndex < b.node.zIndex })

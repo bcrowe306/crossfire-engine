@@ -118,6 +118,8 @@ Player_Setup :: proc(options: PlayerOptions, app: ^Application) -> bool {
 	// The project's sound format, on the device the command line names (the machine's choice)
 	audio := playerProject.audioOutput
 	audio.device = options.audioDevice
+	// Shaders run on the GPU renderer: Auto picks it for projects that use them
+	if playerProject.renderer == .Auto && playerProject.usesShaders do playerProject.renderer = .GPU
 	if !Application_Setup(app, fmt.tprintf("%s", playerProject.name), playerProject.size, playerProject.renderer, playerProject.window, audio) {
 		return false
 	}

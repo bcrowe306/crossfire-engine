@@ -238,6 +238,7 @@ SCENE_NODE_TYPES := [SceneNodeKind]typeid{
 	.CameraView      = CameraView,
 	.VirtualJoystick = VirtualJoystick,
 	.TouchButton     = TouchButton,
+	.ScreenEffect    = ScreenEffect,
 }
 
 /*
@@ -617,6 +618,10 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			n = CreateVirtualJoystick(scene, TouchControl_ParseActions(node.touchActions), node.touch)
 		case .TouchButton:
 			n = CreateTouchButton(scene, TouchControl_ParseActions(node.touchActions)[0], node.text, node.touch)
+		case .ScreenEffect:
+			fx := CreateScreenEffect(scene, "")
+			fx.includeScreenLayers = node.effectScreenLayers
+			n = fx
 		case .Light2D:
 			n = CreateLight2D(scene, node.light)
 		case .LightOccluder:
@@ -661,6 +666,15 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 		if !instance || node.zIndex != 0 do n.zIndex = node.zIndex
 		if !instance || node.ySort do n.ySort = node.ySort
 		for g in node.groups do Node_AddToGroup(n, g)
+		// Its shader and parameters (shaders.odin)
+		if node.shader != "" && Node_SetShader(n, node.shader) {
+			for p in node.shaderParams {
+				for def, j in n.shader.program.bundle.params do if def.name == p.name {
+					if value, ok := ShaderParam_Parse(def.type, p.value); ok do n.shader.values[j] = value
+					else do log.warnf("%s: shader parameter %s: can't read %q", node.name, p.name, p.value)
+				}
+			}
+		}
 		if node.parent >= 0 && created[node.parent] != nil {
 			Node_AddChild(created[node.parent], n)
 		}

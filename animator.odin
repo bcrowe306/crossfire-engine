@@ -104,6 +104,9 @@ ANIMATOR_EVENT_PROPERTY :: "event"
 
 // The prefix of a script field's property ("script.speed")
 ANIMATOR_SCRIPT_PREFIX :: "script."
+// The prefix of a shader parameter's property ("shader.amount": shaders.odin; floats, vec2s and
+// colors animate)
+ANIMATOR_SHADER_PREFIX :: "shader."
 
 // A key in a scene file or in code (`AnimatorTrackData.keys`)
 AnimatorKeyData :: struct {
@@ -290,7 +293,7 @@ Animator_SetClips :: proc(animator: ^Animator, settings: AnimatorSettings) {
 			kind, known := Animator_PropertyKind(track.property)
 			event := track.property == ANIMATOR_EVENT_PROPERTY
 			// Events, and script fields until their script is found, keep the keys' text
-			script := strings.has_prefix(track.property, ANIMATOR_SCRIPT_PREFIX)
+			script := strings.has_prefix(track.property, ANIMATOR_SCRIPT_PREFIX) || strings.has_prefix(track.property, ANIMATOR_SHADER_PREFIX)
 			if event || script do kind = .Text
 			keys := make([dynamic]AnimatorKey, 0, len(track.keys), allocator)
 			for key in track.keys {
@@ -621,6 +624,7 @@ Node_WriteProperty :: proc(node: ^Node, property: string, text: string) -> bool 
 		if !found do return false
 		kind, known = Animator_ScriptFieldKind(field.type)
 	}
+	if strings.has_prefix(property, ANIMATOR_SHADER_PREFIX) do kind, known = shaderParamKind(node, property)
 	if !known do return false
 	if _, has := readProperty(node, property); !has do return false
 	value, ok := Animator_ParseValue(kind, text, context.temp_allocator)
@@ -650,6 +654,11 @@ Node_Properties :: proc(node: ^Node, allocator := context.allocator) -> []string
 	if node.script.info != nil {
 		for field in node.script.info.fields do if field.type != .Node {
 			append(&list, strings.concatenate({ANIMATOR_SCRIPT_PREFIX, field.name}, allocator))
+		}
+	}
+	if node.shader != nil {
+		for p in node.shader.program.bundle.params do if !p.builtin && (p.type == .Float || p.type == .Vec2 || p.type == .Color) {
+			append(&list, strings.concatenate({ANIMATOR_SHADER_PREFIX, p.name}, allocator))
 		}
 	}
 	return list[:]
@@ -896,6 +905,10 @@ trackTarget :: proc(animator: ^Animator, track: ^AnimatorTrack) -> ^Node {
 	if target == nil do return nil
 	track.target = target
 	track.targetId = target.id
+	// A shader parameter's kind comes from the shader
+	if strings.has_prefix(track.property, ANIMATOR_SHADER_PREFIX) {
+		if kind, ok := shaderParamKind(target, track.property); ok && kind != track.kind do reparseKeys(animator, track, kind)
+	}
 	// A script field's kind comes from the script
 	if strings.has_prefix(track.property, ANIMATOR_SCRIPT_PREFIX) {
 		if field, ok := scriptField(target, track.property); ok {
@@ -907,6 +920,21 @@ trackTarget :: proc(animator: ^Animator, track: ^AnimatorTrack) -> ^Node {
 		}
 	}
 	return target
+}
+
+// A shader parameter's value kind ("shader.amount"): floats, vec2s and colors
+@(private="file")
+shaderParamKind :: proc(node: ^Node, property: string) -> (AnimatorValueKind, bool) {
+	if node == nil || node.shader == nil do return {}, false
+	name := property[len(ANIMATOR_SHADER_PREFIX):]
+	for p in node.shader.program.bundle.params do if p.name == name {
+		#partial switch p.type {
+		case .Float: return .Float, true
+		case .Vec2: return .Vector, true
+		case .Color: return .Color, true
+		}
+	}
+	return {}, false
 }
 
 @(private="file")
@@ -959,6 +987,17 @@ readProperty :: proc(node: ^Node, property: string) -> (AnimatorValue, bool) {
 		if Node_Is(node, Light2D) do return (cast(^Light2D)node).settings.radius, true
 	case "lightColor":
 		if Node_Is(node, Light2D) do return (cast(^Light2D)node).settings.color, true
+	}
+	if strings.has_prefix(property, ANIMATOR_SHADER_PREFIX) {
+		kind, known := shaderParamKind(node, property)
+		value, has := Node_GetShaderParam(node, property[len(ANIMATOR_SHADER_PREFIX):])
+		if !known || !has do return nil, false
+		#partial switch kind {
+		case .Float: return value[0], true
+		case .Vector: return [2]f32{value[0], value[1]}, true
+		case .Color: return sdl.Color{u8(clamp(value[0], 0, 1) * 255 + 0.5), u8(clamp(value[1], 0, 1) * 255 + 0.5), u8(clamp(value[2], 0, 1) * 255 + 0.5), u8(clamp(value[3], 0, 1) * 255 + 0.5)}, true
+		}
+		return nil, false
 	}
 	if strings.has_prefix(property, ANIMATOR_SCRIPT_PREFIX) {
 		field, ok := scriptField(node, property)
@@ -1034,6 +1073,13 @@ writeProperty :: proc(node: ^Node, property: string, value: AnimatorValue) {
 	case "lightColor":
 		if Node_Is(node, Light2D) && isC do (cast(^Light2D)node).settings.color = c
 	case:
+		if strings.has_prefix(property, ANIMATOR_SHADER_PREFIX) {
+			name := property[len(ANIMATOR_SHADER_PREFIX):]
+			if isF do Node_SetShaderParam(node, name, f)
+			else if isV do Node_SetShaderParam(node, name, v)
+			else if isC do Node_SetShaderParam(node, name, c)
+			return
+		}
 		if !strings.has_prefix(property, ANIMATOR_SCRIPT_PREFIX) do return
 		field, ok := scriptField(node, property)
 		if !ok do return

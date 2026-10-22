@@ -337,10 +337,27 @@ DrawTexture :: proc(
 		// And only the part on screen: SDL's software renderer scales the whole source first
 		source := hasSrc ? srcRect : sdl.FRect{0, 0, f32(texture.w), f32(texture.h)}
 		if !clipToScreen(renderer, &source, &dst) do return
+		on := shaderDrawBegin(renderer, {f32(texture.w), f32(texture.h)})
 		sdl.RenderTexture(renderer, texture, &source, &dst)
+		shaderDrawEnd(renderer, on)
+		// The hit flash without the GPU renderer: the picture again, added in its color
+		if !on do if color, flash := shaderFallbackFlash(renderer, texture); flash {
+			sdl.SetTextureColorMod(texture, color.r, color.g, color.b)
+			sdl.SetTextureBlendMode(texture, sdl.BLENDMODE_ADD)
+			sdl.RenderTexture(renderer, texture, &source, &dst)
+			sdl.SetTextureBlendMode(texture, SDLBlendMode(drawState().blend))
+		}
 		return
 	}
+	on := shaderDrawBegin(renderer, {f32(texture.w), f32(texture.h)})
 	sdl.RenderTextureRotated(renderer, texture, hasSrc ? &srcRect : nil, &dst, f64(angle), nil, flip)
+	shaderDrawEnd(renderer, on)
+	if !on do if color, flash := shaderFallbackFlash(renderer, texture); flash {
+		sdl.SetTextureColorMod(texture, color.r, color.g, color.b)
+		sdl.SetTextureBlendMode(texture, sdl.BLENDMODE_ADD)
+		sdl.RenderTextureRotated(renderer, texture, hasSrc ? &srcRect : nil, &dst, f64(angle), nil, flip)
+		sdl.SetTextureBlendMode(texture, SDLBlendMode(drawState().blend))
+	}
 }
 
 
