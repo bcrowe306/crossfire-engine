@@ -320,10 +320,10 @@ LDtk_RegisterEntity :: proc "contextless" (identifier: string, spawn: LDtkEntity
 /*
 Development runs (`Game.devKeys`: the editor's Play) watch the LDtk files the game read: saved in
 LDtk, a file is read again and every LDtkLevel node of it updated in place (LDtk_WatchFiles,
-twice a second). What's updated: tile layers (their tiles, tileset, visibility, IntGrid colors),
-backgrounds and the collision body. Entity nodes are left running (scripts may hold them), so
-entity changes and layers added or removed show on the next Play. The project replaced is kept
-until the game ends: entity nodes point into it.
+twice a second). What's updated: tile layers (their tiles, tileset, visibility, IntGrid colors;
+layers added or removed appear or go), backgrounds and the collision body. Entities are matched
+by iid: new ones are spawned, deleted ones removed, the others keep running (scripts may hold
+them). The project replaced is kept until the game ends: entity nodes point into it.
 */
 @(private)
 LDtk_WatchFiles :: proc(game: ^Game, deltaTime: f64) {
