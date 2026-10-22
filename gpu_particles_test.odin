@@ -37,7 +37,6 @@ gpu_particles_draw_on_the_gpu :: proc(t: ^testing.T) {
 		log.info("No GPU renderer here: skipping the GPU particles test")
 		return
 	}
-	defer sdl.QuitSubSystem({.VIDEO})
 	defer sdl.DestroyRenderer(renderer)
 	defer { Game_Destroy(game); free(game) }
 	target := sdl.CreateTexture(renderer, RENDER_TARGET_FORMAT, .TARGET, 64, 32)

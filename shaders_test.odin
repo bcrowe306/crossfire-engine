@@ -145,7 +145,9 @@ node_shaders_parameters_and_animator_tracks :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(scene2.screenEffects), 0)
 }
 
-// An offscreen GPU renderer and a game drawing with it (nil, nil when there's no GPU here)
+// An offscreen GPU renderer and a game drawing with it (nil, nil when there's no GPU here). SDL
+// video stays initialized: quitting it destroys every renderer, other tests' software ones too
+// (a segfault on macOS CI, where the GPU tests run)
 @(private)
 gpuGame :: proc() -> (^sdl.Renderer, ^Game) {
 	if !sdl.InitSubSystem({.VIDEO}) do return nil, nil
@@ -158,10 +160,7 @@ gpuGame :: proc() -> (^sdl.Renderer, ^Game) {
 		sdl.DestroyRenderer(renderer)
 		renderer = nil
 	}
-	if renderer == nil {
-		sdl.QuitSubSystem({.VIDEO})
-		return nil, nil
-	}
+	if renderer == nil do return nil, nil
 	game := testGame("testdata")
 	game.renderer = renderer
 	return renderer, game
@@ -195,7 +194,6 @@ shaders_draw_with_the_gpu_renderer :: proc(t: ^testing.T) {
 		log.info("No GPU renderer here: skipping the shader drawing test")
 		return
 	}
-	defer sdl.QuitSubSystem({.VIDEO})
 	defer sdl.DestroyRenderer(renderer)
 	defer { Game_Destroy(game); free(game) }
 	testing.expect(t, Renderer_SupportsShaders(renderer), "the GPU renderer runs shaders")
