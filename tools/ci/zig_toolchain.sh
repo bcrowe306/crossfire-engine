@@ -33,8 +33,16 @@ target="$arch-linux-gnu.$GLIBC"
 syslib=""
 for d in /usr/lib/$arch-linux-gnu /usr/lib64 /usr/lib; do [[ -d "$d" ]] && syslib+=" -L$d"; done
 mkdir -p "$root/bin"
+# The system's own clang (not this wrapper), for links zig can't do
+systemClang=$(PATH=$(printf %s "$PATH" | tr : '\n' | grep -vxF "$root/bin" | paste -sd:) command -v clang || true)
 cat > "$root/bin/clang" <<WRAP
 #!/usr/bin/env bash
+# Shared libraries Odin makes (-build-mode:shared: editor plugins) pass -Wl,-init / -Wl,-fini,
+# which zig's driver refuses; they're loaded by the program that built them, so the system's
+# clang links them (no glibc floor needed)
+if [[ -n "$systemClang" ]]; then
+	for a in "\$@"; do [[ "\$a" == -Wl,-init,* ]] && exec "$systemClang" "\$@"; done
+fi
 args=()
 for a in "\$@"; do
 	case "\$a" in
