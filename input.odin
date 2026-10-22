@@ -214,6 +214,19 @@ InputState :: struct {
 	warned: map[string]bool,
 	// Waiting for the next input to bind (input_rebind.odin)
 	capture: InputCapture,
+	// Fingers on the screen, and those lifted this frame (touch.odin)
+	touches: [dynamic]Touch,
+	// The screen has been touched (touch controls show)
+	touched: bool,
+	// The last mouse press or release came from a finger (SDL's touch mouse): touch controls
+	// take the finger, not that mouse press
+	mouseFromTouch: bool,
+	// Touch controls always show (editors' previews)
+	showTouchControls: bool,
+	// The VirtualJoysticks and TouchButtons of the game's scenes (they add and remove themselves)
+	touchControls: [dynamic]^TouchControl,
+	// Counts updates (touch controls use the ones that updated last frame)
+	frame: u64,
 }
 
 /*
@@ -639,6 +652,7 @@ Input_Update :: proc(input: ^InputState, events: []sdl.Event) {
 		input.mouse[wheel] = false
 	}
 	for &pad in input.gamepads do pad.pressed, pad.released = {}, {}
+	touchesBeginFrame(input)
 
 	for &event in events {
 		#partial switch event.type {
@@ -655,6 +669,7 @@ Input_Update :: proc(input: ^InputState, events: []sdl.Event) {
 		case .MOUSE_BUTTON_DOWN, .MOUSE_BUTTON_UP:
 			button, ok := mouseButtonOf(event.button.button)
 			if !ok do continue
+			input.mouseFromTouch = event.button.which == sdl.TOUCH_MOUSEID
 			input.mousePosition = {event.button.x, event.button.y}
 			if event.type == .MOUSE_BUTTON_DOWN {
 				if !input.mouse[button] do input.mousePressed[button] = true
@@ -708,6 +723,8 @@ Input_Update :: proc(input: ^InputState, events: []sdl.Event) {
 			axis := GamepadAxis(event.gaxis.axis)
 			if i < 0 || axis < .LeftX || axis > .RightTrigger do continue
 			input.gamepads[i].axes[axis] = math.clamp(f32(event.gaxis.value) / 32767, -1, 1)
+		case .FINGER_DOWN, .FINGER_MOTION, .FINGER_UP, .FINGER_CANCELED:
+			touchEvent(input, &event)
 		case .WINDOW_FOCUS_LOST:
 			// Keys let go while another window had focus would stay down
 			for key in Key do if input.keys[key] do input.keysReleased[key] = true
@@ -721,9 +738,12 @@ Input_Update :: proc(input: ^InputState, events: []sdl.Event) {
 	// but don't press or release: the press being bound doesn't also act (a menu's ui_accept)
 	capturing := input.capture.state == .Waiting
 	if capturing do captureInput(input)
+	// On-screen joysticks and buttons take fingers, then push their actions (touch.odin)
+	touchControlsUpdate(input)
 	for &a in input.actions {
 		strength: f32
 		for binding in a.data.bindings do strength = max(strength, bindingStrength(input, binding, a.data.deadzone))
+		if len(input.touchControls) > 0 do strength = max(strength, touchActionStrength(input, a.data.name))
 		down := strength > 0
 		a.pressed = down && !a.down && !capturing
 		a.released = !down && a.down && !capturing
@@ -737,6 +757,8 @@ Input_Update :: proc(input: ^InputState, events: []sdl.Event) {
 Input_Destroy :: proc(input: ^InputState) {
 	for pad in input.gamepads do sdl.CloseGamepad(pad.handle)
 	delete(input.gamepads)
+	delete(input.touches)
+	delete(input.touchControls)
 	for name in input.warned do delete(name)
 	delete(input.warned)
 	input^ = {}

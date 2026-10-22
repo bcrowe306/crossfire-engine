@@ -183,6 +183,8 @@ save_and_load :: proc(t: ^testing.T) {
 	register()
 	dir := tempFolder("engine_test_saves")
 	defer os.remove_all(dir)
+	sync.mutex_lock(&saveFolderLock)
+	defer sync.mutex_unlock(&saveFolderLock)
 	saveRootOverride = dir
 	defer saveRootOverride = ""
 	project, _ := ParseProject(`<project formatVersion="5" name="S"><global script="TestState"/></project>`)

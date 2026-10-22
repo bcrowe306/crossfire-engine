@@ -118,6 +118,8 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 	// The project's input actions (input.odin) and mix buses (audio_nodes.odin)
 	Input_SetActions(game, project.actions[:])
 	Audio_SetBuses(game, project.buses[:])
+	// Steam's achievements, stats and cloud files (steam.odin: the stub until Steamworks is in)
+	Steam_Setup(game, project.steam, project.achievements[:])
 	// Translations before anything that shows text
 	loadProjectTranslations(game, project, projectDir)
 	if project.icon != "" && game.window != nil do Game_SetWindowIcon(game, project.icon)
@@ -232,6 +234,8 @@ SCENE_NODE_TYPES := [SceneNodeKind]typeid{
 	.ParallaxLayer   = ParallaxLayer,
 	.CameraZone      = CameraZone,
 	.CameraView      = CameraView,
+	.VirtualJoystick = VirtualJoystick,
+	.TouchButton     = TouchButton,
 }
 
 /*
@@ -607,6 +611,10 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			n = CreateNavRegion(scene, node.shapeSize, node.nav)
 		case .NavAgent:
 			n = CreateNavAgent(scene, node.nav)
+		case .VirtualJoystick:
+			n = CreateVirtualJoystick(scene, TouchControl_ParseActions(node.touchActions), node.touch)
+		case .TouchButton:
+			n = CreateTouchButton(scene, TouchControl_ParseActions(node.touchActions)[0], node.text, node.touch)
 		case .Light2D:
 			n = CreateLight2D(scene, node.light)
 		case .LightOccluder:

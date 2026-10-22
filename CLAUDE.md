@@ -135,6 +135,9 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `nodes_test.odin` | Tests: process modes and pausing (physics too), the time scale (hitstops in real time), groups, z-index / y-sort / blend order, format 13 attributes parsed and built |
 | `component_test.odin` | Tests: component files, instances in scene files (names, transforms, under parents, nested), `Scene_Instantiate` |
 | `input.odin` | **Input**: keyboard, mouse and gamepad state (`Input_IsKeyPressed`, `Input_IsMouseButtonJustPressed`, `Input_GetMousePosition`, `Input_GetGamepadAxis`...) through the engine's own `Key`, `MouseButton`, `GamepadButton`, `GamepadAxis`; **actions** like Godot's input map (`Input_IsActionPressed` / `JustPressed` / `JustReleased`, `Input_GetActionStrength`, `Input_GetAxis`, `Input_GetVector`); bindings' text format; `Game.input`, updated first in `Game_Update` |
+| `touch.odin` | **Touch input and on-screen controls**: `Touch` (`Input_GetTouches` / `GetTouchCount` / `IsTouchScreen`: fingers in game coordinates, pressed / released / claimed), `VirtualJoystick` and `TouchButton` nodes (`TouchControl`: `TouchControlSettings`, actions; `CreateVirtualJoystick`, `CreateTouchButton`, `VirtualJoystick_GetVector`, `TouchButton_IsPressed`), pushing input actions |
+| `steam.odin` | **Steam**: achievements (project.xml's `<achievement>`), stats, cloud files (`Steam_UnlockAchievement` / `SetStat` / `StoreStats` / `CloudWrite`...), behind a `SteamBackend`; `STEAM_STUB_BACKEND` (the game's save storage) until the Steamworks SDK is in; `steamCloud` sends saves through cloud files |
+| `touch_test.odin` | Tests: touches' life, a stick pushing actions (deadzone, rescaling), two fingers on two controls, floating sticks, the mouse (not a finger's mouse), hidden and removed controls; the Steam stub's achievements, stats, cloud files, cloud saves, kept across runs |
 | `input_rebind.odin` | **Rebinding**: `Input_StartCapture` / `GetCapturedBinding` (the next key, button or stick push; actions don't press meanwhile), `Input_GetBindings` / `SetBindings` / `ActionsUsing` / `ResetBindings`, `Input_FormatBindings` / `ParseBindings` (text), `Input_SaveBindings` / `LoadBindings` (the save storage), `Input_Rumble` |
 | `input_rebind_test.odin` | Tests: capturing keys, gamepad buttons and sticks (resting sticks ignored; no press while capturing), changing, resetting, text and saved bindings |
 | `input_test.odin` | Tests: key, mouse and wheel edges, focus loss, actions from keys, buttons and sticks (deadzones, strength, vectors), project file actions |
@@ -435,6 +438,23 @@ device, then every other device, and logs what it got ("Audio: <device>, 48000 H
 and what failed. The device is the machine's choice: the player's `--audio-device <name>`
 (`--list-audio-devices` prints them), the editor's Settings for Play. SDL's dummy device mixes
 in stereo whatever's asked (audio_test.odin checks the rate).
+
+**Touch controls** (touch.odin): `Input_Update` keeps `InputState.touches` (finger events, which
+`ConvertEventToRenderCoordinates` puts in game coordinates like the mouse; lifted fingers stay one
+frame, `released`), then `touchControlsUpdate` hands fingers to the controls before the actions are
+worked out, so a stick presses its actions the same frame (`touchActionStrength`, the strongest
+binding wins as usual). Controls add themselves to `InputState.touchControls` when made and leave
+in their `destroy` (the list is freed when the last goes: editors' previews never run
+Input_Destroy); only those that updated last frame (`updatedFrame`, their scene updating) and are
+visible in the tree take fingers. A mouse press SDL made from a finger (`which ==
+TOUCH_MOUSEID`, `mouseFromTouch`) doesn't drive them, or one touch would count twice. They're
+`Position_Only` nodes drawn at their screen position; `Touch_Screens` visibility shows them once
+`touched`, with `devKeys`, or with `showTouchControls` (the editor). **Steam** (steam.odin):
+`Game.steam` is set up by `Game_LoadProject` (`Steam_Setup`; a code-only game calls it itself),
+stopped by `Game_Destroy` (`steamStop`, the stub writes what's pending). The stub's file is the
+save slot `steam-stub` (saveName: dev runs apart); with `steamCloud`, save.odin's
+`saveWrite` / `saveRead` go through `Steam_CloudWrite` / `Read`. Tests sharing
+`saveRootOverride` take `saveFolderLock`.
 
 **Bus effects** (audio_effects.odin): they run on the audio thread inside the bus group's
 post-mix callback (through `AudioMeter.effects`, before measuring). A chain's state (filters'

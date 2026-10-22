@@ -60,7 +60,7 @@ Save_Game :: proc(slot := "save", game: ^Game = nil) -> bool {
 	if game == nil do return false
 	text, ok := Save_ToJSON(game, context.temp_allocator)
 	if !ok do return false
-	if !Platform_SaveWrite(saveName(game, slot), transmute([]byte)text) {
+	if !saveWrite(game, slot, transmute([]byte)text) {
 		log.errorf("Couldn't save the game to slot %s", slot)
 		return false
 	}
@@ -84,7 +84,7 @@ Example:
 Load_Game :: proc(slot := "save", game: ^Game = nil) -> bool {
 	game := game != nil ? game : currentGame
 	if game == nil do return false
-	data, ok := Platform_SaveRead(saveName(game, slot))
+	data, ok := saveRead(game, slot)
 	if !ok do return false
 	if !Save_FromJSON(game, string(data)) {
 		log.errorf("The save %s can't be read", slot)
@@ -107,7 +107,9 @@ Returns:
 */
 Save_Exists :: proc(slot := "save", game: ^Game = nil) -> bool {
 	game := game != nil ? game : currentGame
-	return game != nil && Platform_SaveExists(saveName(game, slot))
+	if game == nil do return false
+	if saveToCloud(game) do return Steam_CloudExists(slot, game)
+	return Platform_SaveExists(saveName(game, slot))
 }
 
 /*
@@ -119,7 +121,9 @@ Inputs:
 */
 Save_Delete :: proc(slot := "save", game: ^Game = nil) {
 	game := game != nil ? game : currentGame
-	if game != nil do Platform_SaveDelete(saveName(game, slot))
+	if game == nil do return
+	if saveToCloud(game) do Steam_CloudDelete(slot, game)
+	else do Platform_SaveDelete(saveName(game, slot))
 }
 
 /*
@@ -211,6 +215,24 @@ savedFields :: proc(T: typeid) -> []reflect.Struct_Field {
 		append(&fields, field)
 	}
 	return fields[:]
+}
+
+// Saves go to Steam Cloud files (the project's `steamCloud`, Steam running: steam.odin)
+@(private="file")
+saveToCloud :: proc(game: ^Game) -> bool {
+	return game.steam.settings.cloudSaves && game.steam.running
+}
+
+@(private="file")
+saveWrite :: proc(game: ^Game, slot: string, data: []byte) -> bool {
+	if saveToCloud(game) do return Steam_CloudWrite(slot, data, game)
+	return Platform_SaveWrite(saveName(game, slot), data)
+}
+
+@(private="file")
+saveRead :: proc(game: ^Game, slot: string) -> ([]byte, bool) {
+	if saveToCloud(game) do return Steam_CloudRead(slot, game)
+	return Platform_SaveRead(saveName(game, slot))
 }
 
 // The storage name of a slot: <game>/<slot>, with the dev suffix for runs from the editor

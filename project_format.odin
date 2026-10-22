@@ -143,7 +143,9 @@ Version history:
   (`lightKind`, `lightColor`, `energy`, `lightRadius`, `spotAngle`, `shadows`) and LightOccluder
   (a CollisionShape's shape attributes) nodes (lighting.odin); NavRegion (`width`, `height`,
   `cellSize`, `agentRadius`, `diagonal`) and NavAgent (`speed`, `arriveDistance`, `avoidRadius`,
-  `autoMove`) nodes (navigation.odin); ParallaxLayer (`factorX`, `factorY`, `repeatX`,
+  `autoMove`) nodes (navigation.odin); VirtualJoystick and TouchButton nodes (`touchActions`,
+  `touchRadius`, `deadzone`, `zoneWidth`, `zoneHeight`, `floating`, `touchVisibility`,
+  `touchMouse`, `touchColor`, `touchOpacity`; a button's label `text`: touch.odin); ParallaxLayer (`factorX`, `factorY`, `repeatX`,
   `repeatY`), CameraZone (`width`, `height`, `zoneTransition`) and CameraView (`width`, `height`,
   `viewCamera`, `viewZoom`, `border`) nodes (camera_tools.odin); StateMachine nodes (`start`, `animates`, `<param>`,
   `<state>`, `<transition>`: state_machine.odin); UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText:
@@ -156,7 +158,9 @@ Version history:
   animator.odin); LDtkLevel `oneWayValues`, `areaValues` and
   `<entity make script noScript>`; bodies' `material` (assets of kind "PhysicsMaterial",
   `.material.xml`: physics_material.odin); buses' `<effect>` children (audio_effects.odin) and a
-  MusicPlayer's `<layer>` children (music_layers.odin). Version 12 files are valid version 13 files.
+  MusicPlayer's `<layer>` children (music_layers.odin); VirtualJoystick and TouchButton nodes
+  (touch.odin); the project's `steamAppId`, `steamCloud` and `<achievement>` children
+  (steam.odin). Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
 - 11: the project's `renderer`. Version 10 files are valid version 11 files.
@@ -255,6 +259,10 @@ SceneNodeKind :: enum {
 	TextField,
 	ScrollBox,
 	RichText,
+	// Touch controls (format 13; touch.odin): an on-screen stick pushing input actions; a round
+	// button pressing one
+	VirtualJoystick,
+	TouchButton,
 }
 
 /*
@@ -338,6 +346,8 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.NavAgent       = {"Finds paths through a NavRegion and moves its parent along them, around other agents", .Scene},
 	.LightOccluder  = {"A shape that blocks light and casts shadows: walls, pillars, trees", .Graphics},
 	.Animator       = {"Animates other nodes' properties over time with keyframes: cutscenes, moving platforms, UI, effects", .Graphics},
+	.VirtualJoystick = {"An on-screen stick for touch screens, pushing input actions (moving left, right, up, down)", .UI},
+	.TouchButton    = {"An on-screen round button for touch screens, pressing an input action (jump, fire)", .UI},
 }
 
 /*
@@ -599,6 +609,13 @@ SceneNodeData :: struct {
 	cameraTools: CameraToolSettings,
 	// CameraView: the Camera node it shows (a path from it)
 	viewCamera: string,
+	// VirtualJoystick, TouchButton: `TouchControlSettings` as `touchRadius`, `deadzone`,
+	// `zoneWidth`, `zoneHeight`, `floating`, `touchVisibility`, `touchMouse`, `touchColor`,
+	// `touchOpacity` (touch.odin; a button's label is `text`)
+	touch: TouchControlSettings,
+	// VirtualJoystick, TouchButton: the input actions it presses, comma-separated (a joystick's
+	// left, right, up, down; a button's one): `touchActions`
+	touchActions: string,
 }
 
 /*
@@ -902,6 +919,10 @@ ProjectData :: struct {
 	actions: [dynamic]InputActionData,
 	// Mix buses (Master's settings too, if listed): `<bus name="Music" volume="0.8"/>` (audio_nodes.odin)
 	buses: [dynamic]AudioBusData,
+	// Steam (steam.odin): `steamAppId`, `steamCloud`, and `<achievement name title description
+	// hidden/>` children (format 13)
+	steam: SteamSettings,
+	achievements: [dynamic]SteamAchievementData,
 	// The renderer games draw with (`renderer="Vulkan"`, format 11; Auto: SDL's choice)
 	renderer: RenderBackend,
 	// The game's window (`fullscreen`, `vsync`, `highDPI`, format 13)
@@ -1015,6 +1036,7 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		background = attrColor(doc, 0, "background", {0, 0, 0, 255}),
 		startScene = cloneAttr(doc, 0, "startScene", ""),
 		locale = cloneAttr(doc, 0, "locale", ""),
+		steam = {appId = u32(max(attrInt(doc, 0, "steamAppId", 0), 0)), cloudSaves = attrBool(doc, 0, "steamCloud", false)},
 		uiTheme = cloneAttr(doc, 0, "uiTheme", ""),
 		transition = {
 			kind = attrEnum(doc, 0, "transition", DEFAULT_TRANSITION.kind),
@@ -1064,6 +1086,13 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 				opacity = clamp(attrInt(doc, child, "opacity", d.opacity), 0, 100),
 				majorOpacity = clamp(attrInt(doc, child, "majorOpacity", d.majorOpacity), 0, 100),
 			}
+		case "achievement":
+			append(&project.achievements, SteamAchievementData{
+				name = cloneAttr(doc, child, "name", ""),
+				title = cloneAttr(doc, child, "title", ""),
+				description = cloneAttr(doc, child, "description", ""),
+				hidden = attrBool(doc, child, "hidden", false),
+			})
 		case "bus":
 			bus := AudioBusData{
 				name = cloneAttr(doc, child, "name", MASTER_BUS),
@@ -1230,6 +1259,8 @@ ProjectData_Destroy :: proc(project: ^ProjectData, allocator := context.allocato
 		delete(b.effects)
 	}
 	delete(project.buses)
+	for a in project.achievements { delete(a.name); delete(a.title); delete(a.description) }
+	delete(project.achievements)
 	delete(project.locale)
 	delete(project.uiTheme)
 	delete(project.loadingScene)
@@ -1297,6 +1328,7 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		UISettings_Destroy(&node.ui)
 		StateMachineSettings_Destroy(&node.stateMachine)
 		delete(node.viewCamera)
+		delete(node.touchActions)
 	}
 	delete(scene.nodes)
 	delete(scene.name)
@@ -1620,6 +1652,18 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		border = max(attrF32(doc, element, "border", dc.border), 0),
 	}
 	node.viewCamera = cloneAttr(doc, element, "viewCamera", "")
+	dt := TouchControl_Defaults(node.kind)
+	node.touch = {
+		radius = max(attrF32(doc, element, "touchRadius", dt.radius), 1),
+		deadzone = clamp(attrF32(doc, element, "deadzone", dt.deadzone), 0, 0.95),
+		zone = {max(attrF32(doc, element, "zoneWidth", dt.zone.x), 0), max(attrF32(doc, element, "zoneHeight", dt.zone.y), 0)},
+		floating = attrBool(doc, element, "floating", dt.floating),
+		visibility = attrEnum(doc, element, "touchVisibility", dt.visibility),
+		mouse = attrBool(doc, element, "touchMouse", dt.mouse),
+		color = attrColor(doc, element, "touchColor", dt.color),
+		opacity = clamp(attrF32(doc, element, "touchOpacity", dt.opacity), 0, 1),
+	}
+	node.touchActions = cloneAttr(doc, element, "touchActions", "")
 	dn := DEFAULT_NAV_SETTINGS
 	node.nav = {
 		cellSize = max(attrF32(doc, element, "cellSize", dn.cellSize), 1),

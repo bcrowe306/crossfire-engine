@@ -96,6 +96,8 @@ Game :: struct {
 	input: InputState,
 	// Mix buses, Master first, and every sound node (audio_nodes.odin)
 	buses: [dynamic]AudioBus,
+	// Achievements, stats and cloud files (steam.odin)
+	steam: SteamState,
 	// Every sound player of every scene (audio_nodes.odin); the players belong to their scenes
 	audioPlayers: [dynamic]^AudioPlayer,
 	// Components read so far, by path (nil: couldn't be read); in the game's memory (project_loader.odin)
@@ -253,6 +255,7 @@ Game_Destroy :: proc(game: ^Game) {
 	game.nextScenePtr = nil
 	SceneFlow_Destroy(game)
 	Globals_Destroy(game)
+	steamStop(game)
 	Input_Destroy(&game.input)
 	// Their memory is the game's arena, freed below
 	game.components = nil
