@@ -28,3 +28,6 @@
 [submodule "third_party/SDL_shadercross"]
 	path = third_party/SDL_shadercross
 	url = https://github.com/libsdl-org/SDL_shadercross
+[submodule "third_party/msdf-atlas-gen"]
+	path = third_party/msdf-atlas-gen
+	url = https://github.com/Chlumsky/msdf-atlas-gen

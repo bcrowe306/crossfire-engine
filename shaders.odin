@@ -670,6 +670,7 @@ shaderMaterialDestroy :: proc(m: ^ShaderMaterial) {
 @(private)
 shadersDestroy :: proc(game: ^Game) {
 	gpuParticleResourcesDestroy(game)
+	glyphFontsReleaseGPU(&game.resourceManager)
 	for _, program in game.shaders {
 		for g in program.gpu do sdl.ReleaseGPUShader(g.device, g.shader)
 		delete(program.gpu)

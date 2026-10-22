@@ -47,6 +47,16 @@ ResourceManager :: struct {
 	audio: map[string]^mix.Audio,
 	// Loaded fonts, by "path@size" (the keys are owned)
 	fonts: map[string]^ttf.Font,
+	// Images' filtering by path, as loadTexture is given it (asset_import.odin: the project's
+	// assets; keys owned), and the filtering of the rest (Default: Smooth, Aseprite files Pixel)
+	textureFilters: map[string]TextureFilter,
+	defaultFilter: TextureFilter,
+	// Bitmap fonts and MSDF fonts' atlases read so far, by path (nil: couldn't be read; fonts.odin)
+	glyphFonts: map[string]^GlyphFont,
+	// TrueType fonts that have an MSDF atlas (asset_import.odin; keys owned)
+	msdfFonts: map[string]struct {},
+	// The shader MSDF fonts draw with (fonts.odin; made on first use)
+	msdfProgram: ^ShaderProgram,
 	// The embedded font at DEFAULT_FONT_SIZE, loaded by ResourceManager_Init
 	defaultFont: ^ttf.Font,
 	// Draws text through the renderer, caching glyphs in a GPU atlas. Used by the text primitives
@@ -125,8 +135,6 @@ ResourceManager_loadTexture :: proc(rm: ^ResourceManager, filePath: string) -> ^
 			if surface := sdl.CreateSurfaceFrom(i32(width), i32(height), .RGBA32, raw_data(pixels), i32(width * 4)); surface != nil {
 				tex = sdl.CreateTextureFromSurface(rm.renderer, surface)
 				sdl.DestroySurface(surface)
-				// Pixel art
-				if tex != nil do sdl.SetTextureScaleMode(tex, .NEAREST)
 			}
 		}
 		Aseprite_Destroy(ase)
@@ -138,6 +146,8 @@ ResourceManager_loadTexture :: proc(rm: ^ResourceManager, filePath: string) -> ^
 		return nil
 	}
 
+	// Smooth or pixel filtering: the asset's, the project's, else Aseprite files' pixels
+	sdl.SetTextureScaleMode(tex, textureScaleMode(rm, file))
 	key := strings.clone(filePath)
 	rm.textures[key] = tex
 	rm.textureTimes[key] = fileModified(file)
@@ -289,6 +299,16 @@ ResourceManager_destroy :: proc(rm: ^ResourceManager) {
 	}
 	delete(rm.textures)
 	delete(rm.textureTimes)
+	for key in rm.textureFilters do delete(key)
+	delete(rm.textureFilters)
+	for key, font in rm.glyphFonts {
+		delete(key)
+		glyphFontDestroy(font)
+	}
+	delete(rm.glyphFonts)
+	for key in rm.msdfFonts do delete(key)
+	delete(rm.msdfFonts)
+	msdfProgramDestroy(rm)
 
 	for key, audio in rm.audio {
 		Audio_Destroy(audio)

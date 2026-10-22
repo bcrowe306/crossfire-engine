@@ -20,8 +20,8 @@ import e "odin_sdl_engine"   // or "../odin_sdl_engine" from a sibling package
 ```bash
 tools/build_box2d.sh [<emsdk>]              # once: build Box2D into box2d/lib/ (with an emsdk: the web library too)
 tools/build_sdl_static.sh                   # once: SDL3 + _image/_ttf/_mixer as static libraries (Linux, macOS; needs CMake)
-tools/build_shader_tools.sh                 # once, after the static SDL: glslang + SDL_shadercross into shader_tools/<os>_<arch>/
-odin run tools/compile_shaders -collection:engine=.   # after editing shaders/builtin/*.frag: their .frag.shader files (commit both)
+tools/build_shader_tools.sh                 # once, after the static SDL: glslang + SDL_shadercross + msdf-atlas-gen into shader_tools/<os>_<arch>/
+odin run tools/compile_shaders -collection:engine=.   # after editing shaders/builtin/*.frag (or particles/, text/msdf.frag): their .frag.shader files (commit both)
 odin check . -no-entry-point -vet-unused    # type-check the library (it has no main)
 odin test . -vet-unused -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true   # unit tests; a leak or bad free fails the test
 odin check player -vet-unused               # type-check the player program
@@ -145,6 +145,11 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `gpu_particles.odin` | **GPU particles** (`ParticleSettings.gpu`, `gpuAmount`): a stateless simulation in a vertex shader (shaders/particles: each particle from its index, its cycle and the time; the emitter's path as a storage buffer), drawn with instanced quads into the emitter's own picture on SDL's GPU device (premultiplied: over or added), which the renderer draws in scene order; shared pipelines in `Game.gpuParticles` |
 | `lines_test.odin`, `gpu_particles_test.odin` | Tests: miters, round joints and caps, closed lines; a line's pixels; a trail's points following its parent, ageing out, emitting off; GPU particles drawn, following a moved emitter, stopping and finishing, started again (skipped without a GPU); the CPU fallback |
 | `screen_effects.odin` | **ScreenEffect nodes**: the scene drawn into a picture, then through each effect (`Scene.screenEffects`, two ping-pong targets in `Scene.effects`), with or without the screen layers |
+| `asset_import.odin` | **Import settings**: `TextureFilter` (Default, Smooth, Pixel), `ResourceManager_SetImportSettings` (a project's assets: filters, MSDF fonts; `Game_LoadProject` calls it), `ResourceManager_SetTextureFilter` (changes loaded textures too), `ResourceManager_TextureFilter` |
+| `atlas.odin` | **Texture atlases**: `AtlasData` (`.atlas.xml`: `ParseAtlas` / `FormatAtlas` / clone / destroy / equal), `Atlas_Pack` (power-of-two shelf packing with padding), `Game_LoadAtlas` (`Game.atlases`), `Game_AtlasRegion`, `Sprite_SetRegion`; Sprites' `region` (`Sprite.region`, drawn as `src`) |
+| `fonts.odin` | **Bitmap and MSDF fonts** behind `DrawText` / `MeasureText`: `ParseBMFont` (text and XML), `GlyphFont` (glyph pictures, kerning, pages), the engine's own layout (wrapping, kerning), quads through the draw transform; MSDF fonts (`ResourceManager_SetFontMSDF`, `<font>.msdf.json` / `.msdf.bmp`) through shaders/text/msdf.frag on the GPU renderer, TrueType elsewhere |
+| `font_compile.odin` | `Font_MakeMSDF`: an MSDF atlas beside a font with msdf-atlas-gen (`ShaderTools.msdfAtlasGen`); native only |
+| `asset_import_test.odin` | Tests: filters from project files and changed while loaded; packing (inside, apart), atlas files, a scene Sprite drawing its region (pixels), `Sprite_SetRegion`; a BMFont read (both formats), measured (kerning, sizes, wrapping) and drawn (pixels, two pages); an MSDF atlas made, measured like the TrueType font and drawn sharp (GPU; skipped without one or the tool) |
 | `shader_compile.odin` | Compiling GLSL with the shader tools (`ShaderTools_Find`, `Shader_Compile`, `Shader_CompileFile`: `<file>.frag.shader` beside it); native only |
 | `shaders/builtin/`, `tools/compile_shaders/`, `tools/build_shader_tools.sh` | The seven built-in effects (GLSL and their committed `.frag.shader`), the program compiling them, and the script building glslang + SDL_shadercross from `third_party/` |
 | `shaders_test.odin` | Tests: params and std140 offsets, bundles, built-ins load; a node's shader, Animator tracks, scene files; drawing with an offscreen GPU renderer (skipped without a GPU): the hit flash, a screen effect with and without the screen layers, hidden; the hit flash without the GPU renderer; compiling (skipped without the tools) |
@@ -471,6 +476,22 @@ size (or the output's); an opaque game background starts the picture and the res
 the screen, else (editors' previews draw their backdrop first) it starts transparent and blends
 over. Built-ins are `#load`ed `.frag.shader` files: rebuild them with tools/compile_shaders
 after editing their GLSL. Checked with Vulkan validation (no errors).
+
+**Import settings, atlases and fonts** (asset_import.odin, atlas.odin, fonts.odin; their doc
+comments have the details): filtering is applied by the resource manager when a texture loads
+(`textureScaleMode`: the asset's, the project's, else Smooth, Aseprite files Pixel) and to loaded
+textures when it changes; keys are the paths textures load with (the project folder joined).
+**Every text draw checks `glyphFontFor` first** (DrawTextWrapped, MeasureText): a `.fnt` path is a
+bitmap font, a TrueType path marked MSDF (`rm.msdfFonts`) is drawn from its atlas when the renderer
+runs shaders, else SDL_ttf as before. Glyph fonts are laid out by the engine (`fontLayout`: lines,
+wrapping at spaces, kerning; a missing space glyph is a quarter em) and drawn as quads through the
+whole draw transform (they turn, unlike SDL_ttf text), one RenderGeometry per page; a bitmap font
+unturned snaps to whole pixels. MSDF fonts have their own `ShaderMaterial` (pxRange) on the
+resource manager's MSDF program (`rm.msdfProgram`), released with the game's shaders. Atlases
+(`Game.atlases`, game arena) are read through the build's project folder (`atlasLoad`), set their
+picture's filtering before it loads, and give Sprites a `region` rectangle (bounds, origin and
+drawing use its size). msdf-atlas-gen is built by build_shader_tools.sh against SDL_ttf's FreeType
+(no PNG: the atlas is a BMP SDL reads everywhere). Checked with Vulkan validation (no errors).
 
 **GPU particles** (gpu_particles.odin): no per-particle state, so nothing to update on the GPU:
 `gpuParticlesUpdate` only advances the emitter's clock and records its path (a ring, resampled

@@ -46,7 +46,14 @@ Example:
 	e.DrawTextWrapped(&game.resourceManager, {16, 16}, "A long line of dialogue...", e.DEFAULT_FONT, 18, {255, 255, 255, 255}, 300)
 */
 DrawTextWrapped :: proc(rm: ^ResourceManager, pos: sdl.FPoint, text: string, font: string, size: f32, color: sdl.Color, wrapWidth: f32) {
-	if len(text) == 0 || rm.textEngine == nil do return
+	if len(text) == 0 do return
+	// A bitmap font, or an MSDF font on the GPU renderer: drawn from its glyphs' pictures, through
+	// the draw transform (fonts.odin)
+	if glyphFont := glyphFontFor(rm, font); glyphFont != nil {
+		glyphFontDraw(rm, glyphFont, cast([2]f32)pos, text, size, color, wrapWidth)
+		return
+	}
+	if rm.textEngine == nil do return
 
 	pos, size, wrapWidth := pos, size, wrapWidth
 	// Text follows the draw transform's position and scale, but stays upright: SDL_ttf can't
@@ -110,6 +117,7 @@ Returns:
 */
 MeasureText :: proc(rm: ^ResourceManager, text: string, font: string, size: f32, wrapWidth: f32 = 0) -> sdl.FPoint {
 	if len(text) == 0 do return {}
+	if glyphFont := glyphFontFor(rm, font); glyphFont != nil do return sdl.FPoint(glyphFontMeasure(glyphFont, text, size, wrapWidth))
 
 	ttfFont := rm->loadFont(font, size)
 	if ttfFont == nil do return {}

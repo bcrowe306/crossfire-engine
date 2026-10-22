@@ -139,7 +139,8 @@ Version history:
   and `repeat` and `events`, the `PingPongReverse` play mode; `TileMap` nodes (`tilemap`, `frame`,
   `layers`, `tileCollision`, `animate`, `tag`: tilemap.odin); Sprite and AnimatedSprite `layers`
   and `pivotSlice`, Sprite `nineSlice`, `nineWidth`, `nineHeight`, CollisionShape `slice`
-  (aseprite_nodes.odin); 2D lighting: scenes' `lighting`, `ambient`, `bodyShadows`, Light2D
+  (aseprite_nodes.odin); assets' `filter` and the project's `textureFilter` (asset_import.odin);
+  atlases (`.atlas.xml`, kind "Atlas") and Sprite `region` (atlas.odin); 2D lighting: scenes' `lighting`, `ambient`, `bodyShadows`, Light2D
   (`lightKind`, `lightColor`, `energy`, `lightRadius`, `spotAngle`, `shadows`) and LightOccluder
   (a CollisionShape's shape attributes) nodes (lighting.odin); NavRegion (`width`, `height`,
   `cellSize`, `agentRadius`, `diagonal`) and NavAgent (`speed`, `arriveDistance`, `avoidRadius`,
@@ -482,6 +483,9 @@ SceneNodeData :: struct {
 	pivotSlice: string,
 	// Sprite: `nineSlice`, a 9-patch Aseprite slice drawn stretched to `nineWidth` x `nineHeight`
 	nineSlice: string,
+	// Sprite: `region`, the region of the atlas its `texture` names (an `.atlas.xml` file:
+	// atlas.odin; format 13)
+	region: string,
 	// Sprite: the 9-patch's size in pixels
 	nineSize: [2]f32,
 	// CollisionShape: `slice`, an Aseprite slice of its sprite whose rectangle it takes, frame by
@@ -928,6 +932,12 @@ AssetRef :: struct {
 	path: string,
 	// "Image", "Audio", "Music", "Font", "Data", "Component", "LDtk" or "Translation"
 	kind: string,
+	// An image's filtering (`filter="Pixel"`, format 13; Default: the project's
+	// `textureFilter`; asset_import.odin)
+	filter: TextureFilter,
+	// A TrueType font's MSDF atlas (`msdf="true"`, format 13): its text drawn sharp at any size on
+	// the GPU renderer (fonts.odin; editors make the atlas)
+	msdf: bool,
 }
 
 /*
@@ -972,6 +982,9 @@ ProjectData :: struct {
 	// The game window's icon: an image path relative to the project (`icon="assets/icon.png"`,
 	// format 13); "" for the engine's (the Crossfire logo)
 	icon: string,
+	// How images are filtered when they're drawn scaled or turned, unless an asset says otherwise
+	// (`textureFilter="Pixel"`, format 13; Default: Smooth, Aseprite files Pixel; asset_import.odin)
+	textureFilter: TextureFilter,
 	// The language to start in (`locale="fr"`, format 13); "" for the player's system language.
 	// The translation tables are the assets of kind "Translation" (localization.odin)
 	locale: string,
@@ -1079,6 +1092,7 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		background = attrColor(doc, 0, "background", {0, 0, 0, 255}),
 		startScene = cloneAttr(doc, 0, "startScene", ""),
 		locale = cloneAttr(doc, 0, "locale", ""),
+		textureFilter = attrEnum(doc, 0, "textureFilter", TextureFilter.Default),
 		steam = {appId = u32(max(attrInt(doc, 0, "steamAppId", 0), 0)), cloudSaves = attrBool(doc, 0, "steamCloud", false)},
 		players = DEFAULT_PLAYER_SETTINGS,
 		uiTheme = cloneAttr(doc, 0, "uiTheme", ""),
@@ -1111,7 +1125,7 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		case "scene":
 			append(&project.scenes, SceneRef{cloneAttr(doc, child, "name", ""), cloneAttr(doc, child, "path", "")})
 		case "asset":
-			append(&project.assets, AssetRef{cloneAttr(doc, child, "path", ""), cloneAttr(doc, child, "kind", "")})
+			append(&project.assets, AssetRef{cloneAttr(doc, child, "path", ""), cloneAttr(doc, child, "kind", ""), attrEnum(doc, child, "filter", TextureFilter.Default), attrBool(doc, child, "msdf", false)})
 		case "global":
 			global := GlobalData{script = cloneAttr(doc, child, "script", ""), props = make([dynamic]ScriptPropData)}
 			for prop in childElements(doc, child) {
@@ -1369,6 +1383,7 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.asepriteLayers)
 		delete(node.pivotSlice)
 		delete(node.nineSlice)
+		delete(node.region)
 		delete(node.slice)
 		delete(node.tilemap.tag)
 		for &layer in node.tilemap.painted do TileLayerData_Destroy(&layer)
@@ -1637,6 +1652,7 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.asepriteLayers = cloneAttr(doc, element, "layers", "")
 	node.pivotSlice = cloneAttr(doc, element, "pivotSlice", "")
 	node.nineSlice = cloneAttr(doc, element, "nineSlice", "")
+	node.region = cloneAttr(doc, element, "region", "")
 	node.nineSize = {attrF32(doc, element, "nineWidth", 0), attrF32(doc, element, "nineHeight", 0)}
 	node.slice = cloneAttr(doc, element, "slice", "")
 	node.component = cloneAttr(doc, element, "component", "")

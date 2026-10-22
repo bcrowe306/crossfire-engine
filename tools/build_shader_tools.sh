@@ -4,6 +4,9 @@
 #   glslang      GLSL -> SPIR-V (glslang 16.6.0; the standalone `glslang` program)
 #   shadercross  SPIR-V -> MSL for Metal, and its reflection (SDL_shadercross, built without DXC
 #                against our own SPIRV-Cross and the static SDL)
+#   msdf-atlas-gen  TTF/OTF -> an MSDF atlas (BMP) and its layout (JSON), for fonts that stay sharp
+#                at any size (asset_import.odin; msdf-atlas-gen 1.4 with its msdfgen, against
+#                SDL_ttf's FreeType; no PNG, SVG, Skia or Artery Font)
 # Projects' shaders and the engine's built-in effects are written in GLSL; the editor compiles
 # them to SPIR-V (Vulkan: Linux, Windows) and MSL (Metal: macOS), which is what SDL's GPU
 # renderer takes on desktops. No DXIL: games with shaders draw through Vulkan on Windows.
@@ -16,9 +19,17 @@ set -euo pipefail
 
 engine=$(cd "$(dirname "$0")/.." && pwd)
 src="$engine/third_party"
-for lib in glslang SPIRV-Cross SDL_shadercross; do
+# Submodules of submodules (CI checks ours out without recursing): msdf-atlas-gen's msdfgen and
+# SDL_ttf's FreeType
+if [[ -f "$src/msdf-atlas-gen/CMakeLists.txt" && ! -f "$src/msdf-atlas-gen/msdfgen/CMakeLists.txt" ]]; then
+	git -C "$src/msdf-atlas-gen" submodule update --init --depth 1 msdfgen
+fi
+if [[ -f "$src/SDL_ttf/CMakeLists.txt" && ! -f "$src/SDL_ttf/external/freetype/CMakeLists.txt" ]]; then
+	git -C "$src/SDL_ttf" submodule update --init --depth 1 external/freetype
+fi
+for lib in glslang SPIRV-Cross SDL_shadercross msdf-atlas-gen msdf-atlas-gen/msdfgen SDL_ttf/external/freetype; do
 	if [[ ! -f "$src/$lib/CMakeLists.txt" ]]; then
-		echo "The $lib sources are missing: git submodule update --init third_party/$lib" >&2
+		echo "The $lib sources are missing: git submodule update --init --recursive third_party/${lib%%/*}" >&2
 		exit 1
 	fi
 done
@@ -84,7 +95,17 @@ build "$src/SDL_shadercross" SDL_shadercross -DSDLSHADERCROSS_DXC=OFF -DSDLSHADE
 	-DSDLSHADERCROSS_SPIRVCROSS_SHARED=OFF -DSDLSHADERCROSS_SHARED=OFF -DSDLSHADERCROSS_STATIC=ON \
 	-DSDLSHADERCROSS_CLI=ON -DSDLSHADERCROSS_CLI_STATIC=ON -DSDLSHADERCROSS_INSTALL=ON -DSDL3_DIR="$(native "$sdlPrefix/lib/cmake/SDL3")"
 
+# FreeType for msdfgen's font loading: SDL_ttf's copy, only the library (no zlib, PNG, bzip2,
+# Brotli or HarfBuzz: plain outlines are all msdfgen reads)
+build "$src/SDL_ttf/external/freetype" freetype -DFT_DISABLE_ZLIB=ON -DFT_DISABLE_BZIP2=ON -DFT_DISABLE_PNG=ON \
+	-DFT_DISABLE_HARFBUZZ=ON -DFT_DISABLE_BROTLI=ON
+# msdf-atlas-gen and its msdfgen: the command-line program
+build "$src/msdf-atlas-gen" msdf-atlas-gen -DMSDF_ATLAS_USE_VCPKG=OFF -DMSDFGEN_USE_VCPKG=OFF -DMSDF_ATLAS_USE_SKIA=OFF \
+	-DMSDFGEN_USE_SKIA=OFF -DMSDFGEN_DISABLE_SVG=ON -DMSDFGEN_DISABLE_PNG=ON -DMSDF_ATLAS_NO_ARTERY_FONT=ON \
+	-DMSDF_ATLAS_BUILD_STANDALONE=ON -DMSDF_ATLAS_INSTALL=ON -DMSDFGEN_BUILD_STANDALONE=OFF -DMSDFGEN_USE_OPENMP=OFF
+
 cp "$prefix/bin/glslang$exe" "$out/glslang$exe"
 cp "$prefix/bin/shadercross$exe" "$out/shadercross$exe"
+cp "$prefix/bin/msdf-atlas-gen$exe" "$out/msdf-atlas-gen$exe"
 echo "Shader tools in $out:"
 ls -la "$out"

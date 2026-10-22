@@ -41,5 +41,16 @@ main :: proc() {
 		}
 		fmt.printfln("%s %s", path, compiled ? "compiled" : "up to date")
 	}
+	// Text from MSDF atlases (fonts.odin)
+	{
+		path := "shaders/text/msdf.frag"
+		messages, ok, compiled := e.Shader_CompileFile(tools, path, path, "shader_tools/build/scratch", force = len(os.args) > 1 && os.args[1] == "-force")
+		if !ok {
+			fmt.eprintln(messages)
+			failed = true
+		} else {
+			fmt.printfln("%s %s", path, compiled ? "compiled" : "up to date")
+		}
+	}
 	if failed do os.exit(1)
 }

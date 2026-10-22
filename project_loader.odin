@@ -26,6 +26,8 @@ Sprite :: struct {
 	nineSlice: string,
 	// The 9-patch's size (0: the slice's own)
 	nineSize: [2]f32,
+	// The part of `texture` it draws, in pixels: an atlas region (atlas.odin; zero: all of it)
+	region: sdl.FRect,
 }
 
 /*
@@ -122,6 +124,8 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 	Steam_Setup(game, project.steam, project.achievements[:])
 	// Local players: how many, the keyboard, the join action (players.odin)
 	Players_Setup(game, project.players)
+	// Images' filtering and fonts' MSDF atlases (asset_import.odin), before anything loads
+	ResourceManager_SetImportSettings(&game.resourceManager, project.assets[:], projectDir, project.textureFilter)
 	// Translations before anything that shows text
 	loadProjectTranslations(game, project, projectDir)
 	if project.icon != "" && game.window != nil do Game_SetWindowIcon(game, project.icon)
@@ -475,7 +479,14 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			sprite := CreateNode(scene, Sprite)
 			sprite.draw = Sprite_draw
 			sprite.getBounds = Sprite_getBounds
-			sprite.texture = loadAsset(rm, projectDir, asepriteLayersKey(node.texture, Aseprite_IsFile(node.texture) ? node.asepriteLayers : ""))
+			if Atlas_IsFile(node.texture) {
+				// A region of an atlas (atlas.odin)
+				ok: bool
+				sprite.texture, sprite.region, ok = atlasRegion(scene.game, projectDir, node.texture, node.region)
+				if !ok && node.region != "" do log.warnf("%s: %s has no region %s", node.name, node.texture, node.region)
+			} else {
+				sprite.texture = loadAsset(rm, projectDir, asepriteLayersKey(node.texture, Aseprite_IsFile(node.texture) ? node.asepriteLayers : ""))
+			}
 			spriteAllocator := Node_GetAllocator(sprite)
 			if Aseprite_IsFile(node.texture) do sprite.source = strings.clone(JoinPath(projectDir, node.texture), spriteAllocator)
 			sprite.pivotSlice = strings.clone(node.pivotSlice, spriteAllocator)

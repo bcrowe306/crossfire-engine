@@ -19,10 +19,13 @@ The tools are built by tools/build_shader_tools.sh into `shader_tools/<os>_<arch
 ShaderTools :: struct {
 	glslang: string,
 	shadercross: string,
+	// The font tool beside them (font_compile.odin; "" when that build has none)
+	msdfAtlasGen: string,
 }
 
 /*
-Finds the shader tools in a folder of builds (`<dir>/<os>_<arch>/glslang`, `shadercross`).
+Finds the shader tools in a folder of builds (`<dir>/<os>_<arch>/glslang`, `shadercross`, and
+the font tool `msdf-atlas-gen` when it's there).
 
 Inputs:
 - dir: The folder holding the `<os>_<arch>` folders (the engine's `shader_tools`, or a release's)
@@ -39,7 +42,8 @@ ShaderTools_Find :: proc(dir: string) -> (ShaderTools, bool) {
 	else do archName := "amd64"
 	exe := ODIN_OS == .Windows ? ".exe" : ""
 	folder := JoinPath(dir, fmt.tprintf("%s_%s", osName, archName))
-	tools := ShaderTools{JoinPath(folder, fmt.tprintf("glslang%s", exe)), JoinPath(folder, fmt.tprintf("shadercross%s", exe))}
+	tools := ShaderTools{JoinPath(folder, fmt.tprintf("glslang%s", exe)), JoinPath(folder, fmt.tprintf("shadercross%s", exe)), JoinPath(folder, fmt.tprintf("msdf-atlas-gen%s", exe))}
+	if !os.exists(tools.msdfAtlasGen) do tools.msdfAtlasGen = ""
 	return tools, os.exists(tools.glslang) && os.exists(tools.shadercross)
 }
 

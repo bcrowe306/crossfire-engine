@@ -105,6 +105,8 @@ Game :: struct {
 	// Animation sets read so far, by path (nil: couldn't be read); in the game's memory
 	// (animation_sets.odin)
 	animationSets: map[string]^AnimationSetData,
+	// Atlases read so far, by path (nil: couldn't be read); in the game's memory (atlas.odin)
+	atlases: map[string]^AtlasData,
 	// Scene changes with transitions, scenes over scenes, the loading screen (scene_flow.odin)
 	flow: SceneFlow,
 	// The live link with an editor (live.odin; nil unless the player runs with `--live`)
@@ -271,6 +273,7 @@ Game_Destroy :: proc(game: ^Game) {
 	game.components = nil
 	Game_ForgetAseprites(game)
 	game.animationSets = nil
+	game.atlases = nil
 	game.sceneFiles = nil
 	Game_ForgetLDtk(game)
 	Audio_DestroyBuses(game)

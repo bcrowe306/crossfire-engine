@@ -188,7 +188,7 @@ Sprite_Origin :: proc(node: ^Node) -> [2]f32 {
 spritePicture :: proc(node: ^Node) -> (source, pivot: string, frame: int, size: [2]f32) {
 	if Node_Is(node, Sprite) {
 		s := cast(^Sprite)node
-		if s.texture != nil do size = {f32(s.texture.w), f32(s.texture.h)}
+		size = spriteSize(s)
 		return s.source, s.pivotSlice, 0, size
 	}
 	if Node_Is(node, AnimatedSprite) {
@@ -206,7 +206,7 @@ spritePicture :: proc(node: ^Node) -> (source, pivot: string, frame: int, size: 
 Sprite_draw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	sprite := cast(^Sprite)node
 	if sprite.texture == nil do return
-	size := [2]f32{f32(sprite.texture.w), f32(sprite.texture.h)}
+	size := spriteSize(sprite)
 	if sprite.nineSlice != "" && sprite.source != "" {
 		if key, ok := Aseprite_SliceAt(Game_LoadAseprite(sprite.scene.game, sprite.source), sprite.nineSlice, 0); ok {
 			drawNineSlice(renderer, sprite.texture, key, nineSize(sprite, key))
@@ -214,7 +214,17 @@ Sprite_draw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 		}
 	}
 	origin := Sprite_Origin(node)
-	DrawTexture(renderer, sprite.texture, {-origin.x, -origin.y, size.x, size.y})
+	// An atlas region: that part of the picture
+	src: Maybe(sdl.FRect) = sprite.region.w > 0 ? sprite.region : nil
+	DrawTexture(renderer, sprite.texture, {-origin.x, -origin.y, size.x, size.y}, src = src)
+}
+
+// What a sprite draws: its atlas region's size, else its texture's
+@(private="file")
+spriteSize :: proc(sprite: ^Sprite) -> [2]f32 {
+	if sprite.region.w > 0 && sprite.region.h > 0 do return {sprite.region.w, sprite.region.h}
+	if sprite.texture == nil do return {}
+	return {f32(sprite.texture.w), f32(sprite.texture.h)}
 }
 
 @(private)
@@ -228,7 +238,8 @@ Sprite_getBounds :: proc(node: ^Node) -> (sdl.FRect, bool) {
 		}
 	}
 	origin := Sprite_Origin(node)
-	return {-origin.x, -origin.y, f32(sprite.texture.w), f32(sprite.texture.h)}, true
+	size := spriteSize(sprite)
+	return {-origin.x, -origin.y, size.x, size.y}, true
 }
 
 // A 9-patch's size: the sprite's, else the slice's own
