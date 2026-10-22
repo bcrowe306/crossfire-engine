@@ -249,6 +249,7 @@ SCENE_NODE_TYPES := [SceneNodeKind]typeid{
 	.Bone2D          = Bone2D,
 	.SkinnedMesh     = SkinnedMesh,
 	.IKChain         = IKChain,
+	.DialogueBox     = DialogueBox,
 }
 
 /*
@@ -671,6 +672,11 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			n = CreateSkinnedMesh(scene, texture, node.mesh, region)
 		case .IKChain:
 			n = CreateIKChain(scene, node.ikTip, node.ikTarget, node.ik)
+		case .DialogueBox:
+			box := CreateDialogueBox(scene, node.dialogue, node.dialogueStart, node.dialogueBox)
+			// The font's text in the node's memory (the scene data goes)
+			box.settings.font = strings.clone(node.dialogueBox.font, Node_GetAllocator(box))
+			n = box
 		case .ScreenEffect:
 			fx := CreateScreenEffect(scene, "")
 			fx.includeScreenLayers = node.effectScreenLayers

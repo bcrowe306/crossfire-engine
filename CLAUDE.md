@@ -145,6 +145,10 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `gpu_particles.odin` | **GPU particles** (`ParticleSettings.gpu`, `gpuAmount`): a stateless simulation in a vertex shader (shaders/particles: each particle from its index, its cycle and the time; the emitter's path as a storage buffer), drawn with instanced quads into the emitter's own picture on SDL's GPU device (premultiplied: over or added), which the renderer draws in scene order; shared pipelines in `Game.gpuParticles` |
 | `lines_test.odin`, `gpu_particles_test.odin` | Tests: miters, round joints and caps, closed lines; a line's pixels; a trail's points following its parent, ageing out, emitting off; GPU particles drawn, following a moved emitter, stopping and finishing, started again (skipped without a GPU); the CPU fallback |
 | `screen_effects.odin` | **ScreenEffect nodes**: the scene drawn into a picture, then through each effect (`Scene.screenEffects`, two ping-pong targets in `Scene.effects`), with or without the screen layers |
+| `dialogue.odin` | **Dialogue**: `DialogueData` (`.dialogue.xml`, kind "Dialogue": nodes of steps Line / Options / Jump / Set / Command / Stop, conditions; `ParseDialogue` / `FormatDialogue` / clone / destroy / equal), Yarn-style expressions (`Dialogue_Evaluate`, `Dialogue_Interpolate`), `DialogueRunner` (`Dialogue_Start` / `Continue` / `Choose` / `Stop`), `DialogueVariables` (shared: `Game.dialogueVariables`) |
+| `yarn.odin` | **Yarn Spinner import**: `Yarn_Convert` (a `.yarn` file into a `DialogueData`: options' bodies into nodes and continuation nodes, ifs into conditions, declares into first-visit sets) |
+| `dialogue_box.odin` | **DialogueBox** node: `DialogueBoxSettings`, typed lines, options picked by ui_up / ui_down / ui_accept (or keys, clicks), `wait` and held commands, `onLine` / `onCommand` / `onFinished`; `DialogueBox_Start` / `Hold` / `Continue` / `IsPlaying`; `Game_LoadDialogue` (`Game.dialogues`) |
+| `dialogue_test.odin` | Tests: expressions, a file's round trip and played (interpolation, hidden options, commands, conditional jumps, stop), a Yarn file converted and played both ways, a DialogueBox from a scene file typing, holding a command, waiting, finishing and hiding (pixels) |
 | `skeleton.odin` | **Skeletal animation**: `Bone2D` (`length`, `Bone2D_Tip`), `Skeleton2D`, `SkinnedMesh` (`MeshData`: vertices, picture pixels, triangles, bone paths, `VertexWeights`; `SkinnedMesh_Bind` at the rest pose, `SkinnedMesh_Deform` linear blend skinning, drawn with RenderGeometry), `IKChain` (`IKSettings`; two bones exact, longer CCD; `Scene.ikChains`, `Scene_SolveIK` after nodes and tweens), weights' and triangles' text |
 | `dragonbones.odin` | **DragonBones import**: `DragonBones_Convert` (a `_ske.json` and `_tex.json` into a component's `SceneData`: Skeleton2D, Bone2D, Sprites and SkinnedMeshes per slot by zIndex, an Animator of the animations; and an `AtlasData`) |
 | `skeleton_test.odin` | Tests: bones and IK from a scene file (two bones exact, bend side, out of reach, three bones, disabled), weights' text; a mesh bending with a turned bone (vertices and pixels); a DragonBones armature converted (bones, trimmed sprite, weighted mesh, slot order, the animation), built and played (the arm at 90°, the mesh bent) |
@@ -479,6 +483,19 @@ size (or the output's); an opaque game background starts the picture and the res
 the screen, else (editors' previews draw their backdrop first) it starts transparent and blends
 over. Built-ins are `#load`ed `.frag.shader` files: rebuild them with tools/compile_shaders
 after editing their GLSL. Checked with Vulkan validation (no errors).
+
+**Dialogue** (dialogue.odin, yarn.odin, dialogue_box.odin; their doc comments have the details):
+a runner runs steps until one shows something (`dialogueRun`, capped at 10000 so a loop of jumps
+can't hang the game); the strings it shows (speaker, text, options, command) are in its allocator
+until the next run, since a box draws them across frames. Variables and node visits are a
+`DialogueVariables` the runner points at (`shared`: a game's, which every box uses) or its own;
+the game's lives on the heap with its strings and is freed by `Game_Destroy` (editors' previews
+free theirs too). Expressions are parsed and evaluated in one pass (no AST). The Yarn converter
+flattens structure instead of interpreting Yarn: an option group becomes an Options step plus an
+unconditional Jump to the continuation node (taken when the step's condition is false), each
+option body a generated node ending with a Jump there; if / elseif / else become `(cond) and
+not (earlier)` conditions on each contained step. A DialogueBox polls the ui_* actions only
+when the game has them (`Input_HasAction`: no warning in projects without).
 
 **Skeletons** (skeleton.odin, dragonbones.odin; their doc comments have the details): bones are
 plain nodes (the Animator keys them; no special bone pose state), so **the scene file's pose is the

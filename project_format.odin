@@ -143,7 +143,10 @@ Version history:
   atlases (`.atlas.xml`, kind "Atlas") and Sprite `region` (atlas.odin); skeletons: Skeleton2D,
   Bone2D (`boneLength`), SkinnedMesh (`texture`, `region`, a `<mesh vertices uvs triangles bones
   weights/>` child) and IKChain (`ikTip`, `ikTarget`, `ikLength`, `ikBend`, `ikEnabled`) nodes
-  (skeleton.odin); 2D lighting: scenes' `lighting`, `ambient`, `bodyShadows`, Light2D
+  (skeleton.odin); DialogueBox nodes (`dialogue`, `startNode`, `boxWidth`, `boxHeight`, `typeSpeed`,
+  `textSize`, `boxFont`, `boxPadding`, `boxColor`, `textColor`, `nameColor`, `pickColor`,
+  `boxAutostart`, `hideWhenDone`) and dialogue assets (`.dialogue.xml`, kind "Dialogue":
+  dialogue.odin); 2D lighting: scenes' `lighting`, `ambient`, `bodyShadows`, Light2D
   (`lightKind`, `lightColor`, `energy`, `lightRadius`, `spotAngle`, `shadows`) and LightOccluder
   (a CollisionShape's shape attributes) nodes (lighting.odin); NavRegion (`width`, `height`,
   `cellSize`, `agentRadius`, `diagonal`) and NavAgent (`speed`, `arriveDistance`, `avoidRadius`,
@@ -285,6 +288,8 @@ SceneNodeKind :: enum {
 	Bone2D,
 	SkinnedMesh,
 	IKChain,
+	// A conversation's box: lines typed out, options to choose (format 13; dialogue_box.odin)
+	DialogueBox,
 }
 
 /*
@@ -376,6 +381,7 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.Skeleton2D     = {"The root of a character's bones: animate the bones, and the pictures on them follow", .Graphics},
 	.Bone2D         = {"A bone of a skeleton: its children (pictures, more bones) move with it; key it in the Timeline", .Graphics},
 	.SkinnedMesh    = {"A picture bent over bones: a mesh whose points follow weighted bones (soft bodies, sleeves, tails)", .Graphics},
+	.DialogueBox    = {"Shows a conversation: the speaker, each line typed out, options to choose (a dialogue asset, or Yarn)", .UI},
 	.IKChain        = {"Turns a chain of bones so its tip reaches a target: arms reaching, feet planted on the ground", .Graphics},
 }
 
@@ -678,6 +684,11 @@ SceneNodeData :: struct {
 	// `ikEnabled`
 	ik: IKSettings,
 	ikTip, ikTarget: string,
+	// DialogueBox: `dialogue` (a `.dialogue.xml` asset), `startNode`, and `DialogueBoxSettings` as
+	// `boxWidth`, `boxHeight`, `typeSpeed`, `textSize`, `boxFont`, `boxPadding`, `boxColor`,
+	// `textColor`, `nameColor`, `pickColor`, `boxAutostart`, `hideWhenDone`
+	dialogue, dialogueStart: string,
+	dialogueBox: DialogueBoxSettings,
 }
 
 /*
@@ -858,6 +869,7 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	cameraTools = DEFAULT_CAMERA_TOOL_SETTINGS,
 	boneLength = 32,
 	ik = DEFAULT_IK_SETTINGS,
+	dialogueBox = DEFAULT_DIALOGUE_BOX_SETTINGS,
 }
 
 /*
@@ -1410,6 +1422,9 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		MeshData_Destroy(&node.mesh)
 		delete(node.ikTip)
 		delete(node.ikTarget)
+		delete(node.dialogue)
+		delete(node.dialogueStart)
+		delete(node.dialogueBox.font)
 		delete(node.slice)
 		delete(node.tilemap.tag)
 		for &layer in node.tilemap.painted do TileLayerData_Destroy(&layer)
@@ -1801,6 +1816,22 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		enabled = attrBool(doc, element, "ikEnabled", true),
 	}
 	node.ikTip = cloneAttr(doc, element, "ikTip", "")
+	node.dialogue = cloneAttr(doc, element, "dialogue", "")
+	node.dialogueStart = cloneAttr(doc, element, "startNode", "")
+	db := DEFAULT_DIALOGUE_BOX_SETTINGS
+	node.dialogueBox = {
+		size = {max(attrF32(doc, element, "boxWidth", db.size.x), 16), max(attrF32(doc, element, "boxHeight", db.size.y), 16)},
+		typeSpeed = max(attrF32(doc, element, "typeSpeed", db.typeSpeed), 0),
+		fontSize = max(attrF32(doc, element, "textSize", db.fontSize), 4),
+		font = cloneAttr(doc, element, "boxFont", ""),
+		padding = max(attrF32(doc, element, "boxPadding", db.padding), 0),
+		background = attrColor(doc, element, "boxColor", db.background),
+		textColor = attrColor(doc, element, "textColor", db.textColor),
+		nameColor = attrColor(doc, element, "nameColor", db.nameColor),
+		pickColor = attrColor(doc, element, "pickColor", db.pickColor),
+		autostart = attrBool(doc, element, "boxAutostart", db.autostart),
+		hideWhenDone = attrBool(doc, element, "hideWhenDone", db.hideWhenDone),
+	}
 	node.ikTarget = cloneAttr(doc, element, "ikTarget", "")
 	dn := DEFAULT_NAV_SETTINGS
 	node.nav = {

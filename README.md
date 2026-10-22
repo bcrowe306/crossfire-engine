@@ -15,7 +15,8 @@ and an overlay, physics queries and one-way platforms, levels made in the
 [LDtk](https://ldtk.io) level editor (tile layers, entities that become components or scripted
 nodes with their LDtk fields, IntGrid collision), scripts in Odin (several per node, node types of
 your own, hot reload from the editor), texture atlases, image filtering per asset, bitmap (BMFont) and
-MSDF fonts, skeletal animation (bones, skinned meshes, IK, DragonBones import), global game state with JSON saves, data resources, and a player
+MSDF fonts, skeletal animation (bones, skinned meshes, IK, DragonBones import), dialogue (a dialogue
+asset, a typewriter DialogueBox, Yarn Spinner import), global game state with JSON saves, data resources, and a player
 that runs projects made with [odin_sdl_editor](https://github.com/bcrowe306/crossfire-editor). It
 builds for Linux, Windows, macOS and the web (WebAssembly).
 

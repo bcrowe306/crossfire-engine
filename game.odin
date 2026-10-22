@@ -107,6 +107,10 @@ Game :: struct {
 	animationSets: map[string]^AnimationSetData,
 	// Atlases read so far, by path (nil: couldn't be read); in the game's memory (atlas.odin)
 	atlases: map[string]^AtlasData,
+	// Dialogues read so far, by path (nil: couldn't be read; dialogue_box.odin), and the
+	// conversations' variables every DialogueBox shares
+	dialogues: map[string]^DialogueData,
+	dialogueVariables: DialogueVariables,
 	// Scene changes with transitions, scenes over scenes, the loading screen (scene_flow.odin)
 	flow: SceneFlow,
 	// The live link with an editor (live.odin; nil unless the player runs with `--live`)
@@ -274,6 +278,8 @@ Game_Destroy :: proc(game: ^Game) {
 	Game_ForgetAseprites(game)
 	game.animationSets = nil
 	game.atlases = nil
+	game.dialogues = nil
+	DialogueVariables_Destroy(&game.dialogueVariables)
 	game.sceneFiles = nil
 	Game_ForgetLDtk(game)
 	Audio_DestroyBuses(game)
