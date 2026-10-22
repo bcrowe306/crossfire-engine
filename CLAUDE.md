@@ -454,8 +454,8 @@ take `audioTestLock` (SDL audio init/quit is process-wide).
   (0 when either is muted), stereo gains from the balance law `L = min(1, 1 - p)`, `R = min(1, 1 + p)`
   multiplied across the node's pan, a 2D player's positional pan, its bus and Master. Pitch is the
   track's frequency ratio (speed and pitch together).
-- A bus also has a `mix.Group` its players' tracks join: that's where bus effects go later. Its
-  post-mix callback meters it (audio_meter.odin).
+- A bus also has a `mix.Group` its players' tracks join. Its post-mix callback runs the bus's
+  effects (audio_effects.odin), then meters it (audio_meter.odin).
 - **Master's gain and pan go on the final mix** (the mixer's post-mix callback, gains set every
   frame by `Audio_Update`), not on the tracks: tracks carry player × bus (`Audio_Output(...,
   master = false)`), so a bus's meter reads it after its fader and Master's meter the output.
