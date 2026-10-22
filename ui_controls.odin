@@ -150,6 +150,8 @@ UISettings :: struct {
 	direction: ProgressDirection,
 	// Progress bars: the value as a percentage on it
 	showValue: bool,
+	// Progress bars: show the loading screen's progress (`Game_LoadingProgress`) instead of `value`
+	showLoading: bool,
 	// Text fields: the most characters (0: any)
 	maxLength: int,
 	// With a texture: its edges that don't stretch, in pixels (left, top, right, bottom)
@@ -972,15 +974,7 @@ press :: proc(b: ^Button) {
 	Event_Notify(&b.onPressed, b, b.settings.action)
 	game := b.scene.game
 	action := b.settings.action
-	switch {
-	case action == "":
-	case action == "quit":
-		game.shouldQuit = true
-	case strings.has_prefix(action, "scene:"):
-		if game.switchScene != nil do game->switchScene(action[len("scene:"):])
-	case:
-		log.warnf("Button %s: unknown action '%s'", b.name, action)
-	}
+	if action != "" && !Game_RunAction(game, action) do log.warnf("Button %s: unknown action '%s'", b.name, action)
 }
 
 // Typing into a focused text field: text events, Backspace, Delete, the arrows, Home, End, Enter
@@ -1094,6 +1088,7 @@ controlDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 			drawAligned(rm, c, text, font, textSize, textColor, padding, .Center)
 		}
 	case .ProgressBar:
+		if c.settings.showLoading do c.settings.value = c.settings.minValue + (c.settings.maxValue - c.settings.minValue) * Game_LoadingProgress(c.scene.game)
 		back := rect
 		DrawRoundedRectangle(renderer, &back, min(theme.cornerRadius, c.size.y * 0.5), theme.progressBackColor)
 		s := c.settings

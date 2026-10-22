@@ -103,6 +103,8 @@ Game :: struct {
 	// Animation sets read so far, by path (nil: couldn't be read); in the game's memory
 	// (animation_sets.odin)
 	animationSets: map[string]^AnimationSetData,
+	// Scene changes with transitions, scenes over scenes, the loading screen (scene_flow.odin)
+	flow: SceneFlow,
 	// The live link with an editor (live.odin; nil unless the player runs with `--live`)
 	live: ^LiveLink,
 	// How long the parts of recent frames took (live.odin)
@@ -230,6 +232,7 @@ Inputs:
 */
 Game_Destroy :: proc(game: ^Game) {
 	LiveLink_Destroy(game)
+	for len(game.flow.overlays) > 0 do Game_PopScene(game)
 	// The scene that's playing exits first, then every scene's nodes go (their scripts' destroy
 	// hooks can still reach the globals), then the globals
 	if game.currentScene != nil {
@@ -245,6 +248,7 @@ Game_Destroy :: proc(game: ^Game) {
 	game.scenes = nil
 	game.currentScene = nil
 	game.nextScenePtr = nil
+	SceneFlow_Destroy(game)
 	Globals_Destroy(game)
 	Input_Destroy(&game.input)
 	// Their memory is the game's arena, freed below
@@ -372,7 +376,8 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 		}
 		// Every visit starts fresh: a scene played before is built again from its file (switching
 		// to the current scene restarts it)
-		if game.nextScenePtr.played do Game_RebuildScene(game, game.nextScenePtr)
+		if game.nextScenePtr.played || game.nextScenePtr.unbuilt do Game_RebuildScene(game, game.nextScenePtr)
+		game.nextScenePtr.unbuilt = false
 		game.nextScenePtr.played = true
 		game.nextScenePtr.onEnter->notify(game.nextScenePtr, nil)
 		game.currentScene = game.nextScenePtr
@@ -409,13 +414,18 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 		if game.live.paused do deltaTime = 1.0 / 60
 	}
 	start := sdl.GetPerformanceCounter()
+	// A scene change's cover and loading (scene_flow.odin)
+	SceneFlow_Update(game, realDeltaTime)
 	// Globals first: the scene's nodes see what they changed this frame
 	Globals_Update(game, events, deltaTime)
 
-	// No scene yet (before the first switch) is fine: nothing to update
-	if game.currentScene != nil && game.currentScene.update != nil {
+	// No scene yet (before the first switch) is fine: nothing to update. Scenes opened over it
+	// update after it; one that pauses what's under it stops the ones below
+	base, from := SceneFlow_Updating(game)
+	if base && game.currentScene != nil && game.currentScene.update != nil {
 		game.currentScene->update(events, deltaTime)
 	}
+	for o in game.flow.overlays[from:] do if o.scene.update != nil do o.scene->update(events, deltaTime)
 	profileAdd(&game.profile.update, start)
 	if game.currentScene != nil do game.profile.nodes = len(game.currentScene.nodes)
 }
@@ -563,8 +573,12 @@ Game_Draw :: proc(game: ^Game) {
 	if game.currentScene != nil && game.currentScene.draw != nil {
 		game.currentScene->draw(game.renderer)
 	}
+	// Scenes opened over it, bottom first
+	for o in game.flow.overlays do if o.scene.draw != nil do o.scene->draw(game.renderer)
 	// Globals that draw (a HUD) go over the scene, in screen space
 	Globals_Draw(game)
+	// A scene change's cover over everything
+	SceneFlow_Draw(game)
 	if game.debugOverlay do drawDebugOverlay(game)
 }
 

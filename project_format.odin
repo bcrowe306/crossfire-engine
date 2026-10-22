@@ -147,7 +147,9 @@ Version history:
   `width`, `height`, `anchor`, `margin`, `layout`, `align`, `justify`, `columns`, `padding`,
   `spacing`, `expand`, `disabled`, `value`, `min`, `max`, `direction`, `showValue`, `maxLength`,
   `patchMargins`, `textSize`, `textAlign`, `theme`, `placeholder`, `action`: ui_controls.odin),
-  assets of kind "Theme" (`.theme.xml`: ui_theme.odin) and the project's `uiTheme`; `Animator` nodes (`autoplay`, `speed`, `<clip>` / `<track>` / `<key>`:
+  assets of kind "Theme" (`.theme.xml`: ui_theme.odin) and the project's `uiTheme`; the
+  project's `transition`, `transitionTime`, `transitionColor` and `loadingScene`, ProgressBar
+  `showLoading`, Menu and Button actions `push:<Name>` and `pop` (scene_flow.odin); `Animator` nodes (`autoplay`, `speed`, `<clip>` / `<track>` / `<key>`:
   animator.odin); LDtkLevel `oneWayValues`, `areaValues` and
   `<entity make script noScript>`. Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
@@ -879,6 +881,11 @@ ProjectData :: struct {
 	// The UI theme controls use when they and their parents name none (`uiTheme`, a `.theme.xml`
 	// asset, format 13; ui_theme.odin)
 	uiTheme: string,
+	// How scene changes look (`transition`: a `TransitionKind`, `transitionTime` seconds,
+	// `transitionColor`; format 13; scene_flow.odin)
+	transition: Transition,
+	// The scene shown while scenes load (`loadingScene`; "": none: every scene is built at start)
+	loadingScene: string,
 	// The editor's grid for this project (`<grid width="16" height="16"/>`, format 13); games
 	// don't use it
 	grid: GridSettings,
@@ -975,6 +982,12 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		startScene = cloneAttr(doc, 0, "startScene", ""),
 		locale = cloneAttr(doc, 0, "locale", ""),
 		uiTheme = cloneAttr(doc, 0, "uiTheme", ""),
+		transition = {
+			kind = attrEnum(doc, 0, "transition", DEFAULT_TRANSITION.kind),
+			duration = max(attrF32(doc, 0, "transitionTime", DEFAULT_TRANSITION.duration), 0),
+			color = attrColor(doc, 0, "transitionColor", DEFAULT_TRANSITION.color),
+		},
+		loadingScene = cloneAttr(doc, 0, "loadingScene", ""),
 		icon = cloneAttr(doc, 0, "icon", ""),
 		grid = DEFAULT_GRID_SETTINGS,
 		audioOutput = {
@@ -1166,6 +1179,7 @@ ProjectData_Destroy :: proc(project: ^ProjectData, allocator := context.allocato
 	delete(project.buses)
 	delete(project.locale)
 	delete(project.uiTheme)
+	delete(project.loadingScene)
 	delete(project.icon)
 	delete(project.name)
 	delete(project.startScene)
@@ -1565,6 +1579,7 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		maxValue = attrF32(doc, element, "max", du.maxValue),
 		direction = attrEnum(doc, element, "direction", du.direction),
 		showValue = attrBool(doc, element, "showValue", false),
+		showLoading = attrBool(doc, element, "showLoading", false),
 		maxLength = max(attrInt(doc, element, "maxLength", 0), 0),
 		textSize = max(attrF32(doc, element, "textSize", 0), 0),
 		textAlign = attrEnum(doc, element, "textAlign", du.textAlign),

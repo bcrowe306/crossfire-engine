@@ -128,8 +128,23 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 	game.projectDir = strings.clone(projectDir)
 	ok := true
 
+	// The project's transition and loading scene (scene_flow.odin). With a loading scene, only
+	// the start scene and the loading scene are built now; the others when they're entered
+	game.flow.transition = project.transition
+	delete(game.flow.loadingScene)
+	game.flow.loadingScene = strings.clone(project.loadingScene)
+	lazy := project.loadingScene != ""
 	for ref in project.scenes {
 		path := JoinPath(projectDir, ref.path)
+		if lazy && ref.name != project.startScene && ref.name != project.loadingScene {
+			scene := game->createScene(ref.name)
+			if scene != nil {
+				scene.unbuilt = true
+				if game.sceneFiles == nil do game.sceneFiles = make(map[string]string, Game_GetAllocator(game))
+				game.sceneFiles[strings.clone(ref.name, Game_GetAllocator(game))] = strings.clone(path, Game_GetAllocator(game))
+			}
+			continue
+		}
 		data, err := LoadSceneFile(path)
 		if err != .None {
 			log.errorf("Couldn't load scene '%s' from %s: %v", ref.name, path, err)
@@ -639,14 +654,7 @@ runMenuAction :: proc(menu: ^Menu, item: ^MenuItem) {
 	if item.userData == nil do return
 	action := (cast(^string)item.userData)^
 	game := menu.scene.game
-	switch {
-	case action == "quit":
-		game.shouldQuit = true
-	case strings.has_prefix(action, "scene:"):
-		game->switchScene(action[len("scene:"):])
-	case:
-		log.warnf("Unknown menu action '%s'", action)
-	}
+	if !Game_RunAction(game, action) do log.warnf("Unknown menu action '%s'", action)
 }
 
 @(private)

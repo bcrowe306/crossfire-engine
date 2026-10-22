@@ -58,6 +58,8 @@ Scene :: struct {
 	// Paused (`Scene_SetPaused`): physics doesn't step, and only nodes whose process mode allows it
 	// update (`Node_CanProcess`); everything still draws
 	paused: bool,
+	// Not built yet: a project with a loading scene builds scenes when they're entered (scene_flow.odin)
+	unbuilt: bool,
 	// UI controls' focus and layout passes (ui_controls.odin)
 	ui: SceneUI,
 	// 2D lighting (lighting.odin): `Scene_SetLighting`

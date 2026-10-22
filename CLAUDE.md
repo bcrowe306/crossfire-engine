@@ -153,6 +153,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `aseprite_nodes.odin` | **Aseprite in a running game**: `Game_LoadAseprite` (files kept for slices and events; `Game_ReloadChangedAseprites`), `Aseprite_SliceAt`, `Aseprite_FrameEvents`, `Aseprite_LayersNamed`; sprites' pivot slices (`Sprite_Origin`) and 9-patches, CollisionShapes following slices (hitboxes), layer-filtered texture keys (`?layers=`); Sprite / AnimatedSprite drawing |
 | `aseprite_nodes_test.odin` | Tests (on Aseprite's files): frame events through `animation.onFrameEvent`, layers drawn, pivot and 9-patch slices, hitboxes following a moving slice (mirrored, hidden), animated tilemaps and tiles set while they play |
 | `tilemap.odin` | **TileMap nodes**: an Aseprite file's tilemap layers (`TileMapSettings`: `tilemap`, `frame`, `layers`, `tileCollision`), a `TileMapLayer` per layer drawn in one batch, collision from tile properties (`TileMap_TileCollision`: StaticBody "Collision" for solid and one-way tiles, an Area per area name), `TileMap_TileAt`, `TileMap_TileProperty`, `TileMap_Rebuild`, painted layers (`TileLayerData`), terrains (`Terrain_TileFor`, `TileGrid_PaintTerrain`, `TileMap_SetTerrain`), reloading saved files in development runs |
+| `scene_flow.odin` | **Scene changes**: transitions (`Transition`, `Game_ChangeScene`: a fade, wipes, a circle over the switch), scenes over scenes (`Game_PushScene` / `PopScene` / `TopScene`, pausing what's under them), the loading screen (`Game.flow.loadingScene`: scenes built when entered, their assets loaded a few a frame, `Game_LoadingProgress`), `Game_RunAction` (`scene:`, `push:`, `pop`, `quit` for Menus and Buttons) |
+| `scene_flow_test.odin` | Tests: a fade's halves with the switch under the cover, actions, scenes pushed over others pausing them (or not) and popped, a scene change closing them, a loading scene shown at least its minimum while an unbuilt scene loads, then built |
 | `live.odin`, `live_native.odin`, `live_web.odin` | **The live link** with an editor (the player's `--live`): commands on stdin read by a thread (`LiveLink_Start`), run at the start of each update (`LiveLink_Process`: watch, select, set, pause, resume, step), replies on stdout as `@@live` JSON lines (stats, the scene's tree, a node's properties); `GameProfile` (`Game.profile`: update, physics, draw times; nodes, drawn); `Node_WriteProperty` / `Node_Properties` (animator.odin) |
 | `live_test.odin` | Tests: watch (stats and the tree), select (a node's properties), set (and a refused value), pause holding the game, a step of 1/60 s, resume |
 | `navigation.odin` | **Navigation**: `NavRegion` (a `NavGrid` over an area, blocked by static bodies' shapes grown by an agent radius: `NavRegion_Rebuild`, `NavGrid_BlockStaticBodies`, `NavGrid_SetBlocked`), A* paths straightened by line of sight (`NavGrid_FindPath`, `NavRegion_FindPath`, `Scene_FindNavRegion`), `NavAgent` (`NavAgent_SetTarget` / `Stop`, `velocity` with arrival and separation, moving its parent; `onArrived`, `onPathFailed`) |
@@ -575,6 +577,18 @@ the build gives them a synthetic cel in the node's arena, so drawing, collision 
 edge-only set ignores them), `TileGrid_PaintTerrain` sets a cell and refits its neighbours
 (off-grid counts as the same terrain), `TileMap_SetTerrain` from code. tilemap_paint_test.odin. LDtk's tile layers still draw with their own
 code (square tiles, no diagonal flips); moving them onto `TileBatch` is a possible cleanup.
+
+**Scene changes** (scene_flow.odin; its doc comment has the details): `Game.flow` holds the
+project's transition and loading scene, the change under way (a phase machine: covering,
+showing the loading scene, loading, leaving it, uncovering) and the overlays. `SceneFlow_Update`
+runs in Game_Update before the globals; the switch itself still goes through
+`Game_SwitchScene` / `nextScenePtr` (on the next update), so `onExit` / `onEnter` and the
+rebuild of played scenes are unchanged. Overlays: `Game_Update` updates the game's scene unless
+an overlay pauses below it, then the overlays from the topmost pausing one; `Game_Draw` draws
+them after the scene and the cover (`SceneFlow_Draw`) after the globals. **A project with a
+loading scene builds only its start and loading scenes at load** (`Scene.unbuilt`, built by
+`Game_RebuildScene` when entered), so nothing else may assume every scene has its nodes at the
+start. Menu and Button actions go through `Game_RunAction`.
 
 **The live link** (live.odin; its doc comment has the details): `Game_Update` runs
 `LiveLink_Process` after input, the hitstop and file watching, before globals and the scene: a
