@@ -111,6 +111,9 @@ Game :: struct {
 	profile: GameProfile,
 	// UI themes read so far, by path (nil: couldn't be read); in the game's memory (ui_theme.odin)
 	themes: map[string]^ThemeData,
+	// Physics materials read so far, by path (nil: couldn't be read); in the game's memory
+	// (physics_material.odin)
+	physicsMaterials: map[string]^PhysicsMaterial,
 	// The project's UI theme (project.xml's `uiTheme`; "": the default), used by controls with none
 	uiTheme: string,
 	// Aseprite files read for their slices and events, by full path (aseprite_nodes.odin; each

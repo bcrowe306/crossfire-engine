@@ -154,7 +154,8 @@ Version history:
   project's `transition`, `transitionTime`, `transitionColor` and `loadingScene`, ProgressBar
   `showLoading`, Menu and Button actions `push:<Name>` and `pop` (scene_flow.odin); `Animator` nodes (`autoplay`, `speed`, `<clip>` / `<track>` / `<key>`:
   animator.odin); LDtkLevel `oneWayValues`, `areaValues` and
-  `<entity make script noScript>`. Version 12 files are valid version 13 files.
+  `<entity make script noScript>`; bodies' `material` (assets of kind "PhysicsMaterial",
+  `.material.xml`: physics_material.odin). Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
 - 11: the project's `renderer`. Version 10 files are valid version 11 files.
@@ -475,6 +476,9 @@ SceneNodeData :: struct {
 	restitution: f32,
 	// Bodies: density, for the mass of dynamic bodies (default 1)
 	density: f32,
+	// Bodies: a physics material (`.material.xml`, physics_material.odin) whose friction,
+	// restitution and density replace the three above ("": none)
+	material: string,
 	// DynamicBody: multiplies the project's gravity (default 1)
 	gravityScale: f32,
 	// DynamicBody: slows its movement over time (0: none)
@@ -1256,6 +1260,7 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.tilemap.painted)
 		delete(node.component)
 		delete(node.sound)
+		delete(node.material)
 		delete(node.bus)
 		LDtkLevelSettings_Destroy(&node.ldtk)
 		delete(node.tilemap.file)
@@ -1525,6 +1530,7 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.friction = attrF32(doc, element, "friction", DEFAULT_SCENE_NODE.friction)
 	node.restitution = attrF32(doc, element, "restitution", DEFAULT_SCENE_NODE.restitution)
 	node.density = attrF32(doc, element, "density", DEFAULT_SCENE_NODE.density)
+	node.material = cloneAttr(doc, element, "material", "")
 	node.gravityScale = attrF32(doc, element, "gravityScale", DEFAULT_SCENE_NODE.gravityScale)
 	node.linearDamping = attrF32(doc, element, "linearDamping", 0)
 	node.angularDamping = attrF32(doc, element, "angularDamping", 0)

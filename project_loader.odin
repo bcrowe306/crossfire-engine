@@ -627,6 +627,10 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			body.friction = node.friction
 			body.restitution = node.restitution
 			body.density = node.density
+			// A shared material replaces the body's own surface and density
+			if node.material != "" {
+				if material, ok := Game_LoadPhysicsMaterial(scene.game, node.material); ok do PhysicsBody_SetMaterial(body, material)
+			}
 		}
 
 		n.name = strings.clone(node.name, Node_GetAllocator(n))
