@@ -154,6 +154,8 @@ Camera2D :: struct {
 	move: CameraMove,
 	// Active `Camera2D_Shake`
 	shake: CameraShake,
+	// Active `Camera2D_ZoomTo` (the zoom in `from.x` / `to.x`: camera_tools.odin)
+	zoomMove: CameraMove,
 	// A `Camera2D_MoveTo` pan reached its end (not when replaced or cancelled)
 	onPanFinished: EventSubject `event:"A timed pan (Camera2D_MoveTo) reached its end"`,
 	// A `Camera2D_Shake` settled

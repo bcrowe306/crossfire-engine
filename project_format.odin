@@ -143,7 +143,9 @@ Version history:
   (`lightKind`, `lightColor`, `energy`, `lightRadius`, `spotAngle`, `shadows`) and LightOccluder
   (a CollisionShape's shape attributes) nodes (lighting.odin); NavRegion (`width`, `height`,
   `cellSize`, `agentRadius`, `diagonal`) and NavAgent (`speed`, `arriveDistance`, `avoidRadius`,
-  `autoMove`) nodes (navigation.odin); StateMachine nodes (`start`, `animates`, `<param>`,
+  `autoMove`) nodes (navigation.odin); ParallaxLayer (`factorX`, `factorY`, `repeatX`,
+  `repeatY`), CameraZone (`width`, `height`, `zoneTransition`) and CameraView (`width`, `height`,
+  `viewCamera`, `viewZoom`, `border`) nodes (camera_tools.odin); StateMachine nodes (`start`, `animates`, `<param>`,
   `<state>`, `<transition>`: state_machine.odin); UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText:
   `width`, `height`, `anchor`, `margin`, `layout`, `align`, `justify`, `columns`, `padding`,
   `spacing`, `expand`, `disabled`, `value`, `min`, `max`, `direction`, `showValue`, `maxLength`,
@@ -238,6 +240,11 @@ SceneNodeKind :: enum {
 	// A state machine: states, transitions on parameters, animations per state (format 13;
 	// state_machine.odin)
 	StateMachine,
+	// Camera tools (format 13; camera_tools.odin): a background moving slower than the world; a
+	// room the camera stays inside; another camera's view in a rectangle
+	ParallaxLayer,
+	CameraZone,
+	CameraView,
 	// UI controls (format 13; ui_controls.odin): a box laying out controls; a button; a bar
 	// showing a value; a line of text to type; a scrolling column; text with colors and sizes
 	Panel,
@@ -321,6 +328,9 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.ScrollBox      = {"A column of controls that scrolls: long lists, inventories, credits", .UI},
 	.RichText       = {"Text with colors and sizes that wraps: dialogue, descriptions, tooltips", .UI},
 	.Light2D        = {"A light in a lit scene: a point or a spot cone, colored, with shadows from occluders", .Graphics},
+	.ParallaxLayer  = {"A background that moves slower than the world as the camera moves (depth), tiled if asked: skies, hills", .Graphics},
+	.CameraZone     = {"A room the camera stays inside while it's in it; moving to another slides the view over", .Scene},
+	.CameraView     = {"What another camera sees, in a rectangle on the screen: split screen, minimaps, picture in picture", .Graphics},
 	.StateMachine   = {"Keeps one of a set of states (idle, run, jump) and moves between them on conditions; plays each state's animation", .Scene},
 	.NavRegion      = {"Where characters can walk: a grid over an area, blocked by static bodies, for finding paths", .Scene},
 	.NavAgent       = {"Finds paths through a NavRegion and moves its parent along them, around other agents", .Scene},
@@ -575,6 +585,12 @@ SceneNodeData :: struct {
 	// `<state name animation x y>`, `<transition from to when after onFinished>` children
 	// (state_machine.odin)
 	stateMachine: StateMachineSettings,
+	// ParallaxLayer (`factorX`, `factorY`, `repeatX`, `repeatY`; its image `texture`), CameraZone
+	// (`width`, `height`, `zoneTransition`), CameraView (`width`, `height`, `viewCamera`,
+	// `viewZoom`, `border`): camera_tools.odin
+	cameraTools: CameraToolSettings,
+	// CameraView: the Camera node it shows (a path from it)
+	viewCamera: string,
 }
 
 /*
@@ -752,6 +768,7 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	ui = DEFAULT_UI_SETTINGS,
 	light = DEFAULT_LIGHT_SETTINGS,
 	nav = DEFAULT_NAV_SETTINGS,
+	cameraTools = DEFAULT_CAMERA_TOOL_SETTINGS,
 }
 
 /*
@@ -1246,6 +1263,7 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		AnimatorSettings_Destroy(&node.animator)
 		UISettings_Destroy(&node.ui)
 		StateMachineSettings_Destroy(&node.stateMachine)
+		delete(node.viewCamera)
 	}
 	delete(scene.nodes)
 	delete(scene.name)
@@ -1558,6 +1576,16 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 			transitions = make([dynamic]StateMachineTransition),
 		}
 	}
+	dc := DEFAULT_CAMERA_TOOL_SETTINGS
+	node.cameraTools = {
+		factor = {attrF32(doc, element, "factorX", dc.factor.x), attrF32(doc, element, "factorY", dc.factor.y)},
+		repeatX = attrBool(doc, element, "repeatX", false),
+		repeatY = attrBool(doc, element, "repeatY", false),
+		transition = max(attrF32(doc, element, "zoneTransition", dc.transition), 0),
+		zoom = max(attrF32(doc, element, "viewZoom", dc.zoom), 0.01),
+		border = max(attrF32(doc, element, "border", dc.border), 0),
+	}
+	node.viewCamera = cloneAttr(doc, element, "viewCamera", "")
 	dn := DEFAULT_NAV_SETTINGS
 	node.nav = {
 		cellSize = max(attrF32(doc, element, "cellSize", dn.cellSize), 1),

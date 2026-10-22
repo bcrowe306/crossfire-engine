@@ -64,6 +64,8 @@ Scene :: struct {
 	ui: SceneUI,
 	// 2D lighting (lighting.odin): `Scene_SetLighting`
 	lighting: SceneLighting,
+	// Camera zones' bounds (camera_tools.odin)
+	cameraZones: CameraZoneState,
 	// It has been the current scene before: entering it again rebuilds it from its file
 	// (Game.sceneFiles), so every visit starts fresh
 	played: bool,
@@ -420,9 +422,12 @@ Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 
 	// After nodes have moved the camera (e.g. following a player), advance any pan and keep
 	// it inside its bounds
+	// Camera zones and zooms (camera_tools.odin), then the clamp, then parallax layers follow
+	CameraTools_Update(scene, deltaTime)
 	if scene.camera != nil && scene.game != nil {
 		Camera2D_Update(scene.camera, scene.game.size, deltaTime)
 	}
+	CameraTools_Parallax(scene)
 }
 
 /*

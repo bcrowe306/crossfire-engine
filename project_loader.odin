@@ -229,6 +229,9 @@ SCENE_NODE_TYPES := [SceneNodeKind]typeid{
 	.NavRegion       = NavRegion,
 	.NavAgent        = NavAgent,
 	.StateMachine    = StateMachine,
+	.ParallaxLayer   = ParallaxLayer,
+	.CameraZone      = CameraZone,
+	.CameraView      = CameraView,
 }
 
 /*
@@ -583,6 +586,19 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			n = ldtkBuildNode(scene, &node, projectDir, attachScripts, depth)
 		case .TileMap:
 			n = tileMapBuildNode(scene, &node, projectDir)
+		case .ParallaxLayer:
+			layer := CreateParallaxLayer(scene, node.texture != "" ? loadAsset(rm, projectDir, node.texture) : nil, node.cameraTools.factor)
+			layer.settings = node.cameraTools
+			n = layer
+		case .CameraZone:
+			zone := CreateCameraZone(scene, node.shapeSize)
+			zone.settings = node.cameraTools
+			n = zone
+		case .CameraView:
+			view := CreateCameraView(scene, node.shapeSize, "")
+			view.cameraPath = strings.clone(node.viewCamera, Node_GetAllocator(view))
+			view.settings = node.cameraTools
+			n = view
 		case .StateMachine:
 			n = CreateStateMachine(scene, node.stateMachine)
 		case .NavRegion:

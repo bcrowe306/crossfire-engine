@@ -153,6 +153,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `aseprite_nodes.odin` | **Aseprite in a running game**: `Game_LoadAseprite` (files kept for slices and events; `Game_ReloadChangedAseprites`), `Aseprite_SliceAt`, `Aseprite_FrameEvents`, `Aseprite_LayersNamed`; sprites' pivot slices (`Sprite_Origin`) and 9-patches, CollisionShapes following slices (hitboxes), layer-filtered texture keys (`?layers=`); Sprite / AnimatedSprite drawing |
 | `aseprite_nodes_test.odin` | Tests (on Aseprite's files): frame events through `animation.onFrameEvent`, layers drawn, pivot and 9-patch slices, hitboxes following a moving slice (mirrored, hidden), animated tilemaps and tiles set while they play |
 | `tilemap.odin` | **TileMap nodes**: an Aseprite file's tilemap layers (`TileMapSettings`: `tilemap`, `frame`, `layers`, `tileCollision`), a `TileMapLayer` per layer drawn in one batch, collision from tile properties (`TileMap_TileCollision`: StaticBody "Collision" for solid and one-way tiles, an Area per area name), `TileMap_TileAt`, `TileMap_TileProperty`, `TileMap_Rebuild`, painted layers (`TileLayerData`), terrains (`Terrain_TileFor`, `TileGrid_PaintTerrain`, `TileMap_SetTerrain`), reloading saved files in development runs |
+| `camera_tools.odin` | **Camera tools**: `ParallaxLayer` (an image and children following the camera by a factor, tiled across the screen), `CameraZone` (rooms bounding the camera, sliding between them: `Scene.cameraZones`), `Camera2D_ZoomTo` (smooth zoom: `Camera2D.zoomMove`), `CameraView` (another Camera's view drawn into a rectangle: split screen, minimaps) |
+| `camera_tools_test.odin` | Tests: a parallax layer moving by its factor, zone bounds and the slide between rooms, a smooth zoom, a camera view's pixels (its scene's background inside, its border) |
 | `state_machine.odin` | **State machines**: `StateMachine` (`StateMachineSettings`: parameters Float / Bool / Trigger, states with an animation, transitions with a condition, `after`, `onFinished`, `*` from any state), `StateMachine_SetFloat` / `SetBool` / `SetTrigger`, `Current`, `Is`, `Travel`, `TimeInState`, `StateMachine_ConditionProblem` (for editors); `onStateEntered`, `onStateExited`; the `state` property |
 | `state_machine_test.odin` | Tests: parameters moving it (and back), a trigger spent once from any state, waiting for an attack animation's end, `after`, travel, the state read and written as a property, events, conditions checked |
 | `scene_flow.odin` | **Scene changes**: transitions (`Transition`, `Game_ChangeScene`: a fade, wipes, a circle over the switch), scenes over scenes (`Game_PushScene` / `PopScene` / `TopScene`, pausing what's under them), the loading screen (`Game.flow.loadingScene`: scenes built when entered, their assets loaded a few a frame, `Game_LoadingProgress`), `Game_RunAction` (`scene:`, `push:`, `pop`, `quit` for Menus and Buttons) |
@@ -579,6 +581,17 @@ the build gives them a synthetic cel in the node's arena, so drawing, collision 
 edge-only set ignores them), `TileGrid_PaintTerrain` sets a cell and refits its neighbours
 (off-grid counts as the same terrain), `TileMap_SetTerrain` from code. tilemap_paint_test.odin. LDtk's tile layers still draw with their own
 code (square tiles, no diagonal flips); moving them onto `TileBatch` is a possible cleanup.
+
+**Camera tools** (camera_tools.odin; its doc comment has the details): `Scene_Update` runs
+`CameraTools_Update` (the zoom move, the zone the camera's position is in: its bounds set, or slid
+to over `transition`) before `Camera2D_Update`'s clamp, and `CameraTools_Parallax` after it, so
+layers place themselves for this frame's view: `position = base + (camera - cameraStart) × (1 -
+factor)`, `base` and `cameraStart` taken on the first update (editors' `syncTransforms` rewrite
+`position`, which the next update turns into `base` again only on the first: in the editor a
+layer shows where the scene starts). Tiled layers draw the tiles covering the screen mapped back
+through the draw transform (at most 4096). A **CameraView** draws its scene again into its render
+target through its camera (centered, zoom × the view's zoom) with a thread-local guard against
+drawing views inside views, and frees the target in its node's `destroy`.
 
 **State machines** (state_machine.odin; its doc comment has the details): conditions are parsed
 once into clauses (a parameter's index, an operator, a number; Bools are 1 / 0, an unknown
