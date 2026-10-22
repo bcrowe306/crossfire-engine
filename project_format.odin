@@ -1047,14 +1047,14 @@ GridSettings :: struct {
 	size: [2]int,
 	// A major (more opaque) line every this many cells; 0 = none (GRID_MAJOR_RANGE)
 	majorEvery: int,
-	// The lines' opacity, percent
+	// The lines' opacity, percent (the editor draws them dark gray)
 	opacity: int,
 	// The major lines' opacity, percent
 	majorOpacity: int,
 }
 
 // A project's grid without a `<grid>` element: 32 px cells, a major line every 4
-DEFAULT_GRID_SETTINGS :: GridSettings{size = {32, 32}, majorEvery = 4, opacity = 8, majorOpacity = 20}
+DEFAULT_GRID_SETTINGS :: GridSettings{size = {32, 32}, majorEvery = 4, opacity = 60, majorOpacity = 90}
 
 // The values a grid's cell size may take (parsing clamps to it)
 GRID_SIZE_RANGE :: [2]int{2, 1024}
