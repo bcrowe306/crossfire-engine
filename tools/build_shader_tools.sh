@@ -54,7 +54,9 @@ prefix="$work/install"
 # restores only sdl/lib from its cache) a static SDL of its own, built below
 sdlPrefix="$engine/sdl/build/$target/install"
 [[ -d "$sdlPrefix/lib/cmake/SDL3" ]] || sdlPrefix="$prefix"
-jobs=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+# SHADER_TOOLS_JOBS caps parallel compiles (Linux CI: zig's C++ compiler on glslang ran a
+# 4-job build out of the runner's memory, and the job was killed)
+jobs=${SHADER_TOOLS_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}
 mkdir -p "$out" "$work"
 exe=""
 [[ $os == windows ]] && exe=".exe"
