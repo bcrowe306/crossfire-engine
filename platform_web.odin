@@ -265,3 +265,8 @@ Platform_SaveDelete :: proc(name: string) {
 Platform_SetWindowIcon :: proc(window: ^sdl.Window, data: []byte) -> bool {
 	return false
 }
+
+// Writes a file: the browser has none to write (false)
+Platform_WriteFile :: proc(path: string, data: []byte) -> bool {
+	return false
+}

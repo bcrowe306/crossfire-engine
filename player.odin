@@ -98,6 +98,21 @@ Player_Setup :: proc(options: PlayerOptions, app: ^Application) -> bool {
 		log.errorf("Couldn't load project %s: %v", projectFile, err)
 		return false
 	}
+	// --restore: the snapshot's scene, unless one was named (hot_reload.odin)
+	options := options
+	restoreText = ""
+	if options.restore != "" {
+		if data, read := Platform_ReadFile(options.restore); read {
+			if snapshot, ok := Snapshot_Parse(string(data)); ok {
+				restoreText = strings.clone(string(data))
+				if options.scene == "" do options.scene = strings.clone(snapshot.scene)
+			} else {
+				log.warnf("%s isn't a snapshot: starting fresh", options.restore)
+			}
+		} else {
+			log.warnf("Couldn't read %s: starting fresh", options.restore)
+		}
+	}
 	if options.scene != "" {
 		known := false
 		for ref in playerProject.scenes do if ref.name == options.scene do known = true
@@ -135,6 +150,11 @@ Player_Setup :: proc(options: PlayerOptions, app: ^Application) -> bool {
 		if !Game_LoadProject(game, &playerProject, projectDir) {
 			log.warn("Some scenes failed to load")
 		}
+		if restoreText != "" {
+			if Game_RestoreSnapshot(game, restoreText) do log.info("Hot reload: restarted where the game was")
+			delete(restoreText)
+			restoreText = ""
+		}
 		// --quit-after: the game's frames count down to a normal quit (set here: Game_Init, which
 		// runs build, sets `update` first)
 		if quitAfter > 0 {
@@ -160,6 +180,9 @@ projectDir: string
 // Seconds left before --quit-after quits (0: no limit)
 @(private="file")
 quitAfter: f64
+// --restore's snapshot, applied once the project is loaded
+@(private="file")
+restoreText: string
 
 
 // What the player was asked to do (`Player_ParseArgs`)
@@ -187,6 +210,8 @@ PlayerOptions :: struct {
 	audioDevice: string,
 	// `--list-audio-devices`: print the playback devices' names and exit
 	listAudioDevices: bool,
+	// `--restore <file>`: start where a snapshot left off (its scene, globals, nodes: hot_reload.odin)
+	restore: string,
 }
 
 /*
@@ -245,6 +270,10 @@ Player_ParseArgs :: proc(args: []string) -> (PlayerOptions, bool) {
 		case "--scene":
 			if i + 1 >= len(args) do return options, false
 			options.scene = args[i + 1]
+			i += 1
+		case "--restore":
+			if i + 1 >= len(args) do return options, false
+			options.restore = args[i + 1]
 			i += 1
 		case "--renderer":
 			if i + 1 >= len(args) do return options, false

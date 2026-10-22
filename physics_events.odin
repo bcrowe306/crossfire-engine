@@ -279,7 +279,9 @@ notify :: proc(body, other: ^PhysicsBody, shape, otherShape: ^CollisionShape, po
 	case .Area_Exit:       subject = &body.onAreaExit
 	}
 	subject->notify(body, EventData(rawptr(&collision)))
-	if info := body.script.info; info != nil {
+	// Every script on the body
+	for s in Node_Scripts(body) {
+		info := s.info
 		hook: proc(self: rawptr, collision: ^Collision)
 		switch kind {
 		case .Collision_Enter: hook = info.collisionEnter
@@ -287,7 +289,7 @@ notify :: proc(body, other: ^PhysicsBody, shape, otherShape: ^CollisionShape, po
 		case .Area_Enter:      hook = info.areaEnter
 		case .Area_Exit:       hook = info.areaExit
 		}
-		if hook != nil do hook(body.script.data, &collision)
+		if hook != nil do hook(s.data, &collision)
 	}
 }
 

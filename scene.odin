@@ -243,6 +243,11 @@ CreateNode :: proc(scene: ^Scene, $T: typeid, addToScene: bool = true) -> ^T {
 	node := cast(^Node)newObject
 	node.id = NewEntityId()
 	node.type = T
+	// A custom node type's (custom_nodes.odin): only this node, not ones its constructor makes
+	if override := nodeTypeOverride; override != nil {
+		node.type = override.type
+		nodeTypeOverride = nil
+	}
 	node.scene = scene
 	Node_Init(node, Node_GetAllocator(node))
 	scene.index[node.id] = node
@@ -417,9 +422,13 @@ Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 		if node.update != nil {
 			node.update(node, events, deltaTime)
 		}
+		if custom := node.custom; custom.info != nil && custom.info.update != nil {
+			custom.info.update(custom.data, events, deltaTime)
+		}
 		if script := node.script; script.info != nil && script.info.update != nil {
 			script.info.update(script.data, events, deltaTime)
 		}
+		for s in node.moreScripts do if s.info.update != nil do s.info.update(s.data, events, deltaTime)
 	}
 
 	if len(scene.tweens) > 0 do Scene_UpdateTweens(scene, deltaTime)
@@ -556,7 +565,9 @@ Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transfo
 			if renderer != nil do sdl.SetRenderDrawBlendMode(renderer, SDLBlendMode(node.blendMode))
 			if node.draw != nil do node.draw(node, renderer)
 			// A script draws after its node, in the same local space
+			if node.custom.info != nil && node.custom.info.draw != nil do node.custom.info.draw(node.custom.data, renderer)
 			if item.scriptDraw != nil do item.scriptDraw(node.script.data, renderer)
+			for s in node.moreScripts do if s.info.draw != nil do s.info.draw(s.data, renderer)
 		}
 	}
 	drawState().material = nil
@@ -614,7 +625,9 @@ drawOrder :: proc(scene: ^Scene) -> [RenderLayer][dynamic]DrawItem {
 		// is the screen's
 		material := parentMaterial
 		if node.shader != nil && !Node_Is(node, ScreenEffect) do material = node.shader
-		if node.draw != nil || scriptDraw != nil {
+		moreDraw := node.custom.info != nil && node.custom.info.draw != nil
+		for s in node.moreScripts do if s.info.draw != nil do moreDraw = true
+		if node.draw != nil || scriptDraw != nil || moreDraw {
 			append(&layers[node.layer], DrawItem{node, world, tint, scriptDraw, material})
 			if node.zIndex != 0 do zIndexed^ = true
 		}

@@ -273,3 +273,13 @@ Platform_SetWindowIcon :: proc(window: ^sdl.Window, data: []byte) -> bool {
 	defer sdl.DestroySurface(surface)
 	return sdl.SetWindowIcon(window, surface)
 }
+
+/*
+Writes a file (a hot reload's snapshot: hot_reload.odin). Not the data pack: files the game makes.
+
+Returns:
+- false when it couldn't be written
+*/
+Platform_WriteFile :: proc(path: string, data: []byte) -> bool {
+	return os.write_entire_file(path, data) == nil
+}

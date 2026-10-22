@@ -651,8 +651,8 @@ Node_Properties :: proc(node: ^Node, allocator := context.allocator) -> []string
 		if p.name == "position.x" || p.name == "position.y" || p.name == "scale.x" || p.name == "scale.y" do continue
 		append(&list, p.name)
 	}
-	if node.script.info != nil {
-		for field in node.script.info.fields do if field.type != .Node {
+	for s in Node_Scripts(node) {
+		for field in s.info.fields do if field.type != .Node {
 			append(&list, strings.concatenate({ANIMATOR_SCRIPT_PREFIX, field.name}, allocator))
 		}
 	}
@@ -952,10 +952,17 @@ reparseKeys :: proc(animator: ^Animator, track: ^AnimatorTrack, kind: AnimatorVa
 
 @(private="file")
 scriptField :: proc(node: ^Node, property: string) -> (ScriptField, bool) {
-	if node.script.info == nil do return {}, false
+	field, _, ok := scriptFieldData(node, property)
+	return field, ok
+}
+
+// A script field by property ("script.speed"), and the struct of the script that has it (the
+// first of the node's scripts with a field of that name)
+@(private="file")
+scriptFieldData :: proc(node: ^Node, property: string) -> (ScriptField, rawptr, bool) {
 	name := property[len(ANIMATOR_SCRIPT_PREFIX):]
-	for field in node.script.info.fields do if field.name == name do return field, true
-	return {}, false
+	for s in Node_Scripts(node) do for field in s.info.fields do if field.name == name do return field, s.data, true
+	return {}, nil, false
 }
 
 @(private="file")
@@ -1000,9 +1007,9 @@ readProperty :: proc(node: ^Node, property: string) -> (AnimatorValue, bool) {
 		return nil, false
 	}
 	if strings.has_prefix(property, ANIMATOR_SCRIPT_PREFIX) {
-		field, ok := scriptField(node, property)
+		field, data, ok := scriptFieldData(node, property)
 		if !ok do return nil, false
-		at := rawptr(uintptr(node.script.data) + field.offset)
+		at := rawptr(uintptr(data) + field.offset)
 		#partial switch field.type {
 		case .Float: return field.odinType == f64 ? f32((cast(^f64)at)^) : (cast(^f32)at)^, true
 		case .Int: return field.odinType == i32 ? f32((cast(^i32)at)^) : f32((cast(^int)at)^), true
@@ -1081,9 +1088,9 @@ writeProperty :: proc(node: ^Node, property: string, value: AnimatorValue) {
 			return
 		}
 		if !strings.has_prefix(property, ANIMATOR_SCRIPT_PREFIX) do return
-		field, ok := scriptField(node, property)
+		field, data, ok := scriptFieldData(node, property)
 		if !ok do return
-		at := rawptr(uintptr(node.script.data) + field.offset)
+		at := rawptr(uintptr(data) + field.offset)
 		#partial switch field.type {
 		case .Float:
 			if !isF do return
@@ -1102,7 +1109,7 @@ writeProperty :: proc(node: ^Node, property: string, value: AnimatorValue) {
 		case .Bool: if b, isB := value.(bool); isB do (cast(^bool)at)^ = b
 		case .Node:
 		case:
-			if text, isText := value.(string); isText do Script_SetField(node.script.data, field, text, Node_GetAllocator(node))
+			if text, isText := value.(string); isText do Script_SetField(data, field, text, Node_GetAllocator(node))
 		}
 	}
 }

@@ -142,6 +142,8 @@ Game :: struct {
 	shaders: map[string]^ShaderProgram,
 	// GPU particles' pipelines (gpu_particles.odin)
 	gpuParticles: GPUParticleResources,
+	// A hot reload's snapshot whose nodes are still to restore (hot_reload.odin; the game's arena)
+	pendingSnapshot: string,
 	// Multiplies the time scenes and globals see: 0.5 is slow motion, 2 double speed
 	// (`Game_SetTimeScale`). 0 counts as 1, so a game that never sets it runs normally; to stop
 	// time, pause the scene (`Scene_SetPaused`)
@@ -441,6 +443,8 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 		game.currentScene->update(events, deltaTime)
 	}
 	for o in game.flow.overlays[from:] do if o.scene.update != nil do o.scene->update(events, deltaTime)
+	// A hot reload's snapshot: the nodes once the scene's scripts have had ready (hot_reload.odin)
+	if game.pendingSnapshot != "" && game.currentScene != nil do snapshotApply(game)
 	profileAdd(&game.profile.update, start)
 	if game.currentScene != nil do game.profile.nodes = len(game.currentScene.nodes)
 }

@@ -445,6 +445,19 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 
 	for &node, i in nodes {
 		n: ^Node
+		// A custom node type: the base kind's node, allocated as the bigger type (custom_nodes.odin)
+		customType: ^NodeTypeInfo
+		if node.customKind != "" {
+			customType = NodeType_Find(node.customKind)
+			if customType != nil && customType.base != node.kind {
+				log.warnf("%s: %s extends %v, not %v: built as a %v", node.name, node.customKind, customType.base, node.kind, node.kind)
+				customType = nil
+			} else if customType == nil && attachScripts {
+				log.warnf("%s: no node type named '%s' (is the project's scripts package built into this player?): built as a %v", node.name, node.customKind, node.kind)
+			}
+			if !attachScripts do customType = nil
+			nodeTypeBegin(customType)
+		}
 		switch node.kind {
 		case .Node2D:
 			n = CreateNode(scene, Node)
@@ -688,14 +701,20 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 		if node.parent >= 0 && created[node.parent] != nil {
 			Node_AddChild(created[node.parent], n)
 		}
+		if customType != nil do nodeTypeAttach(n, customType, node.customProps[:])
+		nodeTypeOverride = nil
+		// Its scripts (a component instance's join its root's own: one of each)
 		if node.script != "" && attachScripts {
-			if n.script.info != nil {
-				log.warnf("%s: its component's root has a script already; '%s' isn't attached", node.name, node.script)
-			} else if info := Script_Find(node.script); info != nil {
-				Node_AttachScript(n, info, node.props[:])
-			} else {
-				log.warnf("%s: no script named '%s' (is the project's scripts package built into this player?)", node.name, node.script)
+			attach :: proc(n: ^Node, nodeName, name: string, props: []ScriptPropData) {
+				info := Script_Find(name)
+				if info == nil {
+					log.warnf("%s: no script named '%s' (is the project's scripts package built into this player?)", nodeName, name)
+					return
+				}
+				if Node_AttachScript(n, info, props) == nil do log.warnf("%s: has the script '%s' already", nodeName, name)
 			}
+			attach(n, node.name, node.script, node.props[:])
+			for extra in node.moreScripts do attach(n, node.name, extra.name, extra.props[:])
 		}
 		created[i] = n
 	}

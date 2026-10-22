@@ -13,7 +13,8 @@ scenes or from code), tweens, pausing with per-node process modes, a time scale 
 z-index and y-sort, blend modes, render targets, groups, localization (CSV tables), debug drawing
 and an overlay, physics queries and one-way platforms, levels made in the
 [LDtk](https://ldtk.io) level editor (tile layers, entities that become components or scripted
-nodes with their LDtk fields, IntGrid collision), scripts in Odin, global game state with JSON saves, data resources, and a player
+nodes with their LDtk fields, IntGrid collision), scripts in Odin (several per node, node types of
+your own, hot reload from the editor), global game state with JSON saves, data resources, and a player
 that runs projects made with [odin_sdl_editor](https://github.com/bcrowe306/crossfire-editor). It
 builds for Linux, Windows, macOS and the web (WebAssembly).
 

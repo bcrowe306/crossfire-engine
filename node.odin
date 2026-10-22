@@ -143,8 +143,12 @@ Node :: struct {
 	inScene: bool,
 	// Set while it waits to be added (Scene_AddNode until the next Scene_ProcessQueues)
 	queued: bool,
-	// The script attached to the node, if any (script.odin)
+	// The script attached to the node, if any (script.odin), and the ones attached after it (each
+	// a different script; in its arena). Their hooks run in that order
 	script: NodeScript,
+	moreScripts: [dynamic]NodeScript,
+	// A custom node type's hooks and fields (custom_nodes.odin): its data is the node itself
+	custom: NodeScript,
 	// Scripts listening to its events, subscribed before the scene's scripts get `ready`
 	// (`Node_AddListener`, node_events.odin; in its arena)
 	listeners: [dynamic]NodeListenerData,
@@ -306,7 +310,9 @@ Inputs:
 */
 Node_Destroy :: proc(node: ^Node) {
 	if node == nil do return
+	if node.custom.info != nil && node.custom.info.destroy != nil do node.custom.info.destroy(node.custom.data)
 	if node.script.info != nil && node.script.info.destroy != nil do node.script.info.destroy(node.script.data)
+	for s in node.moreScripts do if s.info.destroy != nil do s.info.destroy(s.data)
 	if node.destroy != nil do node.destroy(node)
 	// Its shader's render states are SDL's
 	if node.shader != nil do shaderMaterialDestroy(node.shader)
@@ -326,7 +332,17 @@ allocateNode :: proc($T: typeid) -> ^T {
 	if runtime.arena_init(&arena, NODE_ARENA_BLOCK_SIZE, runtime.heap_allocator()) != nil {
 		log.panicf("Failed to allocate node %v", typeid_of(T))
 	}
-	object, err := runtime.new(T, runtime.Allocator{procedure = runtime.arena_allocator_proc, data = &arena})
+	// A custom node type (custom_nodes.odin) is bigger: the base kind's node is the start of it
+	object: ^T
+	err: runtime.Allocator_Error
+	arenaAllocator := runtime.Allocator{procedure = runtime.arena_allocator_proc, data = &arena}
+	if override := nodeTypeOverride; override != nil && override.size >= size_of(T) {
+		memory: []byte
+		memory, err = runtime.mem_alloc(override.size, max(override.align, align_of(T)), arenaAllocator)
+		object = cast(^T)raw_data(memory)
+	} else {
+		object, err = runtime.new(T, arenaAllocator)
+	}
 	if err != nil {
 		runtime.arena_destroy(&arena)
 		log.panicf("Failed to allocate node %v", typeid_of(T))

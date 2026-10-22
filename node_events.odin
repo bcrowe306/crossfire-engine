@@ -110,7 +110,11 @@ Example:
 Node_FindEvent :: proc(node: ^Node, name: string) -> ^EventSubject {
 	if node == nil do return nil
 	// Its script's ("script.onCoinCollected")
-	if strings.has_prefix(name, SCRIPT_EVENT_PREFIX) do return Script_FindEvent(node.script.data, node.script.info, name)
+	// Its scripts' ("script.onCoinCollected"): the first script that has it
+	if strings.has_prefix(name, SCRIPT_EVENT_PREFIX) {
+		for s in Node_Scripts(node) do if found := Script_FindEvent(s.data, s.info, name); found != nil do return found
+		return nil
+	}
 	for event in NodeType_Events(node.type) do if event.name == name do return cast(^EventSubject)(uintptr(node) + event.offset)
 	return nil
 }
@@ -230,6 +234,8 @@ ListenerBinding :: struct {
 	scene: ^Scene,
 	target: EntityId,
 	handler: ScriptListenerProc,
+	// The target's script that has the handler
+	scriptType: typeid,
 	// A global's event: called only while the scene plays, unsubscribed when the listening node
 	// leaves (the global outlives it)
 	global: bool,
@@ -253,6 +259,7 @@ bindListeners :: proc(node: ^Node) {
 			subject = Node_FindEvent(node, l.event)
 		}
 		handler: ScriptListenerProc
+		scriptType: typeid
 		switch {
 		case subject == nil && l.global != "":
 			log.warnf("%s: no global %s with an event '%s' (Project Settings > Globals)", node.name, l.global, l.event)
@@ -263,20 +270,30 @@ bindListeners :: proc(node: ^Node) {
 		case target.script.info == nil:
 			log.warnf("%s.%s: %s has no script to listen with", node.name, l.event, target.name)
 		case:
-			handler = Script_FindListener(target.script.info.type, l.handler)
+			// The first of the target's scripts with a handler of that name
+			for s in Node_Scripts(target) {
+				handler = Script_FindListener(s.info.type, l.handler)
+				if handler != nil {
+					scriptType = s.info.type
+					break
+				}
+			}
 			if handler == nil do log.warnf("%s.%s: %s has no handler '%s' (Script_Listener; are the scripts built?)", node.name, l.event, target.script.info.name, l.handler)
 		}
 		if handler == nil do continue
 		binding := new(ListenerBinding, Node_GetAllocator(node))
-		binding^ = {source = l.global != "" ? nil : node, scene = node.scene, target = target.id, handler = handler, global = l.global != "", subject = subject}
+		binding^ = {source = l.global != "" ? nil : node, scene = node.scene, target = target.id, handler = handler, scriptType = scriptType, global = l.global != "", subject = subject}
 		binding.handle = Event_Subscribe(subject, proc(_: ^EventSubject, _: rawptr, data: EventData, userData: rawptr) {
 			b := cast(^ListenerBinding)userData
 			// A global's event reaches only the scene that's playing (a scene left keeps its nodes
 			// until it's entered again)
 			if b.global && b.scene.game != nil && b.scene.game.currentScene != b.scene do return
 			target := Scene_GetNode(b.scene, b.target)
-			if target == nil || target.script.data == nil do return
-			b.handler(target.script.data, b.source, data)
+			if target == nil do return
+			for s in Node_Scripts(target) do if s.info.type == b.scriptType {
+				b.handler(s.data, b.source, data)
+				return
+			}
 		}, binding)
 		if binding.global {
 			// The global outlives the node: its subscription goes when the node leaves

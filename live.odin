@@ -181,6 +181,11 @@ liveCommand :: proc(game: ^Game, line: string) {
 		link.paused = false
 	case "step":
 		link.step = true
+	case "snapshot":
+		// A hot reload: the game's state into a file, for the restarted game (hot_reload.odin)
+		path := strings.trim_space(rest)
+		ok := path != "" && Platform_WriteFile(path, transmute([]byte)Game_Snapshot(game))
+		liveOutput(fmt.tprintf(`%s{{"type":"snapshot","ok":%v,"path":%q}}`, LIVE_PREFIX, ok, path))
 	case "set":
 		id, _, more := strings.partition(rest, " ")
 		property, _, value := strings.partition(more, " ")

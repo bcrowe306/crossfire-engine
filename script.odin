@@ -328,7 +328,9 @@ Returns:
 - The script's struct, or nil if the node already has one
 */
 Node_AttachScript :: proc(node: ^Node, info: ^ScriptInfo, values: []ScriptPropData) -> rawptr {
-	if node.script.info != nil do return nil
+	// One of each script: the first is `node.script`, the others `moreScripts`
+	if node.script.info == info do return nil
+	for s in node.moreScripts do if s.info == info do return nil
 	allocator := Node_GetAllocator(node)
 	data, err := runtime.mem_alloc(info.size, info.align, allocator)
 	if err != nil do return nil
@@ -337,6 +339,21 @@ Node_AttachScript :: proc(node: ^Node, info: ^ScriptInfo, values: []ScriptPropDa
 	script.node = node
 	script.scene = node.scene
 	script.game = node.scene != nil ? node.scene.game : nil
+	nodePaths := scriptInitFields(self, info, values, allocator)
+	attached := NodeScript{info = info, data = self, nodePaths = nodePaths}
+	if node.script.info == nil {
+		node.script = attached
+	} else {
+		if node.moreScripts == nil do node.moreScripts = make([dynamic]NodeScript, allocator)
+		append(&node.moreScripts, attached)
+	}
+	return self
+}
+
+// Sets a script's (or custom node's) exported fields from values, and its events up; returns its
+// node fields' paths (resolved before ready), nil without any
+@(private)
+scriptInitFields :: proc(self: rawptr, info: ^ScriptInfo, values: []ScriptPropData, allocator: runtime.Allocator) -> []string {
 	nodePaths: []string
 	initScriptEvents(self, info, allocator)
 	for field, i in info.fields {
@@ -353,8 +370,26 @@ Node_AttachScript :: proc(node: ^Node, info: ^ScriptInfo, values: []ScriptPropDa
 			_ = Script_SetField(self, field, field.defaultValue, allocator)
 		}
 	}
-	node.script = {info = info, data = self, nodePaths = nodePaths}
-	return self
+	return nodePaths
+}
+
+/*
+Every script on a node, the first one first (temp allocated).
+
+Inputs:
+- node: The node
+
+Returns:
+- Pointers to its scripts (valid until another is attached)
+*/
+Node_Scripts :: proc(node: ^Node) -> []^NodeScript {
+	if node == nil || (node.script.info == nil && node.custom.info == nil) do return nil
+	list := make([dynamic]^NodeScript, 0, 2 + len(node.moreScripts), context.temp_allocator)
+	// A custom node type's own hooks and fields first (custom_nodes.odin)
+	if node.custom.info != nil do append(&list, &node.custom)
+	if node.script.info != nil do append(&list, &node.script)
+	for &s in node.moreScripts do append(&list, &s)
+	return list[:]
 }
 
 /*
@@ -375,8 +410,10 @@ Example:
 	if player := e.Node_GetScript(node, Player); player != nil do player.lives -= 1
 */
 Node_GetScript :: proc(node: ^Node, $T: typeid) -> ^T {
-	if node == nil || node.script.info == nil || node.script.info.type != T do return nil
-	return cast(^T)node.script.data
+	if node == nil || node.script.info == nil do return nil
+	if node.script.info.type == T do return cast(^T)node.script.data
+	for s in node.moreScripts do if s.info.type == T do return cast(^T)s.data
+	return nil
 }
 
 /*
@@ -485,6 +522,14 @@ Script_DescribeJSON :: proc(allocator := context.allocator) -> string {
 		describeFields(&b, info.fields)
 		strings.write_string(&b, "}")
 	}
+	// Custom node types (custom_nodes.odin): a script's description and the kind they extend
+	strings.write_string(&b, "], \"nodeTypes\": [")
+	for info, i in NodeType_All() {
+		if i > 0 do strings.write_string(&b, ", ")
+		fmt.sbprintf(&b, "{{\"name\": %q, \"base\": %q, \"file\": %q, \"line\": %d, \"fields\": ", info.name, fmt.tprint(info.base), info.file, info.line)
+		describeFields(&b, info.fields)
+		strings.write_string(&b, "}")
+	}
 	strings.write_string(&b, "]}")
 	return strings.to_string(b)
 }
@@ -516,18 +561,22 @@ Scene_ReadyScripts :: proc(scene: ^Scene) {
 	// Listeners first, so a ready that sets something off is heard
 	for node in scene.nodes do if !node.listenersBound && len(node.listeners) > 0 do bindListeners(node)
 	for node in scene.nodes {
-		s := &node.script
-		if s.info == nil || s.ready do continue
-		s.ready = true
-		if s.nodePaths != nil do resolveNodeFields(node)
-		if s.info.ready != nil do s.info.ready(s.data)
+		if node.script.info == nil && node.custom.info == nil do continue
+		ready :: proc(node: ^Node, s: ^NodeScript) {
+			if s.ready do return
+			s.ready = true
+			if s.nodePaths != nil do resolveNodeFields(node, s)
+			if s.info.ready != nil do s.info.ready(s.data)
+		}
+		if node.custom.info != nil do ready(node, &node.custom)
+		if node.script.info != nil do ready(node, &node.script)
+		for &s in node.moreScripts do ready(node, &s)
 	}
 }
 
 // Sets a script's node fields to the nodes their paths name (Node_AttachScript kept the paths)
 @(private="file")
-resolveNodeFields :: proc(node: ^Node) {
-	s := &node.script
+resolveNodeFields :: proc(node: ^Node, s: ^NodeScript) {
 	for field, i in s.info.fields {
 		path := s.nodePaths[i]
 		if field.type != .Node || path == "" do continue

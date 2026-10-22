@@ -107,9 +107,12 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `layers.odin` | `RenderLayer` (draw order, `Layer1` first) |
 | `project_format.odin` | **Project/scene XML format spec** (doc comment) and parser: `ParseProject`, `ParseScene` → plain data (`ProjectData`, `SceneData`), no SDL; `SCENE_NODE_KINDS` (each kind's description and `SceneNodeCategory`, for tools' pickers) |
 | `project_loader.odin` | Builds scenes from parsed data: `LoadProjectFile`, `Game_LoadProject`, `Scene_Build`; data-driven `Sprite` and `AnimatedSprite` nodes; menu actions `scene:<Name>` / `quit` |
-| `script.odin` | **Scripts**: Odin game code attached to nodes. `Script_Register`, the registry, exported fields (`export:""` tags) set from scene files by reflection, `Node_AttachScript`, `Script_DescribeJSON` |
+| `script.odin` | **Scripts**: Odin game code attached to nodes. `Script_Register`, the registry, exported fields (`export:""` tags) set from scene files by reflection, `Node_AttachScript` (several per node: `node.moreScripts`), `Node_Scripts`, `Node_GetScript`, `Script_DescribeJSON` |
+| `custom_nodes.odin` | **Node types from game code**: `NodeType_Register(T, base, hooks)` (a struct embedding a built-in node type), `NodeType_Find` / `All`, the loader's override (`nodeTypeBegin` / `nodeTypeAttach`) |
+| `hot_reload.odin` | **Hot reload's snapshots**: `Game_Snapshot`, `Game_RestoreSnapshot`, `Snapshot_Parse`, `Node_NamePath`; `GAME_SNAPSHOT_VERSION` |
+| `custom_nodes_test.odin`, `hot_reload_test.odin` | Tests: a node type from a scene file (its fields, ready, hooks before the scripts), two scripts (fields, a listener on the second, Animator fields), unregistered types, the catalog; a snapshot of a game restored into a fresh one (globals, positions, script fields) |
 | `render_backend.odin` | **Renderer choice**: `RenderBackend` (Auto, OpenGL, OpenGLES2, Vulkan, GPU, Direct3D11/12, Metal, Software), `RENDER_BACKENDS` (SDL driver names, labels, platforms), `RenderBackend_Available` / `Parse`, `Application_CreateRenderer` (falls back to SDL's choice, logs the one in use) |
-| `player.odin` | `Player_Run(args)`: the whole player program (`player <project folder>`, `player --scene <name>`, `player --describe-scripts`); `Player_Setup`, shared with the web; with no folder, an exported game finds its project next to itself (`data/project.xml`) |
+| `player.odin` | `Player_Run(args)`: the whole player program (`player <project folder>`, `player --scene <name>`, `player --describe-scripts`, `player --restore <snapshot>`); `Player_Setup`, shared with the web; with no folder, an exported game finds its project next to itself (`data/project.xml`) |
 | `platform_native.odin`, `platform_web.odin` | **Platform layer** (`#+build !js` / `#+build js`): memory arenas, reading files, the executable's folder, loading textures. Code outside these files must not import `core:os`, `core:mem/virtual`, `core:path/filepath` or SDL_image: they don't build for the browser (SDL_mixer does: see "Web build") |
 | `player_web.odin` | The browser player: `odin_web_main` (called by `web/main.c`), `Web_Context` (Emscripten's malloc, a per-frame temp arena, console logger), `Player_StartWeb` (Emscripten's main loop drives `Application_Frame`) |
 | `web/` | Files the web export links: `main.c` (C `main`), `odin_env.js` and `odin_env_pre.js` (what Odin's js runtime imports from "odin_env") |
@@ -180,7 +183,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `state_machine_test.odin` | Tests: parameters moving it (and back), a trigger spent once from any state, waiting for an attack animation's end, `after`, travel, the state read and written as a property, events, conditions checked |
 | `scene_flow.odin` | **Scene changes**: transitions (`Transition`, `Game_ChangeScene`: a fade, wipes, a circle over the switch), scenes over scenes (`Game_PushScene` / `PopScene` / `TopScene`, pausing what's under them), the loading screen (`Game.flow.loadingScene`: scenes built when entered, their assets loaded a few a frame, `Game_LoadingProgress`), `Game_RunAction` (`scene:`, `push:`, `pop`, `quit` for Menus and Buttons) |
 | `scene_flow_test.odin` | Tests: a fade's halves with the switch under the cover, actions, scenes pushed over others pausing them (or not) and popped, a scene change closing them, a loading scene shown at least its minimum while an unbuilt scene loads, then built |
-| `live.odin`, `live_native.odin`, `live_web.odin` | **The live link** with an editor (the player's `--live`): commands on stdin read by a thread (`LiveLink_Start`), run at the start of each update (`LiveLink_Process`: watch, select, set, pause, resume, step), replies on stdout as `@@live` JSON lines (stats, the scene's tree, a node's properties); `GameProfile` (`Game.profile`: update, physics, draw times; nodes, drawn); `Node_WriteProperty` / `Node_Properties` (animator.odin) |
+| `live.odin`, `live_native.odin`, `live_web.odin` | **The live link** with an editor (the player's `--live`): commands on stdin read by a thread (`LiveLink_Start`), run at the start of each update (`LiveLink_Process`: watch, select, set, pause, resume, step, snapshot), replies on stdout as `@@live` JSON lines (stats, the scene's tree, a node's properties); `GameProfile` (`Game.profile`: update, physics, draw times; nodes, drawn); `Node_WriteProperty` / `Node_Properties` (animator.odin) |
 | `live_test.odin` | Tests: watch (stats and the tree), select (a node's properties), set (and a refused value), pause holding the game, a step of 1/60 s, resume |
 | `navigation.odin` | **Navigation**: `NavRegion` (a `NavGrid` over an area, blocked by static bodies' shapes grown by an agent radius: `NavRegion_Rebuild`, `NavGrid_BlockStaticBodies`, `NavGrid_SetBlocked`), A* paths straightened by line of sight (`NavGrid_FindPath`, `NavRegion_FindPath`, `Scene_FindNavRegion`), `NavAgent` (`NavAgent_SetTarget` / `Stop`, `velocity` with arrival and separation, moving its parent; `onArrived`, `onPathFailed`) |
 | `navigation_test.odin` | Tests: paths around a wall through a gap (clear legs, straightened), targets in walls, walled off, no corner cutting; a scene file's region blocked by a static body, an agent walking around it and arriving, failing outside any region |
@@ -840,11 +843,29 @@ too. Editors call it for their previews. changed_textures_reload_in_place tests 
   catalog's `hint` is the type's name. `SCENE_NODE_TYPES` (each kind's built type) and
   `SceneNodeKind_IsType` let editors offer the nodes that fit. script_nodes_test.odin.
 - Hooks are stored type-erased (`transmute` of `proc(^T)` to `proc(rawptr)`).
-- One script per node. `Scene_Build(..., attachScripts = false)` is for the editor viewport, where
-  scripts don't run.
-- **Later (decided, not built):** several scripts per node; custom node kinds registered by game code
-  (a struct embedding e.g. `e.Sprite`, used as `kind="Player"`); hot reload of scripts as a shared
-  library (`core:dynlib`) in development builds.
+- `Scene_Build(..., attachScripts = false)` is for the editor viewport, where scripts don't run.
+- **Several scripts per node** (2026-10-22): the first is `node.script`, the others
+  `node.moreScripts`, one of each type (`Node_AttachScript` refuses a second). Field setup is
+  `scriptInitFields`, shared. **Anything that runs or looks up scripts goes through
+  `Node_Scripts(node)`** (the node type's first, then the scripts in order): the update loop,
+  drawing (`drawOrder` counts their draws), destroy, ready and node fields
+  (`Scene_ReadyScripts`), collision hooks, `Node_FindEvent` ("script.x" in each), listeners
+  (`ListenerBinding.scriptType`: the handler's script found by type on each call), the Animator's
+  `script.<field>` (`scriptFieldData`: the first with the field) and `Node_GetScript`. Scene
+  files: several `<script>` children, in order.
+- **Node types from game code** (custom_nodes.odin): `NodeType_Register(Player, .Sprite, hooks)`
+  for a struct whose first field is `SCENE_NODE_TYPES[base]` (checked). The loader sees an
+  unknown `kind` with a `baseKind` (`SceneNodeData.customKind`), sets `nodeTypeOverride` (size,
+  alignment, type) before the base kind's Create, so `allocateNode` makes the bigger struct and
+  `CreateNode` records the type; `nodeTypeAttach` sets up its fields (`<prop>` children:
+  `customProps`) and `node.custom` (a NodeScript whose data is the node itself). Not registered,
+  or built without scripts (editors): the base kind. The catalog's `nodeTypes`.
+- **Hot reload** (hot_reload.odin, 2026-10-22; the user chose "restart with state", not a
+  shared library): `Game_Snapshot` (JSON: the scene, `Save_ToJSON`'s globals, every node's
+  `Node_Properties` by `Node_NamePath`), `Game_RestoreSnapshot` (globals now, nodes in
+  `snapshotApply` after the scene's first update, so `ready` doesn't undo them). The live
+  link's `snapshot <file>` writes one; `player --restore <file>` starts in its scene and applies
+  it. The editor rebuilds, snapshots, restarts. hot_reload_test.odin.
 
 ## Conventions
 

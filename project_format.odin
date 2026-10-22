@@ -165,7 +165,9 @@ Version history:
   kind "Shader" (`.frag`, compiled beside them as `.frag.shader`) and the project's `shaders`
   (shaders.odin, screen_effects.odin); Line2D and Trail2D nodes (`lineWidth`, `endWidth`,
   `lineColor`, `endColor`, `joint`, `roundCaps`, `closed`, `textureMode`, `lifetime`,
-  `minDistance`, `emitting`; a line's `points`: lines.odin). Version 12 files are valid version 13 files.
+  `minDistance`, `emitting`; a line's `points`: lines.odin); several `<script>` elements a node
+  (script.odin); custom node types (`kind="Player" baseKind="Sprite"`, `<prop>` children:
+  custom_nodes.odin). Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
 - 11: the project's `renderer`. Version 10 files are valid version 11 files.
@@ -363,6 +365,12 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.Trail2D        = {"A ribbon left behind its parent as it moves: sword swings, dashes, comets, tire tracks", .Graphics},
 }
 
+// A script after a node's first, from a scene file: its name and field values
+NodeScriptData :: struct {
+	name: string,
+	props: [dynamic]ScriptPropData,
+}
+
 /*
 A script listening to a node's event, from a scene file:
 `<listener event="onFinished" target="../Hero" handler="onBloodFinished"/>` inside the node.
@@ -485,6 +493,12 @@ SceneNodeData :: struct {
 	script: string,
 	// Any kind: the script's exported field values (its `<prop>` elements)
 	props: [dynamic]ScriptPropData,
+	// Any kind: more scripts after the first (`<script>` elements after the first, format 13)
+	moreScripts: [dynamic]NodeScriptData,
+	// A custom node type's name (`kind="Player"`, `kind` then is its `baseKind`; "" none) and its
+	// exported fields' values (`<prop name value/>` children of the node): custom_nodes.odin
+	customKind: string,
+	customProps: [dynamic]ScriptPropData,
 	// Any kind: scripts listening to its events (`<listener event target handler/>`, format 13)
 	listeners: [dynamic]NodeListenerData,
 
@@ -1329,6 +1343,15 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.script)
 		for prop in node.props { delete(prop.name); delete(prop.value) }
 		delete(node.props)
+		for &extra in node.moreScripts {
+			delete(extra.name)
+			for prop in extra.props { delete(prop.name); delete(prop.value) }
+			delete(extra.props)
+		}
+		delete(node.moreScripts)
+		delete(node.customKind)
+		for prop in node.customProps { delete(prop.name); delete(prop.value) }
+		delete(node.customProps)
 		for l in node.listeners { delete(l.event); delete(l.target); delete(l.handler); delete(l.global) }
 		delete(node.listeners)
 		delete(node.points)
@@ -1572,6 +1595,14 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node := DEFAULT_SCENE_NODE
 	node.parent = parent
 	node.kind = attrEnum(doc, element, "kind", SceneNodeKind.Node2D)
+	// A custom node type (custom_nodes.odin): `kind="Player" baseKind="Sprite"`, built as its base
+	// kind where it isn't registered
+	if kindText, found := xml.find_attribute_val_by_key(doc, element, "kind"); found {
+		if _, builtin := reflect.enum_from_name(SceneNodeKind, kindText); !builtin && kindText != "" {
+			node.customKind = strings.clone(kindText)
+			node.kind = attrEnum(doc, element, "baseKind", SceneNodeKind.Node2D)
+		}
+	}
 	node.name = cloneAttr(doc, element, "name", fmt.tprintf("%v", node.kind))
 	node.position = {attrF32(doc, element, "x", 0), attrF32(doc, element, "y", 0)}
 	node.rotation = attrF32(doc, element, "rotation", 0)
@@ -1879,16 +1910,22 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 				cloneAttr(doc, child, "handler", ""),
 				cloneAttr(doc, child, "global", ""),
 			})
+		case "prop":
+			// A custom node type's field (custom_nodes.odin)
+			append(&scene.nodes[index].customProps, ScriptPropData{cloneAttr(doc, child, "name", ""), cloneAttr(doc, child, "value", "")})
 		case "script":
-			// One per node; a second one is ignored
-			if scene.nodes[index].script != "" do continue
-			scene.nodes[index].script = cloneAttr(doc, child, "name", "")
+			// The first is the node's script; the others more scripts (each with its props)
+			props := make([dynamic]ScriptPropData)
 			for prop in childElements(doc, child) {
 				if doc.elements[prop].ident != "prop" do continue
-				append(&scene.nodes[index].props, ScriptPropData{
-					cloneAttr(doc, prop, "name", ""),
-					cloneAttr(doc, prop, "value", ""),
-				})
+				append(&props, ScriptPropData{cloneAttr(doc, prop, "name", ""), cloneAttr(doc, prop, "value", "")})
+			}
+			if scene.nodes[index].script == "" {
+				scene.nodes[index].script = cloneAttr(doc, child, "name", "")
+				delete(scene.nodes[index].props)
+				scene.nodes[index].props = props
+			} else {
+				append(&scene.nodes[index].moreScripts, NodeScriptData{cloneAttr(doc, child, "name", ""), props})
 			}
 		}
 	}
