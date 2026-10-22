@@ -1310,7 +1310,7 @@ drawCachedTiles :: proc(tiles: ^LDtkTileLayer, renderer: ^sdl.Renderer, shift: [
 // The layer's tiles at 1:1 into a new target texture (transparent elsewhere), or nil
 @(private="file")
 buildTileCache :: proc(tiles: ^LDtkTileLayer, renderer: ^sdl.Renderer, size: [2]f32) -> ^sdl.Texture {
-	texture := sdl.CreateTexture(renderer, .RGBA32, .TARGET, i32(size.x), i32(size.y))
+	texture := sdl.CreateTexture(renderer, RENDER_TARGET_FORMAT, .TARGET, i32(size.x), i32(size.y))
 	if texture == nil do return nil
 	sdl.SetTextureScaleMode(texture, .NEAREST)
 	target := RenderTarget{texture = texture, size = size}

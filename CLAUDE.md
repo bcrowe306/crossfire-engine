@@ -191,6 +191,13 @@ executable the first time it's asked for and **kept for the program's life**: SD
 streaming music and fonts from that memory. **New file loading must go through these** (or
 `Pack_Bytes`), or packed games won't find the file. The web build stubs them (it preloads files).
 
+**Render targets are `RENDER_TARGET_FORMAT` (BGRA32)** (render_target.odin; RenderTarget_Create,
+the LDtk and tile caches): SDL 3.4's Vulkan renderer picks pipelines by the swapchain's format, not
+the target's, so a target of another format (they were RGBA32) drew with pipelines for an
+incompatible render pass (Vulkan validation's `VUID-vkCmdDraw-renderPass-02684`, found by the
+editor, whose viewport draws with SDL's Vulkan renderer). Make new targets with it, and convert
+pixels read back (`sdl.ConvertSurface`) rather than assume an order.
+
 **Renderer** (render_backend.odin): the window's SDL renderer comes from the project's
 `renderer` (`Application_Setup`'s `backend`), or the player's `--renderer <name>`. It used to be
 hard-coded to "opengl"; Auto lets SDL choose, which is OpenGL on Linux too, so Linux games draw

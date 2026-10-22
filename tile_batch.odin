@@ -127,7 +127,7 @@ drawTileCache :: proc(batch: ^TileBatch, renderer: ^sdl.Renderer, lo, hi: [2]f32
 	if size.x <= 0 || size.y <= 0 || size.x > TILE_CACHE_MAX_SIZE || size.y > TILE_CACHE_MAX_SIZE do return false
 	if batch.cache == nil || batch.cacheRenderer != renderer {
 		dropTileBatchCache(batch)
-		texture := sdl.CreateTexture(renderer, .RGBA32, .TARGET, i32(size.x), i32(size.y))
+		texture := sdl.CreateTexture(renderer, RENDER_TARGET_FORMAT, .TARGET, i32(size.x), i32(size.y))
 		if texture == nil do return false
 		sdl.SetTextureScaleMode(texture, .NEAREST)
 		target := RenderTarget{texture = texture, size = size}

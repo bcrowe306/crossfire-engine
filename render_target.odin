@@ -4,6 +4,18 @@ import "core:log"
 import sdl "vendor:sdl3"
 
 /*
+The pixel format of the engine's render targets (RenderTarget_Create, tile caches): BGRA32,
+`B8G8R8A8_UNORM` on Vulkan, the format SDL's Vulkan swapchains use on nearly every platform.
+
+SDL 3.4's Vulkan renderer picks its pipelines by the swapchain's format, not the render target's
+(`VULKAN_SetDrawState` uses `surfaceFormat.format`), so drawing into a target of another format
+used pipelines made for an incompatible render pass (Vulkan validation:
+`VUID-vkCmdDraw-renderPass-02684`; it drew right on the GPUs tried, but it's undefined). Other
+renderers take any format alike. Readers convert (`sdl.ConvertSurface`): don't assume RGBA order.
+*/
+RENDER_TARGET_FORMAT :: sdl.PixelFormat.BGRA32
+
+/*
 Render targets: textures to draw into instead of the screen. Draw a scene into one (a minimap, a
 picture-in-picture, a split-screen half, a transition snapshot) or draw anything with the Draw*
 helpers between `RenderTarget_Begin` and `RenderTarget_End`; then draw its `texture` like any other
@@ -48,7 +60,7 @@ Example:
 	defer e.RenderTarget_Destroy(minimap)
 */
 RenderTarget_Create :: proc(game: ^Game, size: [2]f32, smooth := false) -> ^RenderTarget {
-	texture := sdl.CreateTexture(game.renderer, .RGBA32, .TARGET, i32(max(size.x, 1)), i32(max(size.y, 1)))
+	texture := sdl.CreateTexture(game.renderer, RENDER_TARGET_FORMAT, .TARGET, i32(max(size.x, 1)), i32(max(size.y, 1)))
 	if texture == nil {
 		log.errorf("RenderTarget_Create: %s", sdl.GetError())
 		return nil
