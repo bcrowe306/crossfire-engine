@@ -52,3 +52,9 @@ publishes the player for each as a [release](https://github.com/bcrowe306/crossf
 doc comment (`odin doc .`; the editor's code editor shows them through OLS). `CLAUDE.md`
 describes the architecture and the rules that keep the engine correct. `odin run bench -o:speed`
 measures the per-frame costs.
+
+## License
+
+MIT: see [LICENSE](LICENSE). Bundled third-party code keeps its own license: SDL and its
+satellite libraries (zlib), Box2D (MIT), FreeType through SDL_ttf (FreeType License: games should
+credit it), stb_image, msdf-atlas-gen, glslang and SDL_shadercross, and Open Sans (SIL OFL 1.1).

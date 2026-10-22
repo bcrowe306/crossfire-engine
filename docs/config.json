@@ -10,8 +10,8 @@
 			"base_url": "/engine",
 			"root_path": "../..",
 			"license": {
-				"text": "See the repository",
-				"url": "https://github.com/bcrowe306/crossfire-engine"
+				"text": "MIT",
+				"url": "https://github.com/bcrowe306/crossfire-engine/blob/main/LICENSE"
 			},
 			"home": {
 				"title": "Crossfire Engine",
