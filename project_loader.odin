@@ -120,6 +120,8 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 	Audio_SetBuses(game, project.buses[:])
 	// Steam's achievements, stats and cloud files (steam.odin: the stub until Steamworks is in)
 	Steam_Setup(game, project.steam, project.achievements[:])
+	// Local players: how many, the keyboard, the join action (players.odin)
+	Players_Setup(game, project.players)
 	// Translations before anything that shows text
 	loadProjectTranslations(game, project, projectDir)
 	if project.icon != "" && game.window != nil do Game_SetWindowIcon(game, project.icon)

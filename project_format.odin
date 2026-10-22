@@ -160,7 +160,7 @@ Version history:
   `.material.xml`: physics_material.odin); buses' `<effect>` children (audio_effects.odin) and a
   MusicPlayer's `<layer>` children (music_layers.odin); VirtualJoystick and TouchButton nodes
   (touch.odin); the project's `steamAppId`, `steamCloud` and `<achievement>` children
-  (steam.odin). Version 12 files are valid version 13 files.
+  (steam.odin); `<players max keyboard joinAction/>` (players.odin). Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
 - 11: the project's `renderer`. Version 10 files are valid version 11 files.
@@ -923,6 +923,8 @@ ProjectData :: struct {
 	// hidden/>` children (format 13)
 	steam: SteamSettings,
 	achievements: [dynamic]SteamAchievementData,
+	// Local players (players.odin): `<players max="4" keyboard="true" joinAction="join"/>`
+	players: PlayerSettings,
 	// The renderer games draw with (`renderer="Vulkan"`, format 11; Auto: SDL's choice)
 	renderer: RenderBackend,
 	// The game's window (`fullscreen`, `vsync`, `highDPI`, format 13)
@@ -1037,6 +1039,7 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 		startScene = cloneAttr(doc, 0, "startScene", ""),
 		locale = cloneAttr(doc, 0, "locale", ""),
 		steam = {appId = u32(max(attrInt(doc, 0, "steamAppId", 0), 0)), cloudSaves = attrBool(doc, 0, "steamCloud", false)},
+		players = DEFAULT_PLAYER_SETTINGS,
 		uiTheme = cloneAttr(doc, 0, "uiTheme", ""),
 		transition = {
 			kind = attrEnum(doc, 0, "transition", DEFAULT_TRANSITION.kind),
@@ -1085,6 +1088,13 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 				majorEvery = clamp(attrInt(doc, child, "majorEvery", d.majorEvery), GRID_MAJOR_RANGE[0], GRID_MAJOR_RANGE[1]),
 				opacity = clamp(attrInt(doc, child, "opacity", d.opacity), 0, 100),
 				majorOpacity = clamp(attrInt(doc, child, "majorOpacity", d.majorOpacity), 0, 100),
+			}
+		case "players":
+			d := DEFAULT_PLAYER_SETTINGS
+			project.players = {
+				maxPlayers = clamp(attrInt(doc, child, "max", d.maxPlayers), 1, MAX_LOCAL_PLAYERS),
+				keyboard = attrBool(doc, child, "keyboard", d.keyboard),
+				joinAction = cloneAttr(doc, child, "joinAction", ""),
 			}
 		case "achievement":
 			append(&project.achievements, SteamAchievementData{
@@ -1261,6 +1271,7 @@ ProjectData_Destroy :: proc(project: ^ProjectData, allocator := context.allocato
 	delete(project.buses)
 	for a in project.achievements { delete(a.name); delete(a.title); delete(a.description) }
 	delete(project.achievements)
+	delete(project.players.joinAction)
 	delete(project.locale)
 	delete(project.uiTheme)
 	delete(project.loadingScene)

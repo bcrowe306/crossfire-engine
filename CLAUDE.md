@@ -136,6 +136,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `component_test.odin` | Tests: component files, instances in scene files (names, transforms, under parents, nested), `Scene_Instantiate` |
 | `input.odin` | **Input**: keyboard, mouse and gamepad state (`Input_IsKeyPressed`, `Input_IsMouseButtonJustPressed`, `Input_GetMousePosition`, `Input_GetGamepadAxis`...) through the engine's own `Key`, `MouseButton`, `GamepadButton`, `GamepadAxis`; **actions** like Godot's input map (`Input_IsActionPressed` / `JustPressed` / `JustReleased`, `Input_GetActionStrength`, `Input_GetAxis`, `Input_GetVector`); bindings' text format; `Game.input`, updated first in `Game_Update` |
 | `touch.odin` | **Touch input and on-screen controls**: `Touch` (`Input_GetTouches` / `GetTouchCount` / `IsTouchScreen`: fingers in game coordinates, pressed / released / claimed), `VirtualJoystick` and `TouchButton` nodes (`TouchControl`: `TouchControlSettings`, actions; `CreateVirtualJoystick`, `CreateTouchButton`, `VirtualJoystick_GetVector`, `TouchButton_IsPressed`), pushing input actions |
+| `players.odin` | **Local multiplayer**: `Player` (a device: the keyboard or a gamepad by SDL id), `PlayersState` (`InputState.players`: settings, joining, events), `Players_StartJoining` / `Join` / `Leave` / `Count` / `Get`, per-player actions (`Player_IsActionPressed` / `GetVector` / `Rumble` / `DeviceName`), `SplitScreen_Rect`; project.xml's `<players>` |
+| `players_test.odin` | Tests: joining with pads and the keyboard (once each, up to the most), each player reading only its device, unplugging and plugging back, leaving and renumbering, actions added later, the join action, the keyboard off, split-screen rectangles |
 | `steam.odin` | **Steam**: achievements (project.xml's `<achievement>`), stats, cloud files (`Steam_UnlockAchievement` / `SetStat` / `StoreStats` / `CloudWrite`...), behind a `SteamBackend`; `STEAM_STUB_BACKEND` (the game's save storage) until the Steamworks SDK is in; `steamCloud` sends saves through cloud files |
 | `touch_test.odin` | Tests: touches' life, a stick pushing actions (deadzone, rescaling), two fingers on two controls, floating sticks, the mouse (not a finger's mouse), hidden and removed controls; the Steam stub's achievements, stats, cloud files, cloud saves, kept across runs |
 | `input_rebind.odin` | **Rebinding**: `Input_StartCapture` / `GetCapturedBinding` (the next key, button or stick push; actions don't press meanwhile), `Input_GetBindings` / `SetBindings` / `ActionsUsing` / `ResetBindings`, `Input_FormatBindings` / `ParseBindings` (text), `Input_SaveBindings` / `LoadBindings` (the save storage), `Input_Rumble` |
@@ -438,6 +440,16 @@ device, then every other device, and logs what it got ("Audio: <device>, 48000 H
 and what failed. The device is the machine's choice: the player's `--audio-device <name>`
 (`--list-audio-devices` prints them), the editor's Settings for Play. SDL's dummy device mixes
 in stereo whatever's asked (audio_test.odin checks the rate).
+
+**Local players** (players.odin): they live in `InputState.players` and are worked out at the end
+of `Input_Update` (only once someone joined or joining is on), which finds its game with
+`container_of(input, Game, "input")`: every InputState is a game's. Each player keeps a
+`PlayerActionState` per input action (resized when actions are added) from its device's bindings
+alone: a gamepad player's pad (bindings' own device numbers ignored), the keyboard player's keys,
+mouse and touch controls. Gamepads are told apart by `JoystickID`; an unplugged player keeps its
+slot and the next pad added goes to the first waiting (`playersGamepadAdded`). The events need
+the game's arena: `playersReady` sets them up on first use (Players_Setup, or a game without a
+project). A project without `<players>` parses as `DEFAULT_PLAYER_SETTINGS`.
 
 **Touch controls** (touch.odin): `Input_Update` keeps `InputState.touches` (finger events, which
 `ConvertEventToRenderCoordinates` puts in game coordinates like the mouse; lifted fingers stay one

@@ -227,6 +227,8 @@ InputState :: struct {
 	touchControls: [dynamic]^TouchControl,
 	// Counts updates (touch controls use the ones that updated last frame)
 	frame: u64,
+	// Local players: who plays with which device (players.odin)
+	players: PlayersState,
 }
 
 /*
@@ -702,10 +704,12 @@ Input_Update :: proc(input: ^InputState, events: []sdl.Event) {
 			if input.gamepads == nil do input.gamepads = make([dynamic]GamepadState)
 			append(&input.gamepads, GamepadState{id = event.gdevice.which, handle = handle})
 			log.infof("Gamepad %d connected: %s", len(input.gamepads) - 1, sdl.GetGamepadName(handle))
+			playersGamepadAdded(input, event.gdevice.which)
 		case .GAMEPAD_REMOVED:
 			if i := gamepadIndex(input, event.gdevice.which); i >= 0 {
 				sdl.CloseGamepad(input.gamepads[i].handle)
 				ordered_remove(&input.gamepads, i)
+				playersGamepadRemoved(input, event.gdevice.which)
 			}
 		case .GAMEPAD_BUTTON_DOWN, .GAMEPAD_BUTTON_UP:
 			i := gamepadIndex(input, event.gbutton.which)
@@ -750,6 +754,9 @@ Input_Update :: proc(input: ^InputState, events: []sdl.Event) {
 		a.down = down
 		a.strength = strength
 	}
+	// Each local player's actions from their own device, and joins (players.odin). The input is
+	// always a game's (`Game.input`)
+	if len(input.players.list) > 0 || input.players.joining do playersUpdate(input, container_of(input, Game, "input"))
 }
 
 // Closes the gamepads (Game_Destroy)
@@ -759,6 +766,7 @@ Input_Destroy :: proc(input: ^InputState) {
 	delete(input.gamepads)
 	delete(input.touches)
 	delete(input.touchControls)
+	playersDestroy(input)
 	for name in input.warned do delete(name)
 	delete(input.warned)
 	input^ = {}
@@ -924,7 +932,7 @@ gamepadsIn :: proc(input: ^InputState, device: int) -> []GamepadState {
 	return input.gamepads[device:device + 1]
 }
 
-@(private="file")
+@(private)
 gamepadIndex :: proc(input: ^InputState, id: sdl.JoystickID) -> int {
 	for pad, i in input.gamepads do if pad.id == id do return i
 	return -1
