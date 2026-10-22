@@ -34,6 +34,8 @@ AudioMeter :: struct {
 	gainLeft, gainRight: u32,
 	// Whether the gains are applied (only a mixer's meter)
 	applyGains: bool,
+	// Effects run on the block before it's measured (a bus's chain: audio_effects.odin; nil none)
+	effects: ^AudioEffectChain,
 }
 
 /*
@@ -168,6 +170,7 @@ foreign mixLib {
 @(private)
 audioMeterMeasure :: proc "contextless" (meter: ^AudioMeter, spec: ^sdl.AudioSpec, pcm: [^]f32, samples: int, apply: bool) {
 	channels := spec != nil ? max(int(spec.channels), 1) : 2
+	if meter.effects != nil && spec != nil do AudioEffects_Process(meter.effects, pcm, samples, channels, f32(spec.freq))
 	gl := apply ? transmute(f32)sync.atomic_load(&meter.gainLeft) : 1
 	gr := apply ? transmute(f32)sync.atomic_load(&meter.gainRight) : 1
 	left, right: f32

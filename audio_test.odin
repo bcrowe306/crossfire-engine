@@ -2,6 +2,7 @@
 package crossfire
 
 import "core:log"
+import "core:sync"
 import "core:testing"
 import mix "vendor:sdl3/mixer"
 import sdl "vendor:sdl3"
@@ -63,7 +64,8 @@ sound_nodes_from_scene_files :: proc(t: ^testing.T) {
 	defer ProjectData_Destroy(&project)
 	testing.expect_value(t, perr, ProjectError.None)
 	testing.expect_value(t, len(project.buses), 2)
-	testing.expect_value(t, project.buses[0], AudioBusData{"Music", 0.7, 0, true})
+	b := project.buses[0]
+	testing.expect(t, b.name == "Music" && b.volume == 0.7 && b.pan == 0 && b.mute && len(b.effects) == 0, "the Music bus")
 
 	text := `<scene formatVersion="10" name="S">
 		<node kind="AudioPlayer" name="Jump" sound="assets/jump.wav" volume="0.5" pitch="1.5" pan="-0.25" bus="Effects"/>
@@ -140,6 +142,8 @@ audio_meters_measure_and_apply :: proc(t: ^testing.T) {
 
 @(test)
 audio_output_opens_with_the_asked_format_and_falls_back :: proc(t: ^testing.T) {
+	// SDL's audio is process-wide: the audio tests take turns (audio_effects_test.odin)
+	sync.guard(&audioTestLock)
 	// SDL's dummy audio driver: a device that takes any format, on every machine
 	sdl.SetHint(sdl.HINT_AUDIO_DRIVER, "dummy")
 	if !sdl.InitSubSystem({.AUDIO}) || !mix.Init() {

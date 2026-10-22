@@ -566,6 +566,8 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			// Sounds don't play in tools that build scenes without scripts (the editor's viewport)
 			if attachScripts do AudioPlayer_SetSound(player, node.sound)
 			else do player.sound = strings.clone(node.sound, Node_GetAllocator(player))
+			// Its layers (music_layers.odin), loaded like its music
+			if attachScripts && kind == .Music do for l in node.musicLayers do MusicPlayer_AddLayer(player, l.name, l.sound, l.volume)
 			n = player
 		case .Component:
 			// The component's tree in its place; its root takes this node's name, transform,

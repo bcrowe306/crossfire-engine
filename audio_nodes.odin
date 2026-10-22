@@ -49,10 +49,12 @@ AudioBus :: struct {
 	pan: f32,
 	// Silences it (and everything on it), keeping its volume
 	mute: bool,
-	// Its SDL3_mixer group (nil without a device), where effects will go
+	// Its SDL3_mixer group (nil without a device)
 	group: ^mix.Group,
 	// Its level (`Audio_GetBusLevel`); Master's is the final mix, where its gain and pan apply
 	meter: ^AudioMeter,
+	// Its effects (audio_effects.odin), run on what it mixed before its meter
+	effects: ^AudioEffectChain,
 }
 
 // A bus in project.xml: `<bus name="Music" volume="0.8" pan="0" mute="false"/>` (format 10)
@@ -65,6 +67,8 @@ AudioBusData :: struct {
 	pan: f32,
 	// Starts muted
 	mute: bool,
+	// Its effects, in order (`<effect>` children: audio_effects.odin)
+	effects: [dynamic]AudioEffect,
 }
 
 // A sound node's settings (scene files store those that differ from DEFAULT_AUDIO_SETTINGS)
@@ -134,6 +138,10 @@ AudioPlayer :: struct {
 	paused: bool,
 	// Autostart happened this time its scene is current
 	started: bool,
+	// MusicPlayer: layers played in step with it, and songs fading out after a crossfade
+	// (music_layers.odin)
+	layers: [dynamic]MusicLayer,
+	fading: [dynamic]FadingTrack,
 	// What it played ended on its own (not looping, not stopped); noticed in its update
 	onFinished: EventSubject `event:"What it played ended on its own (not when stopped; a looping sound never ends)"`,
 }
@@ -240,7 +248,9 @@ AudioPlayer_Play :: proc(player: ^AudioPlayer) {
 	if player.kind == .Music && player.settings.fadeIn > 0 {
 		_ = sdl.SetNumberProperty(props, mix.PROP_PLAY_FADE_IN_MILLISECONDS_NUMBER, i64(player.settings.fadeIn * 1000))
 	}
-	if !mix.PlayTrack(player.track, props) do log.warnf("%s: couldn't play %s: %s", player.name, player.sound, sdl.GetError())
+	// Music with layers: they all start on the same sample (music_layers.odin)
+	played := len(player.layers) > 0 ? musicPlayTogether(player, props) : mix.PlayTrack(player.track, props)
+	if !played do log.warnf("%s: couldn't play %s: %s", player.name, player.sound, sdl.GetError())
 }
 
 /*
@@ -258,6 +268,7 @@ AudioPlayer_Stop :: proc(player: ^AudioPlayer, fade := true) {
 		fadeFrames = mix.TrackMSToFrames(player.track, i64(player.settings.fadeOut * 1000))
 	}
 	_ = mix.StopTrack(player.track, fadeFrames)
+	musicLayersStop(player, fadeFrames)
 }
 
 /*
@@ -270,6 +281,7 @@ AudioPlayer_Pause :: proc(player: ^AudioPlayer) {
 	if !player.playing do return
 	player.paused = true
 	if player.track != nil do _ = mix.PauseTrack(player.track)
+	musicLayersPause(player, true)
 }
 
 /*
@@ -282,6 +294,7 @@ AudioPlayer_Resume :: proc(player: ^AudioPlayer) {
 	if !player.paused do return
 	player.paused = false
 	if player.track != nil do _ = mix.ResumeTrack(player.track)
+	musicLayersPause(player, false)
 }
 
 /*
@@ -307,7 +320,10 @@ Inputs:
 */
 MusicPlayer_FadeOut :: proc(player: ^MusicPlayer, seconds: f32) {
 	player.playing, player.paused = false, false
-	if player.track != nil do _ = mix.StopTrack(player.track, mix.TrackMSToFrames(player.track, i64(seconds * 1000)))
+	if player.track == nil do return
+	frames := mix.TrackMSToFrames(player.track, i64(seconds * 1000))
+	_ = mix.StopTrack(player.track, frames)
+	musicLayersStop(player, frames)
 }
 
 /*
@@ -349,7 +365,9 @@ Inputs:
 */
 MusicPlayer_Seek :: proc(player: ^MusicPlayer, seconds: f32) {
 	if player.track == nil do return
-	_ = mix.SetTrackPlaybackPosition(player.track, mix.TrackMSToFrames(player.track, i64(max(seconds, 0) * 1000)))
+	frame := mix.TrackMSToFrames(player.track, i64(max(seconds, 0) * 1000))
+	_ = mix.SetTrackPlaybackPosition(player.track, frame)
+	musicLayersSeek(player, frame)
 }
 
 // BUSES
@@ -373,7 +391,15 @@ Audio_SetBuses :: proc(game: ^Game, buses: []AudioBusData) {
 		}
 		append(&game.buses, AudioBus{name = strings.clone(b.name, allocator), volume = b.volume, pan = b.pan, mute = b.mute})
 	}
-	for &b in game.buses do b.meter = new(AudioMeter, allocator)
+	for &b in game.buses {
+		b.meter = new(AudioMeter, allocator)
+		b.effects = new(AudioEffectChain, allocator)
+		b.meter.effects = b.effects
+	}
+	for b in buses {
+		bus := b.name == MASTER_BUS ? &game.buses[0] : Audio_GetBus(b.name, game)
+		if bus != nil && len(b.effects) > 0 do AudioEffects_Set(bus.effects, b.effects[:])
+	}
 	if game.mixer != nil {
 		for &b in game.buses {
 			b.group = mix.CreateGroup(game.mixer)
@@ -417,6 +443,8 @@ Audio_AddBus :: proc(name: string, volume: f32 = 1, game: ^Game = nil) -> ^Audio
 	if len(game.buses) == 0 do Audio_SetBuses(game, nil)
 	bus := AudioBus{name = strings.clone(name, Game_GetAllocator(game)), volume = volume}
 	bus.meter = new(AudioMeter, Game_GetAllocator(game))
+	bus.effects = new(AudioEffectChain, Game_GetAllocator(game))
+	bus.meter.effects = bus.effects
 	if game.mixer != nil {
 		bus.group = mix.CreateGroup(game.mixer)
 		AudioMeter_AttachGroup(bus.meter, bus.group)
@@ -555,9 +583,46 @@ Audio_SceneExited :: proc(game: ^Game, scene: ^Scene) {
 Audio_DestroyBuses :: proc(game: ^Game) {
 	if game.mixer != nil do _ = mix.SetPostMixCallback(game.mixer, nil, nil)
 	for b in game.buses do if b.group != nil do mix.DestroyGroup(b.group)
+	// After their groups are gone (nothing runs them now)
+	for b in game.buses do AudioEffects_Destroy(b.effects)
 	game.buses = nil
 	delete(game.audioPlayers)
 	game.audioPlayers = nil
+}
+
+/*
+Replaces a bus's effects (audio_effects.odin): they run on what it mixes from its next block.
+
+Inputs:
+- name: The bus ("" is Master)
+- effects: Up to AUDIO_MAX_EFFECTS, in order
+- game: The game (nil: the current game)
+
+Example:
+	// Under water: everything muffled
+	e.Audio_SetBusEffects("", {e.AudioEffect_Make(.LowPass)})
+*/
+Audio_SetBusEffects :: proc(name: string, effects: []AudioEffect, game: ^Game = nil) {
+	if b := Audio_GetBus(name, game); b != nil do AudioEffects_Set(b.effects, effects)
+}
+
+/*
+Changes one of a bus's effects (a filter swept while the game plays keeps sounding smooth).
+
+Example:
+	// Given: depth: f32
+	muffle := e.AudioEffect_Make(.LowPass)
+	muffle.cutoff = 4000 - depth * 30
+	e.Audio_SetBusEffect("Music", 0, muffle)
+*/
+Audio_SetBusEffect :: proc(name: string, index: int, effect: AudioEffect, game: ^Game = nil) {
+	if b := Audio_GetBus(name, game); b != nil do AudioEffects_SetOne(b.effects, index, effect)
+}
+
+// A bus's effects (a temp copy; none for a bus that doesn't exist)
+Audio_GetBusEffects :: proc(name: string, game: ^Game = nil) -> []AudioEffect {
+	if b := Audio_GetBus(name, game); b != nil do return AudioEffects_Get(b.effects)
+	return nil
 }
 
 // INTERNAL
@@ -569,14 +634,14 @@ balance :: proc(pan: f32) -> (left, right: f32) {
 	return min(1, 1 - p), min(1, 1 + p)
 }
 
-@(private="file")
+@(private)
 busGroup :: proc(game: ^Game, name: string) -> ^mix.Group {
 	if b := Audio_GetBus(name, game); b != nil do return b.group
 	return nil
 }
 
 // Sets the track's gain, pitch and stereo from the settings, the bus, Master and (positional) the listener
-@(private="file")
+@(private)
 applyOutput :: proc(player: ^AudioPlayer) {
 	if player.track == nil do return
 	game := player.scene.game
@@ -592,7 +657,9 @@ applyOutput :: proc(player: ^AudioPlayer) {
 	_ = mix.SetTrackGain(player.track, gain)
 	gains := mix.StereoGains{left, right}
 	_ = mix.SetTrackStereo(player.track, &gains)
-	_ = mix.SetTrackFrequencyRatio(player.track, math.clamp(player.settings.pitch, 0.01, 100))
+	pitch := math.clamp(player.settings.pitch, 0.01, 100)
+	_ = mix.SetTrackFrequencyRatio(player.track, pitch)
+	if len(player.layers) > 0 do musicLayersOutput(player, gain, gains, pitch)
 }
 
 @(private="file")
@@ -607,6 +674,7 @@ audioPlayerUpdate :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 		player.playing = false
 		Event_Notify(&player.onFinished, player, nil)
 	}
+	if player.kind == .Music do musicUpdate(player, deltaTime)
 	applyOutput(player)
 }
 
@@ -616,6 +684,7 @@ audioPlayerDestroyed :: proc(node: ^Node) {
 	if player.track != nil do mix.DestroyTrack(player.track)
 	player.track = nil
 	releaseAudio(player)
+	musicFree(player)
 	if game := player.scene != nil ? player.scene.game : nil; game != nil {
 		for p, i in game.audioPlayers {
 			if p == player {

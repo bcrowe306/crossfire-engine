@@ -155,7 +155,8 @@ Version history:
   `showLoading`, Menu and Button actions `push:<Name>` and `pop` (scene_flow.odin); `Animator` nodes (`autoplay`, `speed`, `<clip>` / `<track>` / `<key>`:
   animator.odin); LDtkLevel `oneWayValues`, `areaValues` and
   `<entity make script noScript>`; bodies' `material` (assets of kind "PhysicsMaterial",
-  `.material.xml`: physics_material.odin). Version 12 files are valid version 13 files.
+  `.material.xml`: physics_material.odin); buses' `<effect>` children (audio_effects.odin) and a
+  MusicPlayer's `<layer>` children (music_layers.odin). Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
 - 11: the project's `renderer`. Version 10 files are valid version 11 files.
@@ -554,6 +555,9 @@ SceneNodeData :: struct {
 	// and `volume`, `pitch`, `pan`, `loop`, `autostart`, `maxDistance`, `attenuation`, `fadeIn`, `fadeOut`.
 	// `sound`: the sound (or music) file, relative to the project folder
 	sound: string,
+	// MusicPlayer: layers played in step with it (`<layer name sound volume/>` children:
+	// music_layers.odin)
+	musicLayers: [dynamic]MusicLayerData,
 	// Sound nodes: the mix bus it plays through ("" for Master)
 	bus: string,
 	// Sound nodes: `volume`, `pitch`, `pan`, `loop`, `autostart`, `maxDistance`, `attenuation`,
@@ -1061,12 +1065,28 @@ ParseProject :: proc(text: string, allocator := context.allocator) -> (project: 
 				majorOpacity = clamp(attrInt(doc, child, "majorOpacity", d.majorOpacity), 0, 100),
 			}
 		case "bus":
-			append(&project.buses, AudioBusData{
+			bus := AudioBusData{
 				name = cloneAttr(doc, child, "name", MASTER_BUS),
 				volume = max(attrF32(doc, child, "volume", 1), 0),
 				pan = clamp(attrF32(doc, child, "pan", 0), -1, 1),
 				mute = attrBool(doc, child, "mute", false),
-			})
+			}
+			// Its effects, in order (audio_effects.odin)
+			for e in childElements(doc, child) do if doc.elements[e].ident == "effect" {
+				d := DEFAULT_AUDIO_EFFECT
+				append(&bus.effects, AudioEffect{
+					kind = attrEnum(doc, e, "kind", AudioEffectKind.LowPass),
+					bypass = attrBool(doc, e, "bypass", false),
+					cutoff = attrF32(doc, e, "cutoff", d.cutoff),
+					resonance = attrF32(doc, e, "resonance", d.resonance),
+					delay = attrF32(doc, e, "delay", d.delay),
+					feedback = attrF32(doc, e, "feedback", d.feedback),
+					roomSize = attrF32(doc, e, "roomSize", d.roomSize),
+					damping = attrF32(doc, e, "damping", d.damping),
+					mix = attrF32(doc, e, "mix", d.mix),
+				})
+			}
+			append(&project.buses, bus)
 		case "action":
 			action := InputActionData{
 				name = cloneAttr(doc, child, "name", ""),
@@ -1205,7 +1225,10 @@ ProjectData_Destroy :: proc(project: ^ProjectData, allocator := context.allocato
 		delete(a.bindings)
 	}
 	delete(project.actions)
-	for b in project.buses do delete(b.name)
+	for b in project.buses {
+		delete(b.name)
+		delete(b.effects)
+	}
 	delete(project.buses)
 	delete(project.locale)
 	delete(project.uiTheme)
@@ -1260,6 +1283,11 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.tilemap.painted)
 		delete(node.component)
 		delete(node.sound)
+		for l in node.musicLayers {
+			delete(l.name)
+			delete(l.sound)
+		}
+		delete(node.musicLayers)
 		delete(node.material)
 		delete(node.bus)
 		LDtkLevelSettings_Destroy(&node.ldtk)
@@ -1683,6 +1711,13 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 			parseNode(doc, child, index, scene)
 		case "animation":
 			append(&scene.nodes[index].animations, parseAnimation(doc, child))
+		case "layer":
+			// A MusicPlayer's layer (music_layers.odin)
+			append(&scene.nodes[index].musicLayers, MusicLayerData{
+				name = cloneAttr(doc, child, "name", ""),
+				sound = cloneAttr(doc, child, "sound", ""),
+				volume = max(attrF32(doc, child, "volume", 1), 0),
+			})
 		case "particles":
 			// Unknown or bad attributes keep the default
 			for a in doc.elements[child].attribs do ParticleSettings_Set(&scene.nodes[index].particles, a.key, a.val)

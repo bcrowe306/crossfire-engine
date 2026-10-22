@@ -141,6 +141,9 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `particles.odin` | **Particle emitters**: `ParticleEmitter` node (`CreateParticleEmitter`), `ParticleSettings` (every setting; tags describe them for editors: `ParticleSettings_Fields`), `ColorRamp` (stops, `ColorRamp_Evaluate` / `Sort` / `AddStop` / `RemoveStop`), Start / Stop / Clear, text format (`ParticleSettings_Get` / `Set`, `FormatParticleSettings`) |
 | `particles_test.odin` | Tests: ramps, settings text round trip, cycles and bursts, world and local space, forces, collisions with the view, scene files, batched drawing (pixels) |
 | `audio_nodes.odin` | **Sound nodes and mix buses**: `AudioPlayer` (a sound: volume, pitch, pan, loop, autostart), `AudioPlayer2D` (panned and faded by its position from the listener: the camera, else the game area's middle; `Audio_Positional`), `MusicPlayer` (streams a Music asset; fades, seek, position); `AudioSettings`; buses (`Game.buses`, Master first: `Audio_SetBuses` from project.xml, `Audio_AddBus`, `Audio_SetBusVolume` / `Pan` / `Mute`), `Audio_Output` (node × bus × Master, applied per track every frame) |
+| `audio_effects.odin` | **Bus effects**: `AudioEffect` (LowPass, HighPass, Echo, Reverb; bypass), `AudioEffectChain` per bus (`AudioEffects_Set` / `SetOne` / `Get` / `Process`), run in the bus's post-mix callback before its meter (Master's before its gains); `Audio_SetBusEffects` / `SetBusEffect` / `GetBusEffects` (audio_nodes.odin); `<effect>` children of `<bus>` |
+| `music_layers.odin` | **Adaptive music**: MusicPlayer layers (`MusicPlayer_AddLayer` / `RemoveLayer` / `SetLayerVolume` / `GetLayer`; `<layer>` children) started on the same sample (SDL3_mixer tags: `PlayTag`), `MusicPlayer_CrossfadeTo` (the old song fades out on its own track, freed when silent) |
+| `audio_effects_test.odin` | Tests: filters by frequency, echo repeats, reverb tails, bypass, a locked chain passing audio through; through an offline mixer (`MIX_CreateMixer` + `MIX_Generate`, no device): a bus's low-pass, bypassed from code, two layers in step, a crossfade; scene and project files |
 | `audio_meter.odin` | **Level meters** on SDL3_mixer's mix callbacks: `AudioMeter` (atomic peaks), `AudioMeter_AttachGroup` (a bus's group) / `AttachMixer` (the final stage: applies Master's gains, then meters), `Audio_GetBusLevel`, `AudioLevel_ToDecibels`; its own C-convention declarations of the two callback setters |
 | `audio_test.odin` | Tests: bus output (volume, pan laws, mute, unknown bus), positional volume and pan, sound nodes and buses from scene files (no device needed) |
 | `audio.odin` | SDL3_mixer setup (`Audio_Init`: no device means silence, not an error; `Audio_OpenMixer`, `AudioOutputSettings`, `Audio_PlaybackDevices`), loading, and `Game_PlaySound(game, path)` (paths relative to `game.projectDir`, cached). The same on desktop and web |
@@ -432,6 +435,16 @@ device, then every other device, and logs what it got ("Audio: <device>, 48000 H
 and what failed. The device is the machine's choice: the player's `--audio-device <name>`
 (`--list-audio-devices` prints them), the editor's Settings for Play. SDL's dummy device mixes
 in stereo whatever's asked (audio_test.odin checks the rate).
+
+**Bus effects** (audio_effects.odin): they run on the audio thread inside the bus group's
+post-mix callback (through `AudioMeter.effects`, before measuring). A chain's state (filters'
+memory, echo lines of `AUDIO_MAX_ECHO` s at `AUDIO_MAX_RATE`, reverb tanks) is allocated per
+effect kind on the main thread by `AudioEffects_Set` and swapped in under the chain's
+`Atomic_Mutex`; the audio thread only try-locks it (busy: that block passes through), so neither
+side waits. `Audio_DestroyBuses` frees chains after destroying their groups. **Music layers**
+share their player's tag and start with `PlayTag`, so they're sample-aligned; their gains are the
+player's output times the layer's volume (`musicLayersOutput` from `applyOutput`). Audio tests
+take `audioTestLock` (SDL audio init/quit is process-wide).
 
 **Sound** (audio_nodes.odin; its doc comment has the details):
 - Each player owns one SDL3_mixer track (made on first use, so no device means no track and
