@@ -228,6 +228,7 @@ SCENE_NODE_TYPES := [SceneNodeKind]typeid{
 	.LightOccluder   = LightOccluder,
 	.NavRegion       = NavRegion,
 	.NavAgent        = NavAgent,
+	.StateMachine    = StateMachine,
 }
 
 /*
@@ -582,6 +583,8 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			n = ldtkBuildNode(scene, &node, projectDir, attachScripts, depth)
 		case .TileMap:
 			n = tileMapBuildNode(scene, &node, projectDir)
+		case .StateMachine:
+			n = CreateStateMachine(scene, node.stateMachine)
 		case .NavRegion:
 			n = CreateNavRegion(scene, node.shapeSize, node.nav)
 		case .NavAgent:

@@ -96,6 +96,7 @@ ANIMATOR_PROPERTIES := [?]AnimatorProperty{
 	{"energy", .Float, "Light energy", Light2D},
 	{"lightRadius", .Float, "Light radius", Light2D},
 	{"lightColor", .Color, "Light color", Light2D},
+	{"state", .Text, "State", StateMachine},
 }
 
 // The track property that fires the Animator's `onEvent` instead of setting a value
@@ -950,6 +951,8 @@ readProperty :: proc(node: ^Node, property: string) -> (AnimatorValue, bool) {
 		if Node_Is(node, Label) do return (cast(^Label)node).text, true
 	case "color":
 		if Node_Is(node, Label) do return (cast(^Label)node).color, true
+	case "state":
+		if Node_Is(node, StateMachine) do return StateMachine_Current(cast(^StateMachine)node), true
 	case "energy":
 		if Node_Is(node, Light2D) do return (cast(^Light2D)node).settings.energy, true
 	case "lightRadius":
@@ -1020,6 +1023,10 @@ writeProperty :: proc(node: ^Node, property: string, value: AnimatorValue) {
 		}
 	case "color":
 		if Node_Is(node, Label) && isC do (cast(^Label)node).color = c
+	case "state":
+		if Node_Is(node, StateMachine) {
+			if name, isText := value.(string); isText && name != "" && name != StateMachine_Current(cast(^StateMachine)node) do StateMachine_Travel(cast(^StateMachine)node, name)
+		}
 	case "energy":
 		if Node_Is(node, Light2D) && isF do (cast(^Light2D)node).settings.energy = max(f, 0)
 	case "lightRadius":

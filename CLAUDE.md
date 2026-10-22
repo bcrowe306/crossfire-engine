@@ -153,6 +153,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `aseprite_nodes.odin` | **Aseprite in a running game**: `Game_LoadAseprite` (files kept for slices and events; `Game_ReloadChangedAseprites`), `Aseprite_SliceAt`, `Aseprite_FrameEvents`, `Aseprite_LayersNamed`; sprites' pivot slices (`Sprite_Origin`) and 9-patches, CollisionShapes following slices (hitboxes), layer-filtered texture keys (`?layers=`); Sprite / AnimatedSprite drawing |
 | `aseprite_nodes_test.odin` | Tests (on Aseprite's files): frame events through `animation.onFrameEvent`, layers drawn, pivot and 9-patch slices, hitboxes following a moving slice (mirrored, hidden), animated tilemaps and tiles set while they play |
 | `tilemap.odin` | **TileMap nodes**: an Aseprite file's tilemap layers (`TileMapSettings`: `tilemap`, `frame`, `layers`, `tileCollision`), a `TileMapLayer` per layer drawn in one batch, collision from tile properties (`TileMap_TileCollision`: StaticBody "Collision" for solid and one-way tiles, an Area per area name), `TileMap_TileAt`, `TileMap_TileProperty`, `TileMap_Rebuild`, painted layers (`TileLayerData`), terrains (`Terrain_TileFor`, `TileGrid_PaintTerrain`, `TileMap_SetTerrain`), reloading saved files in development runs |
+| `state_machine.odin` | **State machines**: `StateMachine` (`StateMachineSettings`: parameters Float / Bool / Trigger, states with an animation, transitions with a condition, `after`, `onFinished`, `*` from any state), `StateMachine_SetFloat` / `SetBool` / `SetTrigger`, `Current`, `Is`, `Travel`, `TimeInState`, `StateMachine_ConditionProblem` (for editors); `onStateEntered`, `onStateExited`; the `state` property |
+| `state_machine_test.odin` | Tests: parameters moving it (and back), a trigger spent once from any state, waiting for an attack animation's end, `after`, travel, the state read and written as a property, events, conditions checked |
 | `scene_flow.odin` | **Scene changes**: transitions (`Transition`, `Game_ChangeScene`: a fade, wipes, a circle over the switch), scenes over scenes (`Game_PushScene` / `PopScene` / `TopScene`, pausing what's under them), the loading screen (`Game.flow.loadingScene`: scenes built when entered, their assets loaded a few a frame, `Game_LoadingProgress`), `Game_RunAction` (`scene:`, `push:`, `pop`, `quit` for Menus and Buttons) |
 | `scene_flow_test.odin` | Tests: a fade's halves with the switch under the cover, actions, scenes pushed over others pausing them (or not) and popped, a scene change closing them, a loading scene shown at least its minimum while an unbuilt scene loads, then built |
 | `live.odin`, `live_native.odin`, `live_web.odin` | **The live link** with an editor (the player's `--live`): commands on stdin read by a thread (`LiveLink_Start`), run at the start of each update (`LiveLink_Process`: watch, select, set, pause, resume, step), replies on stdout as `@@live` JSON lines (stats, the scene's tree, a node's properties); `GameProfile` (`Game.profile`: update, physics, draw times; nodes, drawn); `Node_WriteProperty` / `Node_Properties` (animator.odin) |
@@ -577,6 +579,15 @@ the build gives them a synthetic cel in the node's arena, so drawing, collision 
 edge-only set ignores them), `TileGrid_PaintTerrain` sets a cell and refits its neighbours
 (off-grid counts as the same terrain), `TileMap_SetTerrain` from code. tilemap_paint_test.odin. LDtk's tile layers still draw with their own
 code (square tiles, no diagonal flips); moving them onto `TileBatch` is a possible cleanup.
+
+**State machines** (state_machine.odin; its doc comment has the details): conditions are parsed
+once into clauses (a parameter's index, an operator, a number; Bools are 1 / 0, an unknown
+parameter makes a clause that never holds, logged), transitions keep their states' indices. The
+first update enters the start state; each later one takes the first transition that holds (one
+per update), spending the Triggers it read. The target AnimatedSprite is found lazily (its path
+from the machine, "" its parent) and checked by id; its player's `onAnimationEnded` sets
+`animationFinished` for `onFinished` transitions. The file attribute is `when`, the field
+`condition` (`when` is an Odin keyword).
 
 **Scene changes** (scene_flow.odin; its doc comment has the details): `Game.flow` holds the
 project's transition and loading scene, the change under way (a phase machine: covering,

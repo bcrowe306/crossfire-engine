@@ -143,7 +143,8 @@ Version history:
   (`lightKind`, `lightColor`, `energy`, `lightRadius`, `spotAngle`, `shadows`) and LightOccluder
   (a CollisionShape's shape attributes) nodes (lighting.odin); NavRegion (`width`, `height`,
   `cellSize`, `agentRadius`, `diagonal`) and NavAgent (`speed`, `arriveDistance`, `avoidRadius`,
-  `autoMove`) nodes (navigation.odin); UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText:
+  `autoMove`) nodes (navigation.odin); StateMachine nodes (`start`, `animates`, `<param>`,
+  `<state>`, `<transition>`: state_machine.odin); UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText:
   `width`, `height`, `anchor`, `margin`, `layout`, `align`, `justify`, `columns`, `padding`,
   `spacing`, `expand`, `disabled`, `value`, `min`, `max`, `direction`, `showValue`, `maxLength`,
   `patchMargins`, `textSize`, `textAlign`, `theme`, `placeholder`, `action`: ui_controls.odin),
@@ -234,6 +235,9 @@ SceneNodeKind :: enum {
 	// parent
 	NavRegion,
 	NavAgent,
+	// A state machine: states, transitions on parameters, animations per state (format 13;
+	// state_machine.odin)
+	StateMachine,
 	// UI controls (format 13; ui_controls.odin): a box laying out controls; a button; a bar
 	// showing a value; a line of text to type; a scrolling column; text with colors and sizes
 	Panel,
@@ -317,6 +321,7 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.ScrollBox      = {"A column of controls that scrolls: long lists, inventories, credits", .UI},
 	.RichText       = {"Text with colors and sizes that wraps: dialogue, descriptions, tooltips", .UI},
 	.Light2D        = {"A light in a lit scene: a point or a spot cone, colored, with shadows from occluders", .Graphics},
+	.StateMachine   = {"Keeps one of a set of states (idle, run, jump) and moves between them on conditions; plays each state's animation", .Scene},
 	.NavRegion      = {"Where characters can walk: a grid over an area, blocked by static bodies, for finding paths", .Scene},
 	.NavAgent       = {"Finds paths through a NavRegion and moves its parent along them, around other agents", .Scene},
 	.LightOccluder  = {"A shape that blocks light and casts shadows: walls, pillars, trees", .Graphics},
@@ -566,6 +571,10 @@ SceneNodeData :: struct {
 	// `agentRadius`, `diagonal`, `speed`, `arriveDistance`, `avoidRadius`, `autoMove`
 	// (navigation.odin)
 	nav: NavSettings,
+	// StateMachine: `start`, `animates` (its AnimatedSprite's path), and `<param name type value>`,
+	// `<state name animation x y>`, `<transition from to when after onFinished>` children
+	// (state_machine.odin)
+	stateMachine: StateMachineSettings,
 }
 
 /*
@@ -1236,6 +1245,7 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.tilemap.layers)
 		AnimatorSettings_Destroy(&node.animator)
 		UISettings_Destroy(&node.ui)
+		StateMachineSettings_Destroy(&node.stateMachine)
 	}
 	delete(scene.nodes)
 	delete(scene.name)
@@ -1539,6 +1549,15 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		tag = cloneAttr(doc, element, "tag", ""),
 		painted = make([dynamic]TileLayerData),
 	}
+	if node.kind == .StateMachine {
+		node.stateMachine = {
+			start = cloneAttr(doc, element, "start", ""),
+			target = cloneAttr(doc, element, "animates", ""),
+			params = make([dynamic]StateMachineParam),
+			states = make([dynamic]StateMachineState),
+			transitions = make([dynamic]StateMachineTransition),
+		}
+	}
 	dn := DEFAULT_NAV_SETTINGS
 	node.nav = {
 		cellSize = max(attrF32(doc, element, "cellSize", dn.cellSize), 1),
@@ -1647,6 +1666,26 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 			})
 		case "clip":
 			append(&scene.nodes[index].animator.clips, parseAnimatorClip(doc, child))
+		case "param":
+			append(&scene.nodes[index].stateMachine.params, StateMachineParam{
+				name = cloneAttr(doc, child, "name", ""),
+				kind = attrEnum(doc, child, "type", StateMachineParamKind.Float),
+				value = cloneAttr(doc, child, "value", ""),
+			})
+		case "state":
+			append(&scene.nodes[index].stateMachine.states, StateMachineState{
+				name = cloneAttr(doc, child, "name", ""),
+				animation = cloneAttr(doc, child, "animation", ""),
+				position = {attrF32(doc, child, "x", 0), attrF32(doc, child, "y", 0)},
+			})
+		case "transition":
+			append(&scene.nodes[index].stateMachine.transitions, StateMachineTransition{
+				from = cloneAttr(doc, child, "from", ""),
+				to = cloneAttr(doc, child, "to", ""),
+				condition = cloneAttr(doc, child, "when", ""),
+				after = max(attrF32(doc, child, "after", 0), 0),
+				onFinished = attrBool(doc, child, "onFinished", false),
+			})
 		case "entity":
 			append(&scene.nodes[index].ldtk.entityComponents, LDtkEntityComponent{
 				entity = cloneAttr(doc, child, "name", ""),
