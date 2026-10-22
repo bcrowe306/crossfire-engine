@@ -62,6 +62,8 @@ Scene :: struct {
 	unbuilt: bool,
 	// UI controls' focus and layout passes (ui_controls.odin)
 	ui: SceneUI,
+	// IK chains (skeleton.odin), solved after the nodes update, in the order they were made
+	ikChains: [dynamic]^IKChain,
 	// ScreenEffect nodes (screen_effects.odin), in the order they were added, and their pictures
 	screenEffects: [dynamic]^ScreenEffect,
 	effects: ScreenEffectTargets,
@@ -432,6 +434,8 @@ Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 	}
 
 	if len(scene.tweens) > 0 do Scene_UpdateTweens(scene, deltaTime)
+	// Bones aimed by IK chains, after the Animator and tweens moved them (skeleton.odin)
+	if len(scene.ikChains) > 0 do Scene_SolveIK(scene)
 
 	// After nodes have moved the camera (e.g. following a player), advance any pan and keep
 	// it inside its bounds

@@ -145,6 +145,9 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `gpu_particles.odin` | **GPU particles** (`ParticleSettings.gpu`, `gpuAmount`): a stateless simulation in a vertex shader (shaders/particles: each particle from its index, its cycle and the time; the emitter's path as a storage buffer), drawn with instanced quads into the emitter's own picture on SDL's GPU device (premultiplied: over or added), which the renderer draws in scene order; shared pipelines in `Game.gpuParticles` |
 | `lines_test.odin`, `gpu_particles_test.odin` | Tests: miters, round joints and caps, closed lines; a line's pixels; a trail's points following its parent, ageing out, emitting off; GPU particles drawn, following a moved emitter, stopping and finishing, started again (skipped without a GPU); the CPU fallback |
 | `screen_effects.odin` | **ScreenEffect nodes**: the scene drawn into a picture, then through each effect (`Scene.screenEffects`, two ping-pong targets in `Scene.effects`), with or without the screen layers |
+| `skeleton.odin` | **Skeletal animation**: `Bone2D` (`length`, `Bone2D_Tip`), `Skeleton2D`, `SkinnedMesh` (`MeshData`: vertices, picture pixels, triangles, bone paths, `VertexWeights`; `SkinnedMesh_Bind` at the rest pose, `SkinnedMesh_Deform` linear blend skinning, drawn with RenderGeometry), `IKChain` (`IKSettings`; two bones exact, longer CCD; `Scene.ikChains`, `Scene_SolveIK` after nodes and tweens), weights' and triangles' text |
+| `dragonbones.odin` | **DragonBones import**: `DragonBones_Convert` (a `_ske.json` and `_tex.json` into a component's `SceneData`: Skeleton2D, Bone2D, Sprites and SkinnedMeshes per slot by zIndex, an Animator of the animations; and an `AtlasData`) |
+| `skeleton_test.odin` | Tests: bones and IK from a scene file (two bones exact, bend side, out of reach, three bones, disabled), weights' text; a mesh bending with a turned bone (vertices and pixels); a DragonBones armature converted (bones, trimmed sprite, weighted mesh, slot order, the animation), built and played (the arm at 90°, the mesh bent) |
 | `asset_import.odin` | **Import settings**: `TextureFilter` (Default, Smooth, Pixel), `ResourceManager_SetImportSettings` (a project's assets: filters, MSDF fonts; `Game_LoadProject` calls it), `ResourceManager_SetTextureFilter` (changes loaded textures too), `ResourceManager_TextureFilter` |
 | `atlas.odin` | **Texture atlases**: `AtlasData` (`.atlas.xml`: `ParseAtlas` / `FormatAtlas` / clone / destroy / equal), `Atlas_Pack` (power-of-two shelf packing with padding), `Game_LoadAtlas` (`Game.atlases`), `Game_AtlasRegion`, `Sprite_SetRegion`; Sprites' `region` (`Sprite.region`, drawn as `src`) |
 | `fonts.odin` | **Bitmap and MSDF fonts** behind `DrawText` / `MeasureText`: `ParseBMFont` (text and XML), `GlyphFont` (glyph pictures, kerning, pages), the engine's own layout (wrapping, kerning), quads through the draw transform; MSDF fonts (`ResourceManager_SetFontMSDF`, `<font>.msdf.json` / `.msdf.bmp`) through shaders/text/msdf.frag on the GPU renderer, TrueType elsewhere |
@@ -476,6 +479,18 @@ size (or the output's); an opaque game background starts the picture and the res
 the screen, else (editors' previews draw their backdrop first) it starts transparent and blends
 over. Built-ins are `#load`ed `.frag.shader` files: rebuild them with tools/compile_shaders
 after editing their GLSL. Checked with Vulkan validation (no errors).
+
+**Skeletons** (skeleton.odin, dragonbones.odin; their doc comments have the details): bones are
+plain nodes (the Animator keys them; no special bone pose state), so **the scene file's pose is the
+rest pose**: a SkinnedMesh binds on its first update (`bind`: each bone's transform in the mesh's
+space, inverted) and deforms every draw from the bones' render transforms (weights renormalized
+over the bones found; vertices past the weights list don't move). IK chains register on their
+scene (`Scene.ikChains`, removed in their destroy) and solve in `Scene_Update` after nodes and
+tweens: two bones by the law of cosines (`ikTwoBones`), longer chains by CCD (`turnToward`
+flips the turn under a mirrored parent). DragonBones' y-down data maps directly: rotation is
+`skY` (skew dropped), weighted mesh vertices are placed by `slotPose` in the armature (the mesh
+under the Skeleton2D at identity), bone frames become absolute keys (setup + offset). Node kinds
+Skeleton2D, Bone2D, SkinnedMesh, IKChain (format 13: `boneLength`, `<mesh>`, `ikTip`...).
 
 **Import settings, atlases and fonts** (asset_import.odin, atlas.odin, fonts.odin; their doc
 comments have the details): filtering is applied by the resource manager when a texture loads

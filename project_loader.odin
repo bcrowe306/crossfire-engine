@@ -245,6 +245,10 @@ SCENE_NODE_TYPES := [SceneNodeKind]typeid{
 	.ScreenEffect    = ScreenEffect,
 	.Line2D          = Line2D,
 	.Trail2D         = Trail2D,
+	.Skeleton2D      = Skeleton2D,
+	.Bone2D          = Bone2D,
+	.SkinnedMesh     = SkinnedMesh,
+	.IKChain         = IKChain,
 }
 
 /*
@@ -652,6 +656,21 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			trail := CreateTrail2D(scene, node.line)
 			if node.texture != "" do trail.texture = loadAsset(rm, projectDir, node.texture)
 			n = trail
+		case .Skeleton2D:
+			n = CreateSkeleton2D(scene)
+		case .Bone2D:
+			n = CreateBone2D(scene, node.boneLength)
+		case .SkinnedMesh:
+			texture: ^sdl.Texture
+			region: sdl.FRect
+			if Atlas_IsFile(node.texture) {
+				texture, region, _ = atlasRegion(scene.game, projectDir, node.texture, node.region)
+			} else {
+				texture = loadAsset(rm, projectDir, node.texture)
+			}
+			n = CreateSkinnedMesh(scene, texture, node.mesh, region)
+		case .IKChain:
+			n = CreateIKChain(scene, node.ikTip, node.ikTarget, node.ik)
 		case .ScreenEffect:
 			fx := CreateScreenEffect(scene, "")
 			fx.includeScreenLayers = node.effectScreenLayers

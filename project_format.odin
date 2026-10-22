@@ -140,7 +140,10 @@ Version history:
   `layers`, `tileCollision`, `animate`, `tag`: tilemap.odin); Sprite and AnimatedSprite `layers`
   and `pivotSlice`, Sprite `nineSlice`, `nineWidth`, `nineHeight`, CollisionShape `slice`
   (aseprite_nodes.odin); assets' `filter` and the project's `textureFilter` (asset_import.odin);
-  atlases (`.atlas.xml`, kind "Atlas") and Sprite `region` (atlas.odin); 2D lighting: scenes' `lighting`, `ambient`, `bodyShadows`, Light2D
+  atlases (`.atlas.xml`, kind "Atlas") and Sprite `region` (atlas.odin); skeletons: Skeleton2D,
+  Bone2D (`boneLength`), SkinnedMesh (`texture`, `region`, a `<mesh vertices uvs triangles bones
+  weights/>` child) and IKChain (`ikTip`, `ikTarget`, `ikLength`, `ikBend`, `ikEnabled`) nodes
+  (skeleton.odin); 2D lighting: scenes' `lighting`, `ambient`, `bodyShadows`, Light2D
   (`lightKind`, `lightColor`, `energy`, `lightRadius`, `spotAngle`, `shadows`) and LightOccluder
   (a CollisionShape's shape attributes) nodes (lighting.odin); NavRegion (`width`, `height`,
   `cellSize`, `agentRadius`, `diagonal`) and NavAgent (`speed`, `arriveDistance`, `avoidRadius`,
@@ -276,6 +279,12 @@ SceneNodeKind :: enum {
 	// A thick line through points; a ribbon left behind its parent (format 13; lines.odin)
 	Line2D,
 	Trail2D,
+	// Skeletal animation (format 13; skeleton.odin): a skeleton's root, a bone, a picture bent over
+	// bones, a chain of bones reaching for a target
+	Skeleton2D,
+	Bone2D,
+	SkinnedMesh,
+	IKChain,
 }
 
 /*
@@ -364,6 +373,10 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.ScreenEffect   = {"A shader over the whole scene as drawn: CRT, bloom, color grading (GPU renderer)", .Graphics},
 	.Line2D         = {"A thick line through points: ropes, lasers, paths, with a color gradient, round joints, a texture", .Graphics},
 	.Trail2D        = {"A ribbon left behind its parent as it moves: sword swings, dashes, comets, tire tracks", .Graphics},
+	.Skeleton2D     = {"The root of a character's bones: animate the bones, and the pictures on them follow", .Graphics},
+	.Bone2D         = {"A bone of a skeleton: its children (pictures, more bones) move with it; key it in the Timeline", .Graphics},
+	.SkinnedMesh    = {"A picture bent over bones: a mesh whose points follow weighted bones (soft bodies, sleeves, tails)", .Graphics},
+	.IKChain        = {"Turns a chain of bones so its tip reaches a target: arms reaching, feet planted on the ground", .Graphics},
 }
 
 // A script after a node's first, from a scene file: its name and field values
@@ -657,6 +670,14 @@ SceneNodeData :: struct {
 	// `endWidth`, `lineColor`, `endColor`, `joint`, `roundCaps`, `closed`, `textureMode`,
 	// `lifetime`, `minDistance`, `emitting` (lines.odin)
 	line: LineSettings,
+	// Bone2D: `boneLength` (skeleton.odin)
+	boneLength: f32,
+	// SkinnedMesh (its `texture`, `region`): the `<mesh vertices uvs triangles bones weights/>` child
+	mesh: MeshData,
+	// IKChain: `ikTip`, `ikTarget` (paths from it), `ikLength`, `ikBend` ("positive" / "negative"),
+	// `ikEnabled`
+	ik: IKSettings,
+	ikTip, ikTarget: string,
 }
 
 /*
@@ -835,6 +856,8 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	light = DEFAULT_LIGHT_SETTINGS,
 	nav = DEFAULT_NAV_SETTINGS,
 	cameraTools = DEFAULT_CAMERA_TOOL_SETTINGS,
+	boneLength = 32,
+	ik = DEFAULT_IK_SETTINGS,
 }
 
 /*
@@ -1384,6 +1407,9 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.pivotSlice)
 		delete(node.nineSlice)
 		delete(node.region)
+		MeshData_Destroy(&node.mesh)
+		delete(node.ikTip)
+		delete(node.ikTarget)
 		delete(node.slice)
 		delete(node.tilemap.tag)
 		for &layer in node.tilemap.painted do TileLayerData_Destroy(&layer)
@@ -1768,6 +1794,14 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		minDistance = max(attrF32(doc, element, "minDistance", dLine.minDistance), 0.1),
 		emitting = attrBool(doc, element, "emitting", dLine.emitting),
 	}
+	node.boneLength = max(attrF32(doc, element, "boneLength", DEFAULT_SCENE_NODE.boneLength), 0)
+	node.ik = {
+		length = max(attrInt(doc, element, "ikLength", DEFAULT_IK_SETTINGS.length), 1),
+		bendPositive = attrString(doc, element, "ikBend") != "negative",
+		enabled = attrBool(doc, element, "ikEnabled", true),
+	}
+	node.ikTip = cloneAttr(doc, element, "ikTip", "")
+	node.ikTarget = cloneAttr(doc, element, "ikTarget", "")
 	dn := DEFAULT_NAV_SETTINGS
 	node.nav = {
 		cellSize = max(attrF32(doc, element, "cellSize", dn.cellSize), 1),
@@ -1926,6 +1960,11 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 				cloneAttr(doc, child, "handler", ""),
 				cloneAttr(doc, child, "global", ""),
 			})
+		case "mesh":
+			// A SkinnedMesh's triangles, picture, bones and weights (skeleton.odin)
+			m := &scene.nodes[index].mesh
+			MeshData_Destroy(m)
+			m^ = parseMeshElement(doc, child)
 		case "prop":
 			// A custom node type's field (custom_nodes.odin)
 			append(&scene.nodes[index].customProps, ScriptPropData{cloneAttr(doc, child, "name", ""), cloneAttr(doc, child, "value", "")})
@@ -2013,4 +2052,36 @@ attrEnum :: proc(doc: ^xml.Document, element: xml.Element_ID, key: string, defau
 	if !found do return default
 	result, ok := reflect.enum_from_name(E, value)
 	return ok ? result : default
+}
+
+// A `<mesh>` element (skeleton.odin); bad parts are left empty
+@(private="file")
+parseMeshElement :: proc(doc: ^xml.Document, element: xml.Element_ID) -> MeshData {
+	m := MeshData{
+		vertices = make([dynamic][2]f32), uvs = make([dynamic][2]f32), triangles = make([dynamic]i32),
+		bones = make([dynamic]string), weights = make([dynamic]VertexWeights),
+	}
+	if text, found := xml.find_attribute_val_by_key(doc, element, "vertices"); found {
+		if points, ok := ParsePoints(text); ok do append(&m.vertices, ..points)
+	}
+	if text, found := xml.find_attribute_val_by_key(doc, element, "uvs"); found {
+		if points, ok := ParsePoints(text); ok do append(&m.uvs, ..points)
+	}
+	if text, found := xml.find_attribute_val_by_key(doc, element, "triangles"); found {
+		if triangles, ok := ParseTriangles(text); ok do append(&m.triangles, ..triangles)
+	}
+	if text, found := xml.find_attribute_val_by_key(doc, element, "bones"); found && strings.trim_space(text) != "" {
+		for b in strings.split(text, ",", context.temp_allocator) do append(&m.bones, strings.clone(strings.trim_space(b)))
+	}
+	if text, found := xml.find_attribute_val_by_key(doc, element, "weights"); found {
+		if weights, ok := ParseWeights(text); ok do append(&m.weights, ..weights)
+	}
+	return m
+}
+
+// An attribute's value as it is in the document ("" when absent; not cloned)
+@(private="file")
+attrString :: proc(doc: ^xml.Document, element: xml.Element_ID, key: string) -> string {
+	value, _ := xml.find_attribute_val_by_key(doc, element, key)
+	return value
 }
