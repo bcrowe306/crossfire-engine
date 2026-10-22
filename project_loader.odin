@@ -211,6 +211,8 @@ SCENE_NODE_TYPES := [SceneNodeKind]typeid{
 	.RichText        = RichText,
 	.Light2D         = Light2D,
 	.LightOccluder   = LightOccluder,
+	.NavRegion       = NavRegion,
+	.NavAgent        = NavAgent,
 }
 
 /*
@@ -565,6 +567,10 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			n = ldtkBuildNode(scene, &node, projectDir, attachScripts, depth)
 		case .TileMap:
 			n = tileMapBuildNode(scene, &node, projectDir)
+		case .NavRegion:
+			n = CreateNavRegion(scene, node.shapeSize, node.nav)
+		case .NavAgent:
+			n = CreateNavAgent(scene, node.nav)
 		case .Light2D:
 			n = CreateLight2D(scene, node.light)
 		case .LightOccluder:

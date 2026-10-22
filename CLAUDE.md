@@ -153,6 +153,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `aseprite_nodes.odin` | **Aseprite in a running game**: `Game_LoadAseprite` (files kept for slices and events; `Game_ReloadChangedAseprites`), `Aseprite_SliceAt`, `Aseprite_FrameEvents`, `Aseprite_LayersNamed`; sprites' pivot slices (`Sprite_Origin`) and 9-patches, CollisionShapes following slices (hitboxes), layer-filtered texture keys (`?layers=`); Sprite / AnimatedSprite drawing |
 | `aseprite_nodes_test.odin` | Tests (on Aseprite's files): frame events through `animation.onFrameEvent`, layers drawn, pivot and 9-patch slices, hitboxes following a moving slice (mirrored, hidden), animated tilemaps and tiles set while they play |
 | `tilemap.odin` | **TileMap nodes**: an Aseprite file's tilemap layers (`TileMapSettings`: `tilemap`, `frame`, `layers`, `tileCollision`), a `TileMapLayer` per layer drawn in one batch, collision from tile properties (`TileMap_TileCollision`: StaticBody "Collision" for solid and one-way tiles, an Area per area name), `TileMap_TileAt`, `TileMap_TileProperty`, `TileMap_Rebuild`, painted layers (`TileLayerData`), terrains (`Terrain_TileFor`, `TileGrid_PaintTerrain`, `TileMap_SetTerrain`), reloading saved files in development runs |
+| `navigation.odin` | **Navigation**: `NavRegion` (a `NavGrid` over an area, blocked by static bodies' shapes grown by an agent radius: `NavRegion_Rebuild`, `NavGrid_BlockStaticBodies`, `NavGrid_SetBlocked`), A* paths straightened by line of sight (`NavGrid_FindPath`, `NavRegion_FindPath`, `Scene_FindNavRegion`), `NavAgent` (`NavAgent_SetTarget` / `Stop`, `velocity` with arrival and separation, moving its parent; `onArrived`, `onPathFailed`) |
+| `navigation_test.odin` | Tests: paths around a wall through a gap (clear legs, straightened), targets in walls, walled off, no corner cutting; a scene file's region blocked by a static body, an agent walking around it and arriving, failing outside any region |
 | `lighting.odin` | **2D lighting**: `Light2D` (`LightSettings`: point or spot, color, energy, radius, cone, shadows), `LightOccluder` (a CollisionShape's shapes), `SceneLighting` (`Scene.lighting`: `Scene_SetLighting`, ambient, static bodies' shadows), `Light_Visibility` (the polygon a light reaches), the light map (`Lighting_Apply`) |
 | `lighting_test.odin` | Tests: occluders stopping rays, lights without shadows, spot cones turned with the node, scene files; pixels: bright at a light, fading, dark past its reach and behind an occluder, screen layers unlit |
 | `ui_controls.odin` | **UI controls**: `Control` (settings `UISettings`, laid-out `size`, `offset` from its anchor) and its types `Panel`, `Button`, `ProgressBar`, `TextField`, `ScrollBox`, `RichText`; anchors (`UIAnchor`), layouts (`UILayout`: Row, Column, Grid; align, justify, expand), the mouse, focus moved by the ui_* actions or keys, typing, scroll boxes, rich text (`RichText_Layout`), 9-patch images; `Create*`, `Control_SetText`, `ProgressBar_SetValue`, `Control_Focus`, `Control_GetRect`, `Control_Theme` |
@@ -571,6 +573,17 @@ the build gives them a synthetic cel in the node's arena, so drawing, collision 
 edge-only set ignores them), `TileGrid_PaintTerrain` sets a cell and refits its neighbours
 (off-grid counts as the same terrain), `TileMap_SetTerrain` from code. tilemap_paint_test.odin. LDtk's tile layers still draw with their own
 code (square tiles, no diagonal flips); moving them onto `TileBatch` is a possible cleanup.
+
+**Navigation** (navigation.odin; its doc comment has the details): a region's grid is built on
+its first update (every node exists then) from CollisionShape nodes under StaticBody ancestors,
+read from the nodes (not Box2D), so editors build it without physics. A cell is blocked when its
+middle is within the agent radius of a shape (inside a polygon by the even-odd rule). A*
+(octile heuristic, a binary heap; a local heap proc named `pop` once shadowed the builtin and
+recursed forever) then keeps, from each point, the farthest cell in clear sight
+(`NavGrid_LineClear` samples at a quarter cell). Agents follow their path's points, slowing on the
+last stretch and never overshooting in a step, plus a separation push from agents within the sum
+of their `avoidRadius`; `autoMove` sets a CharacterMover's velocity and moves it (or just its
+position without a physics world), a DynamicBody's velocity, else the position.
 
 **2D lighting** (lighting.odin; its doc comment has the details): `Scene_DrawWithView` applies the
 light map after the last layer the camera draws (`Lighting_Apply`; screen layers after it are

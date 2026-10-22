@@ -141,7 +141,9 @@ Version history:
   and `pivotSlice`, Sprite `nineSlice`, `nineWidth`, `nineHeight`, CollisionShape `slice`
   (aseprite_nodes.odin); 2D lighting: scenes' `lighting`, `ambient`, `bodyShadows`, Light2D
   (`lightKind`, `lightColor`, `energy`, `lightRadius`, `spotAngle`, `shadows`) and LightOccluder
-  (a CollisionShape's shape attributes) nodes (lighting.odin); UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText:
+  (a CollisionShape's shape attributes) nodes (lighting.odin); NavRegion (`width`, `height`,
+  `cellSize`, `agentRadius`, `diagonal`) and NavAgent (`speed`, `arriveDistance`, `avoidRadius`,
+  `autoMove`) nodes (navigation.odin); UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText:
   `width`, `height`, `anchor`, `margin`, `layout`, `align`, `justify`, `columns`, `padding`,
   `spacing`, `expand`, `disabled`, `value`, `min`, `max`, `direction`, `showValue`, `maxLength`,
   `patchMargins`, `textSize`, `textAlign`, `theme`, `placeholder`, `action`: ui_controls.odin),
@@ -226,6 +228,10 @@ SceneNodeKind :: enum {
 	// 2D lighting (format 13; lighting.odin): a point or spot light; a shape that casts shadows
 	Light2D,
 	LightOccluder,
+	// Navigation (format 13; navigation.odin): where characters can walk; a path finder moving its
+	// parent
+	NavRegion,
+	NavAgent,
 	// UI controls (format 13; ui_controls.odin): a box laying out controls; a button; a bar
 	// showing a value; a line of text to type; a scrolling column; text with colors and sizes
 	Panel,
@@ -309,6 +315,8 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.ScrollBox      = {"A column of controls that scrolls: long lists, inventories, credits", .UI},
 	.RichText       = {"Text with colors and sizes that wraps: dialogue, descriptions, tooltips", .UI},
 	.Light2D        = {"A light in a lit scene: a point or a spot cone, colored, with shadows from occluders", .Graphics},
+	.NavRegion      = {"Where characters can walk: a grid over an area, blocked by static bodies, for finding paths", .Scene},
+	.NavAgent       = {"Finds paths through a NavRegion and moves its parent along them, around other agents", .Scene},
 	.LightOccluder  = {"A shape that blocks light and casts shadows: walls, pillars, trees", .Graphics},
 	.Animator       = {"Animates other nodes' properties over time with keyframes: cutscenes, moving platforms, UI, effects", .Graphics},
 }
@@ -552,6 +560,10 @@ SceneNodeData :: struct {
 	// `lightColor`, `energy`, `lightRadius`, `spotAngle`, `shadows`). A LightOccluder's shape uses
 	// `shape`, `width` / `height`, `radius` and `points` like a CollisionShape's
 	light: LightSettings,
+	// NavRegion (its area: `width`, `height`) and NavAgent: `NavSettings` as `cellSize`,
+	// `agentRadius`, `diagonal`, `speed`, `arriveDistance`, `avoidRadius`, `autoMove`
+	// (navigation.odin)
+	nav: NavSettings,
 }
 
 /*
@@ -728,6 +740,7 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	animator = DEFAULT_ANIMATOR_SETTINGS,
 	ui = DEFAULT_UI_SETTINGS,
 	light = DEFAULT_LIGHT_SETTINGS,
+	nav = DEFAULT_NAV_SETTINGS,
 }
 
 /*
@@ -1511,6 +1524,16 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		animate = attrBool(doc, element, "animate", false),
 		tag = cloneAttr(doc, element, "tag", ""),
 		painted = make([dynamic]TileLayerData),
+	}
+	dn := DEFAULT_NAV_SETTINGS
+	node.nav = {
+		cellSize = max(attrF32(doc, element, "cellSize", dn.cellSize), 1),
+		agentRadius = max(attrF32(doc, element, "agentRadius", dn.agentRadius), 0),
+		diagonal = attrBool(doc, element, "diagonal", dn.diagonal),
+		speed = max(attrF32(doc, element, "speed", dn.speed), 0),
+		arriveDistance = max(attrF32(doc, element, "arriveDistance", dn.arriveDistance), 0),
+		avoidRadius = max(attrF32(doc, element, "avoidRadius", dn.avoidRadius), 0),
+		autoMove = attrBool(doc, element, "autoMove", dn.autoMove),
 	}
 	dli := DEFAULT_LIGHT_SETTINGS
 	node.light = {
