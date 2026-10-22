@@ -149,7 +149,15 @@ node_shaders_parameters_and_animator_tracks :: proc(t: ^testing.T) {
 @(private="file")
 gpuGame :: proc() -> (^sdl.Renderer, ^Game) {
 	if !sdl.InitSubSystem({.VIDEO}) do return nil, nil
+	// As games get it: Vulkan on Windows (its default, Direct3D 12, takes neither SPIR-V nor MSL)
+	when ODIN_OS == .Windows do _ = sdl.SetHint(sdl.HINT_GPU_DRIVER, "vulkan")
 	renderer := sdl.CreateGPURenderer(nil, nil)
+	when ODIN_OS == .Windows do _ = sdl.ResetHint(sdl.HINT_GPU_DRIVER)
+	// No GPU, or one that can't run these shaders (CI's runners): the test is skipped
+	if renderer != nil && !Renderer_SupportsShaders(renderer) {
+		sdl.DestroyRenderer(renderer)
+		renderer = nil
+	}
 	if renderer == nil {
 		sdl.QuitSubSystem({.VIDEO})
 		return nil, nil
