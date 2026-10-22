@@ -265,6 +265,12 @@ tilemaps_draw_collide_and_answer :: proc(t: ^testing.T) {
 	if len(level.tileLayers) == 1 do testing.expect_value(t, len(level.tileLayers[0].quads), 2)
 	Scene_Update(scene, nil, 0.01)
 	testing.expect(t, Scene_FindNode(scene, "Level/spikes") == nil, "no area tiles any more")
+	// The replaced file goes on the update after its rebuild. Windows CI once saw the save's time
+	// land a check later (one more rebuild, its file freed on the update after): allow a few
+	for _ in 0 ..< 3 {
+		if len(level.retired) == 0 do break
+		Scene_Update(scene, nil, 0.01)
+	}
 	testing.expect_value(t, len(level.retired), 0)
 	game.devKeys = false
 
