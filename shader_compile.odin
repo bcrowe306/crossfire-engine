@@ -56,12 +56,20 @@ Returns:
 - The bundle (its code temp allocated), and the compilers' messages with the file's name and
   line ("assets/fx/water.frag:12: 'colr' : undeclared identifier"); ok false when it failed
 */
-Shader_Compile :: proc(tools: ShaderTools, source, name, scratch: string) -> (bundle: ShaderBundle, messages: string, ok: bool) {
-	params, size, problem := Shader_ParseParams(source)
-	if problem != "" do return {}, fmt.tprintf("%s: %s", name, problem), false
+Shader_Compile :: proc(tools: ShaderTools, source, name, scratch: string, stage := ShaderStage.Fragment) -> (bundle: ShaderBundle, messages: string, ok: bool) {
+	// A fragment shader's parameters are its Params block; the engine's vertex shaders' uniforms
+	// are its own business
+	params: []ShaderParam
+	size: int
+	if stage == .Fragment {
+		problem: string
+		params, size, problem = Shader_ParseParams(source)
+		if problem != "" do return {}, fmt.tprintf("%s: %s", name, problem), false
+	}
+	glslStage, crossStage := stage == .Vertex ? "vert" : "frag", stage == .Vertex ? "vertex" : "fragment"
 	_ = os.make_directory_all(scratch)
-	base := strings.trim_suffix(filepathBase(name), ".frag")
-	input := JoinPath(scratch, fmt.tprintf("%s.frag", base))
+	base := strings.trim_suffix(strings.trim_suffix(filepathBase(name), ".frag"), ".vert")
+	input := JoinPath(scratch, fmt.tprintf("%s.%s", base, glslStage))
 	spv := JoinPath(scratch, fmt.tprintf("%s.spv", base))
 	msl := JoinPath(scratch, fmt.tprintf("%s.msl", base))
 	reflection := JoinPath(scratch, fmt.tprintf("%s.json", base))
@@ -74,7 +82,7 @@ Shader_Compile :: proc(tools: ShaderTools, source, name, scratch: string) -> (bu
 		return text, state.exited && state.exit_code == 0
 	}
 	// GLSL -> SPIR-V; glslang names the scratch copy: give its lines the real name
-	out, compiled := run({tools.glslang, "-V", "-S", "frag", input, "-o", spv})
+	out, compiled := run({tools.glslang, "-V", "-S", glslStage, input, "-o", spv})
 	if !compiled {
 		lines := make([dynamic]string, context.temp_allocator)
 		for line in strings.split_lines(out, context.temp_allocator) {
@@ -88,16 +96,17 @@ Shader_Compile :: proc(tools: ShaderTools, source, name, scratch: string) -> (bu
 		return {}, strings.join(lines[:], "\n", context.temp_allocator), false
 	}
 	// SPIR-V -> MSL, and the resources it uses
-	if text, good := run({tools.shadercross, spv, "-s", "SPIRV", "-d", "MSL", "-t", "fragment", "-o", msl}); !good do return {}, fmt.tprintf("%s: %s", name, text), false
-	if text, good := run({tools.shadercross, spv, "-s", "SPIRV", "-d", "JSON", "-t", "fragment", "-o", reflection}); !good do return {}, fmt.tprintf("%s: %s", name, text), false
+	if text, good := run({tools.shadercross, spv, "-s", "SPIRV", "-d", "MSL", "-t", crossStage, "-o", msl}); !good do return {}, fmt.tprintf("%s: %s", name, text), false
+	if text, good := run({tools.shadercross, spv, "-s", "SPIRV", "-d", "JSON", "-t", crossStage, "-o", reflection}); !good do return {}, fmt.tprintf("%s: %s", name, text), false
 	spirvData, e1 := os.read_entire_file(spv, context.temp_allocator)
 	mslData, e2 := os.read_entire_file(msl, context.temp_allocator)
 	jsonData, e3 := os.read_entire_file(reflection, context.temp_allocator)
 	if e1 != nil || e2 != nil || e3 != nil do return {}, fmt.tprintf("%s: the compilers wrote nothing", name), false
-	bundle = {version = SHADER_BUNDLE_VERSION, params = params, uniformSize = size, spirv = spirvData, msl = mslData}
+	bundle = {version = SHADER_BUNDLE_VERSION, stage = stage, params = params, uniformSize = size, spirv = spirvData, msl = mslData}
+	bundle.storageBuffers = reflectionCount(string(jsonData), "\"storage_buffers\"")
 	bundle.samplers = reflectionCount(string(jsonData), "\"samplers\"")
 	bundle.uniformBuffers = reflectionCount(string(jsonData), "\"uniform_buffers\"")
-	if bundle.uniformBuffers > 0 && size == 0 do return {}, fmt.tprintf("%s: its uniform block must be at set 3, binding 0 (layout(set = 3, binding = 0) uniform Params { ... })", name), false
+	if stage == .Fragment && bundle.uniformBuffers > 0 && size == 0 do return {}, fmt.tprintf("%s: its uniform block must be at set 3, binding 0 (layout(set = 3, binding = 0) uniform Params { ... })", name), false
 	return bundle, "", true
 }
 
@@ -115,7 +124,7 @@ Inputs:
 Returns:
 - The messages ("" none), whether it compiled (or was up to date), and whether it compiled now
 */
-Shader_CompileFile :: proc(tools: ShaderTools, path, name, scratch: string, force := false) -> (messages: string, ok: bool, compiled: bool) {
+Shader_CompileFile :: proc(tools: ShaderTools, path, name, scratch: string, force := false, stage := ShaderStage.Fragment) -> (messages: string, ok: bool, compiled: bool) {
 	out := fmt.tprintf("%s.shader", path)
 	if !force {
 		src, e1 := os.stat(path, context.temp_allocator)
@@ -124,7 +133,7 @@ Shader_CompileFile :: proc(tools: ShaderTools, path, name, scratch: string, forc
 	}
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil do return fmt.tprintf("%s: can't be read", name), false, false
-	bundle, messages_, good := Shader_Compile(tools, string(data), name, scratch)
+	bundle, messages_, good := Shader_Compile(tools, string(data), name, scratch, stage)
 	if !good do return messages_, false, false
 	text := Shader_FormatBundle(bundle)
 	if os.write_entire_file(out, transmute([]byte)text) != nil do return fmt.tprintf("%s: couldn't write %s", name, out), false, false

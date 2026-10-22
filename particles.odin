@@ -258,6 +258,11 @@ ParticleSettings :: struct {
 	spread: [2]f32 `min:"0" max:"1280" label:"Spread"`,
 	// Particles move with the emitter (its local space) instead of staying in the world
 	localSpace: bool `label:"Local space"`,
+	// Simulated and drawn on the graphics card (gpu_particles.odin: the GPU renderer; no
+	// collisions), with `gpuAmount` particles; elsewhere on the CPU with `amount`
+	gpu: bool `label:"On the GPU"`,
+	// Particles per cycle on the GPU
+	gpuAmount: int `min:"1" max:"200000" label:"GPU amount"`,
 
 	// What each particle is drawn as
 	shape: ParticleShape `label:"Shape" group:"Shape"`,
@@ -333,6 +338,7 @@ DEFAULT_PARTICLE_SETTINGS :: ParticleSettings{
 	emitting = true,
 	continuous = true,
 	amount = 50,
+	gpuAmount = 5000,
 	lifetime = 2,
 	shape = .Circle,
 	size = {5, 5},
@@ -434,6 +440,8 @@ ParticleEmitter :: struct {
 	onFinished: EventSubject `event:"A run ended: it stopped emitting and its last particle died"`,
 	// The run stopped and onFinished is still to come (when the last particle dies)
 	finishPending: bool,
+	// On the GPU (`settings.gpu`: gpu_particles.odin; nil until then)
+	gpu: ^GPUParticles,
 }
 
 /*
@@ -455,6 +463,8 @@ CreateParticleEmitter :: proc(scene: ^Scene, settings := DEFAULT_PARTICLE_SETTIN
 	emitter.update = particleEmitterUpdate
 	emitter.draw = particleEmitterDraw
 	emitter.getBounds = particleEmitterBounds
+	// Its GPU objects, when it had some
+	emitter.destroy = proc(node: ^Node) { gpuParticlesDestroy(cast(^ParticleEmitter)node) }
 	return emitter
 }
 
@@ -471,6 +481,7 @@ Example:
 	e.ParticleEmitter_Start(boom)
 */
 ParticleEmitter_Start :: proc(emitter: ^ParticleEmitter) {
+	gpuParticlesStart(emitter)
 	emitter.emitting = true
 	emitter.finishPending = false
 	emitter.cycleStarted = false
@@ -486,6 +497,7 @@ Inputs:
 - emitter: The emitter
 */
 ParticleEmitter_Stop :: proc(emitter: ^ParticleEmitter) {
+	gpuParticlesStop(emitter)
 	if emitter.emitting do emitter.finishPending = true
 	emitter.emitting = false
 	emitter.cycleStarted = false
@@ -523,6 +535,11 @@ Its node's update does this each frame.
 @(private)
 ParticleEmitter_Update :: proc(emitter: ^ParticleEmitter, deltaTime: f32) {
 	s := &emitter.settings
+	// On the GPU: its clock and path; the CPU simulates only where the GPU couldn't draw
+	if s.gpu {
+		gpuParticlesUpdate(emitter, deltaTime)
+		if emitter.gpu.active do return
+	}
 	// Live particles move first, so new ones start this frame at age 0 (and those emitted at the
 	// start of a cycle die as the next one starts)
 	gravity: [2]f32
@@ -881,6 +898,7 @@ drawn one by one by `customDraw`.
 particleEmitterDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	emitter := cast(^ParticleEmitter)node
 	s := &emitter.settings
+	if s.gpu && gpuParticlesDraw(emitter, renderer) do return
 	base, tint := drawState().transform, drawState().tint
 	// Particle space to the screen: the node's (local space), or the world's
 	view := base

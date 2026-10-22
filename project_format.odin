@@ -163,7 +163,9 @@ Version history:
   (steam.odin); `<players max keyboard joinAction/>` (players.odin); every node's `shader` and
   `<shaderParam name value/>` children, ScreenEffect nodes (`effectScreenLayers`), assets of
   kind "Shader" (`.frag`, compiled beside them as `.frag.shader`) and the project's `shaders`
-  (shaders.odin, screen_effects.odin). Version 12 files are valid version 13 files.
+  (shaders.odin, screen_effects.odin); Line2D and Trail2D nodes (`lineWidth`, `endWidth`,
+  `lineColor`, `endColor`, `joint`, `roundCaps`, `closed`, `textureMode`, `lifetime`,
+  `minDistance`, `emitting`; a line's `points`: lines.odin). Version 12 files are valid version 13 files.
 - 12: `LDtkLevel` nodes (a level, or a whole world, of an LDtk project: ldtk_nodes.odin) and
   assets of kind "LDtk". Version 11 files are valid version 12 files.
 - 11: the project's `renderer`. Version 10 files are valid version 11 files.
@@ -268,6 +270,9 @@ SceneNodeKind :: enum {
 	TouchButton,
 	// A shader over the whole scene: CRT, bloom, color grading (format 13; screen_effects.odin)
 	ScreenEffect,
+	// A thick line through points; a ribbon left behind its parent (format 13; lines.odin)
+	Line2D,
+	Trail2D,
 }
 
 /*
@@ -354,6 +359,8 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.VirtualJoystick = {"An on-screen stick for touch screens, pushing input actions (moving left, right, up, down)", .UI},
 	.TouchButton    = {"An on-screen round button for touch screens, pressing an input action (jump, fire)", .UI},
 	.ScreenEffect   = {"A shader over the whole scene as drawn: CRT, bloom, color grading (GPU renderer)", .Graphics},
+	.Line2D         = {"A thick line through points: ropes, lasers, paths, with a color gradient, round joints, a texture", .Graphics},
+	.Trail2D        = {"A ribbon left behind its parent as it moves: sword swings, dashes, comets, tire tracks", .Graphics},
 }
 
 /*
@@ -628,6 +635,10 @@ SceneNodeData :: struct {
 	shaderParams: [dynamic]ScriptPropData,
 	// ScreenEffect: the effect covers the screen layers too (`effectScreenLayers`, default true)
 	effectScreenLayers: bool,
+	// Line2D (its `points`, `texture`) and Trail2D (`texture`): `LineSettings` as `lineWidth`,
+	// `endWidth`, `lineColor`, `endColor`, `joint`, `roundCaps`, `closed`, `textureMode`,
+	// `lifetime`, `minDistance`, `emitting` (lines.odin)
+	line: LineSettings,
 }
 
 /*
@@ -1696,6 +1707,20 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.touchActions = cloneAttr(doc, element, "touchActions", "")
 	node.shader = cloneAttr(doc, element, "shader", "")
 	node.effectScreenLayers = attrBool(doc, element, "effectScreenLayers", true)
+	dLine := DEFAULT_LINE_SETTINGS
+	node.line = {
+		width = max(attrF32(doc, element, "lineWidth", dLine.width), 0),
+		endWidth = max(attrF32(doc, element, "endWidth", dLine.endWidth), 0),
+		color = attrColor(doc, element, "lineColor", dLine.color),
+		endColor = attrColor(doc, element, "endColor", dLine.endColor),
+		joint = attrEnum(doc, element, "joint", dLine.joint),
+		roundCaps = attrBool(doc, element, "roundCaps", dLine.roundCaps),
+		closed = attrBool(doc, element, "closed", dLine.closed),
+		textureMode = attrEnum(doc, element, "textureMode", dLine.textureMode),
+		lifetime = max(attrF32(doc, element, "lifetime", dLine.lifetime), 0.01),
+		minDistance = max(attrF32(doc, element, "minDistance", dLine.minDistance), 0.1),
+		emitting = attrBool(doc, element, "emitting", dLine.emitting),
+	}
 	dn := DEFAULT_NAV_SETTINGS
 	node.nav = {
 		cellSize = max(attrF32(doc, element, "cellSize", dn.cellSize), 1),

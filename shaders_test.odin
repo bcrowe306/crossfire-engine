@@ -15,7 +15,7 @@ import sdl "vendor:sdl3"
 // without the GPU renderer; Animator tracks; compiling with the shader tools when they're built
 
 // The GPU tests take turns (SDL video, one GPU device at a time)
-@(private="file")
+@(private)
 gpuTestLock: sync.Mutex
 
 TEST_SHADER :: `#version 450
@@ -146,7 +146,7 @@ node_shaders_parameters_and_animator_tracks :: proc(t: ^testing.T) {
 }
 
 // An offscreen GPU renderer and a game drawing with it (nil, nil when there's no GPU here)
-@(private="file")
+@(private)
 gpuGame :: proc() -> (^sdl.Renderer, ^Game) {
 	if !sdl.InitSubSystem({.VIDEO}) do return nil, nil
 	// As games get it: Vulkan on Windows (its default, Direct3D 12, takes neither SPIR-V nor MSL)
@@ -177,7 +177,7 @@ solidTexture :: proc(renderer: ^sdl.Renderer, color: u32, size: i32 = 8) -> ^sdl
 }
 
 // The target's pixel (BGRA32: 0xAARRGGBB)
-@(private="file")
+@(private)
 pixelAt :: proc(renderer: ^sdl.Renderer, x, y: i32) -> u32 {
 	surface := sdl.RenderReadPixels(renderer, nil)
 	if surface == nil do return 0

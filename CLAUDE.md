@@ -138,6 +138,9 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `component_test.odin` | Tests: component files, instances in scene files (names, transforms, under parents, nested), `Scene_Instantiate` |
 | `input.odin` | **Input**: keyboard, mouse and gamepad state (`Input_IsKeyPressed`, `Input_IsMouseButtonJustPressed`, `Input_GetMousePosition`, `Input_GetGamepadAxis`...) through the engine's own `Key`, `MouseButton`, `GamepadButton`, `GamepadAxis`; **actions** like Godot's input map (`Input_IsActionPressed` / `JustPressed` / `JustReleased`, `Input_GetActionStrength`, `Input_GetAxis`, `Input_GetVector`); bindings' text format; `Game.input`, updated first in `Game_Update` |
 | `shaders.odin` | **Shaders**: `ShaderBundle` (a compiled `.frag.shader`: SPIR-V, MSL, params), `Shader_ParseParams` (a GLSL `Params` block: std140 offsets, comment tags), `Game_LoadShader` (`Game.shaders`; `builtin:<name>` from shaders/builtin), `ShaderMaterial` (`Node.shader`: `Node_SetShader` / `SetShaderParam` / `SetShaderParamText` / `ResetShaderParams`), `Renderer_SupportsShaders`, the draw hooks (`shaderDrawBegin` / `End`), the hit flash fallback |
+| `lines.odin` | **Line2D and Trail2D**: `LineSettings` (width, end width, colors, joint, round caps, closed, texture mode; a trail's lifetime, spacing, emitting), `Line_Geometry` (a thick polyline's triangles: miters cut at `LINE_MITER_LIMIT`, or per-segment quads with round fans; round caps), `CreateLine2D` / `Line2D_SetPoints`, `CreateTrail2D` / `Trail2D_Clear` / `SetEmitting` |
+| `gpu_particles.odin` | **GPU particles** (`ParticleSettings.gpu`, `gpuAmount`): a stateless simulation in a vertex shader (shaders/particles: each particle from its index, its cycle and the time; the emitter's path as a storage buffer), drawn with instanced quads into the emitter's own picture on SDL's GPU device (premultiplied: over or added), which the renderer draws in scene order; shared pipelines in `Game.gpuParticles` |
+| `lines_test.odin`, `gpu_particles_test.odin` | Tests: miters, round joints and caps, closed lines; a line's pixels; a trail's points following its parent, ageing out, emitting off; GPU particles drawn, following a moved emitter, stopping and finishing, started again (skipped without a GPU); the CPU fallback |
 | `screen_effects.odin` | **ScreenEffect nodes**: the scene drawn into a picture, then through each effect (`Scene.screenEffects`, two ping-pong targets in `Scene.effects`), with or without the screen layers |
 | `shader_compile.odin` | Compiling GLSL with the shader tools (`ShaderTools_Find`, `Shader_Compile`, `Shader_CompileFile`: `<file>.frag.shader` beside it); native only |
 | `shaders/builtin/`, `tools/compile_shaders/`, `tools/build_shader_tools.sh` | The seven built-in effects (GLSL and their committed `.frag.shader`), the program compiling them, and the script building glslang + SDL_shadercross from `third_party/` |
@@ -465,6 +468,21 @@ size (or the output's); an opaque game background starts the picture and the res
 the screen, else (editors' previews draw their backdrop first) it starts transparent and blends
 over. Built-ins are `#load`ed `.frag.shader` files: rebuild them with tools/compile_shaders
 after editing their GLSL. Checked with Vulkan validation (no errors).
+
+**GPU particles** (gpu_particles.odin): no per-particle state, so nothing to update on the GPU:
+`gpuParticlesUpdate` only advances the emitter's clock and records its path (a ring, resampled
+into GPU_PATH_SAMPLES evenly spaced samples over the last lifetime each draw); runs are
+`start` / `stopped` times on that clock. The draw makes its own command buffer on the renderer's
+device (`SDL_GetGPURendererDevice`): a copy pass for the path, a render pass into the emitter's
+B8G8R8A8 texture (`cycle`, so last frame's composite can still be in flight), submitted at once;
+the texture is wrapped as an SDL texture (`PROP_TEXTURE_CREATE_GPU_TEXTURE_POINTER`) and drawn
+with a premultiplied blend where the emitter is in the draw order (the renderer's batched
+commands are submitted later, so they read the finished picture). Until the first draw finds a
+GPU renderer, the CPU simulates (`gpu.active`). Pipelines need `enable_depth_clip` (else depth
+clamping, which Vulkan validation flags). Checked with Vulkan validation; measured on an Intel
+UHD 620: 100 000 particles 5.2 ms a frame. **Lines**: geometry is built in screen space each
+draw (normals after the transform, so rotation and scale work); round joints are per-segment
+quads plus fans on each turn's outer side (a shared-vertex miter strip left spikes).
 
 **Local players** (players.odin): they live in `InputState.players` and are worked out at the end
 of `Input_Update` (only once someone joined or joining is on), which finds its game with
@@ -1000,6 +1018,7 @@ machine: Intel UHD 620 laptop, -o:speed):
 | 1000 world transforms at depth 64 | 0.69 ms | 0.53 ms |
 | 1000 subscribes / 100 notifies of 1000 listeners | 0.84 ms / 0.26 ms | 0.026 ms / 0.33 ms |
 | particles, 4 emitters x 1000: update / draw (SDL) | 0.09 ms / 2.0 ms; colliding x 500: 2.1 ms | same |
+| GPU particles (offscreen GPU renderer, a frame's update + draw + wait) | 500 on the CPU: 1.6 ms | GPU: 500 0.8 ms, 20 000 2.1 ms, 100 000 5.2 ms, 200 000 9.1 ms |
 | physics, 500 static + 500 dynamic bodies, a frame | 0.37 ms | 0.29 ms |
 | LDtk forest, software renderer: a screenful (3x) / the whole level | 101-130 ms / 19-21 ms (SDL's pixel work) | 33 ms / 13-15 ms (tile layers cached; copies clipped to the screen) |
 | text: 30 centered labels a frame (software) | 0.36 ms | (no cache needed) |

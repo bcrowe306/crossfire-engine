@@ -29,5 +29,17 @@ main :: proc() {
 		}
 		fmt.printfln("%s %s", path, compiled ? "compiled" : "up to date")
 	}
+	// The GPU particles' shaders (gpu_particles.odin)
+	for name in ([]string{"particles.vert", "particles.frag"}) {
+		path := fmt.tprintf("shaders/particles/%s", name)
+		stage := name == "particles.vert" ? e.ShaderStage.Vertex : e.ShaderStage.Fragment
+		messages, ok, compiled := e.Shader_CompileFile(tools, path, path, "shader_tools/build/scratch", force = len(os.args) > 1 && os.args[1] == "-force", stage = stage)
+		if !ok {
+			fmt.eprintln(messages)
+			failed = true
+			continue
+		}
+		fmt.printfln("%s %s", path, compiled ? "compiled" : "up to date")
+	}
 	if failed do os.exit(1)
 }

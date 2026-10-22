@@ -140,6 +140,8 @@ Game :: struct {
 	time: f64,
 	// The shaders loaded, by path (shaders.odin; in the game's arena)
 	shaders: map[string]^ShaderProgram,
+	// GPU particles' pipelines (gpu_particles.odin)
+	gpuParticles: GPUParticleResources,
 	// Multiplies the time scenes and globals see: 0.5 is slow motion, 2 double speed
 	// (`Game_SetTimeScale`). 0 counts as 1, so a game that never sets it runs normally; to stop
 	// time, pause the scene (`Scene_SetPaused`)

@@ -90,10 +90,22 @@ ShaderParam :: struct {
 	builtin: bool,
 }
 
-// A compiled shader: what a `.frag.shader` file holds
+// A shader's stage: what it computes
+ShaderStage :: enum {
+	// Each pixel's color (nodes' and screen effects' shaders)
+	Fragment,
+	// Each vertex's position (the engine's own: GPU particles)
+	Vertex,
+}
+
+// A compiled shader: what a `.frag.shader` (or `.vert.shader`) file holds
 ShaderBundle :: struct {
 	// The format of the file
 	version: int,
+	// Its stage
+	stage: ShaderStage,
+	// How many storage buffers it reads (vertex shaders: the engine's GPU particles)
+	storageBuffers: int,
 	// Its parameters, and the size of its uniform block in bytes (0: none)
 	params: []ShaderParam,
 	uniformSize: int,
@@ -218,6 +230,8 @@ Returns:
 Shader_ParseBundle :: proc(text: []byte, allocator := context.allocator) -> (bundle: ShaderBundle, ok: bool) {
 	File :: struct {
 		version: int,
+		stage: ShaderStage,
+		storageBuffers: int,
 		params: []struct { name: string, type: ShaderParamType, offset: int, value: [4]f32, min, max: f32, label: string, builtin: bool },
 		uniformSize: int,
 		samplers, uniformBuffers: int,
@@ -227,6 +241,7 @@ Shader_ParseBundle :: proc(text: []byte, allocator := context.allocator) -> (bun
 	if json.unmarshal(text, &file, allocator = context.temp_allocator) != nil do return {}, false
 	if file.version != SHADER_BUNDLE_VERSION do return {}, false
 	bundle.version = file.version
+	bundle.stage, bundle.storageBuffers = file.stage, file.storageBuffers
 	bundle.uniformSize = file.uniformSize
 	bundle.samplers, bundle.uniformBuffers = file.samplers, file.uniformBuffers
 	bundle.params = make([]ShaderParam, len(file.params), allocator)
@@ -245,7 +260,8 @@ Writes a bundle as a `.frag.shader` file's text (temp allocated).
 */
 Shader_FormatBundle :: proc(bundle: ShaderBundle) -> string {
 	b := strings.builder_make(context.temp_allocator)
-	fmt.sbprintf(&b, "{{\n\t\"version\": %d,\n\t\"uniformSize\": %d,\n\t\"samplers\": %d,\n\t\"uniformBuffers\": %d,\n\t\"params\": [", bundle.version, bundle.uniformSize, bundle.samplers, bundle.uniformBuffers)
+	fmt.sbprintf(&b, "{{\n\t\"version\": %d,\n\t\"stage\": %q,\n\t\"storageBuffers\": %d,\n\t\"uniformSize\": %d,\n\t\"samplers\": %d,\n\t\"uniformBuffers\": %d,\n\t\"params\": [",
+		bundle.version, fmt.tprint(bundle.stage), bundle.storageBuffers, bundle.uniformSize, bundle.samplers, bundle.uniformBuffers)
 	for p, i in bundle.params {
 		fmt.sbprintf(&b, "%s\n\t\t{{\"name\": %q, \"type\": %q, \"offset\": %d, \"value\": [%v, %v, %v, %v], \"min\": %v, \"max\": %v, \"label\": %q, \"builtin\": %v}",
 			i == 0 ? "" : ",", p.name, fmt.tprint(p.type), p.offset, p.value[0], p.value[1], p.value[2], p.value[3], p.min, p.max, p.label, p.builtin)
@@ -653,6 +669,7 @@ shaderMaterialDestroy :: proc(m: ^ShaderMaterial) {
 // Frees the game's shaders' GPU code (Game_Destroy, before the renderer goes)
 @(private)
 shadersDestroy :: proc(game: ^Game) {
+	gpuParticleResourcesDestroy(game)
 	for _, program in game.shaders {
 		for g in program.gpu do sdl.ReleaseGPUShader(g.device, g.shader)
 		delete(program.gpu)

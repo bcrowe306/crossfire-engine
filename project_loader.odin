@@ -239,6 +239,8 @@ SCENE_NODE_TYPES := [SceneNodeKind]typeid{
 	.VirtualJoystick = VirtualJoystick,
 	.TouchButton     = TouchButton,
 	.ScreenEffect    = ScreenEffect,
+	.Line2D          = Line2D,
+	.Trail2D         = Trail2D,
 }
 
 /*
@@ -618,6 +620,14 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			n = CreateVirtualJoystick(scene, TouchControl_ParseActions(node.touchActions), node.touch)
 		case .TouchButton:
 			n = CreateTouchButton(scene, TouchControl_ParseActions(node.touchActions)[0], node.text, node.touch)
+		case .Line2D:
+			line := CreateLine2D(scene, node.points[:], node.line)
+			if node.texture != "" do line.texture = loadAsset(rm, projectDir, node.texture)
+			n = line
+		case .Trail2D:
+			trail := CreateTrail2D(scene, node.line)
+			if node.texture != "" do trail.texture = loadAsset(rm, projectDir, node.texture)
+			n = trail
 		case .ScreenEffect:
 			fx := CreateScreenEffect(scene, "")
 			fx.includeScreenLayers = node.effectScreenLayers

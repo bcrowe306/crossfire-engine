@@ -8,8 +8,8 @@
 # them to SPIR-V (Vulkan: Linux, Windows) and MSL (Metal: macOS), which is what SDL's GPU
 # renderer takes on desktops. No DXIL: games with shaders draw through Vulkan on Windows.
 #
-# Needs CMake, a C++ compiler and Python 3 (glslang's build), and the static SDL
-# (tools/build_sdl_static.sh). A few minutes the first time.
+# Needs CMake, a C++ compiler and Python 3 (glslang's build). Uses the static SDL's install
+# (tools/build_sdl_static.sh) when it's there, else builds SDL itself. A few minutes the first time.
 #
 # Usage: tools/build_shader_tools.sh
 set -euo pipefail
@@ -36,14 +36,13 @@ case "$(uname -m)" in
 	*)             echo "Unknown CPU $(uname -m)" >&2; exit 1 ;;
 esac
 target="${os}_${arch}"
-sdlPrefix="$engine/sdl/build/$target/install"
-if [[ ! -d "$sdlPrefix/lib/cmake/SDL3" ]]; then
-	echo "The static SDL isn't built for $target: run tools/build_sdl_static.sh first" >&2
-	exit 1
-fi
 out="$engine/shader_tools/$target"
 work="$engine/shader_tools/build/$target"
 prefix="$work/install"
+# shadercross links SDL: the static SDL's CMake install (tools/build_sdl_static.sh), else (CI
+# restores only sdl/lib from its cache) a static SDL of its own, built below
+sdlPrefix="$engine/sdl/build/$target/install"
+[[ -d "$sdlPrefix/lib/cmake/SDL3" ]] || sdlPrefix="$prefix"
 jobs=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 mkdir -p "$out" "$work"
 exe=""
@@ -67,6 +66,12 @@ build() { # <source> <name> <options...>
 		{ tail -40 "$work/$name.build.log" >&2; exit 1; }
 	cmake --install "$(native "$work/$name")" --config Release > /dev/null
 }
+
+# SDL, when the static SDL's install isn't here: just the library (no tests, no other parts)
+if [[ "$sdlPrefix" == "$prefix" && ! -d "$prefix/lib/cmake/SDL3" ]]; then
+	[[ -f "$src/SDL/CMakeLists.txt" ]] || { echo "The SDL sources are missing: git submodule update --init third_party/SDL" >&2; exit 1; }
+	build "$src/SDL" SDL -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+fi
 
 # glslang: only the compiler (no SPIRV-Tools optimizer, tests or HLSL front end needed)
 build "$src/glslang" glslang -DENABLE_OPT=OFF -DGLSLANG_TESTS=OFF -DGLSLANG_ENABLE_INSTALL=ON \
