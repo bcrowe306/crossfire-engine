@@ -215,7 +215,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `pack.odin` | **The data pack**: a game's files appended to its own executable (`Pack_Append`; the footer's `ODINPAK1`), read back by `Pack_Open` at start (the project is then `PACK_ROOT`); `Pack_Bytes` / `Pack_Has`, a `Pack` value for tools and tests (`Pack_OpenFile`) |
 | `pack_test.odin` | Tests: a pack appended to a file and read back by path |
 | `sdl_static.odin` | Links the static SDL (tools/build_sdl_static.sh) when it's built: `SDL_STATIC`, `SDL_LINKED_STATICALLY` |
-| `player/main.odin` | The **player** for projects without scripts: calls `Player_Main` (`Player_Run` with the command line; nothing in the browser). A project with scripts gets its own generated main that also imports its `scripts` package. Used by the editor's Play and, later, exports |
+| `player/main.odin` | The **player** for projects without scripts: calls `Player_Main` (`Player_Run` with the command line; nothing in the browser). A project with scripts gets its own generated main that also imports its `scripts` package. Used by the editor's Play and exports, and built optimized as the editor's prebuilt players |
 | `script_test.odin` | Tests: script registration, fields and tags, lifecycle on a node, bad values, `Scene_FindNode` paths, format v3 scripts |
 | `project_format_test.odin`, `transform_test.odin` | Tests: parser and v1 migration, format 14's sheets per animation (and older files' node and `.anim.xml` sheets migrated), sheet grids; transform math, hierarchy, subtree removal, draw order/transform/tint/visibility, camera node |
 
@@ -1011,8 +1011,18 @@ failed, fixes it and builds again with the next tag.
 ## Documentation (required)
 
 All public code has **Odin-style doc comments** in the format of Odin's own `core` library, which
-`odin doc` and pkg.odin-lang.org render. `camera.odin`, `transform.odin`, `animation*.odin`, `easing.odin` and
-`node.odin` are the reference examples.
+`odin doc` and pkg.odin-lang.org render, published on the website (below).
+
+**Every change updates its docs, in the same commit or the one beside it:** the doc comments,
+both repos' CLAUDE.md (this file's code map and rules; the editor's status block), the READMEs,
+the editor's manual (`../odin_sdl_editor/docs/manual/`) when users see the change, and the
+website's own pages (`../crossfire_astro/src/content/docs/getting-started/`, `examples/`) when
+what they say changed. **After pushing or tagging, watch the website deploy** (crossfire-astro's
+Deploy workflow, then crossfireengine.io itself, fetched with a cache-busting query) and fix it if
+it fails.
+
+`camera.odin`, `transform.odin`, `animation*.odin`, `easing.odin` and `node.odin` are the
+reference examples of doc comments.
 
 ```odin
 /*
@@ -1047,18 +1057,30 @@ Example:
   `events` in scope). An example's `// Given: hero: ^e.CharacterMover, ...` first line names what
   it assumes; keep that convention so examples stay checkable.
 
-### Generating the GitHub Pages site
+### Publishing: the website
 
-`tools/build_docs.sh <generator>` builds the site into `docs/build/` (gitignored) with Odin's
-generator, the one behind pkg.odin-lang.org (github.com/odin-lang/pkg.odin-lang.org, built with
-`odin build . -out:odin-doc`; it links libcmark: `apt install libcmark-dev`, or build
-github.com/commonmark/cmark and pass `-extra-linker-flags:-L<cmark>/build/src`): `odin doc
-docs/all -all-packages -doc-format` (docs/all imports the engine), then the generator with
-`docs/config.json` (the `engine` collection; `url_prefix` /odin_sdl_engine for GitHub Pages).
-`.github/workflows/docs.yml` runs it on pushes to main and deploys to GitHub Pages (the
-repository's Pages source is "GitHub Actions"; the generator is pinned by commit). Published at
-https://bcrowe306.github.io/crossfire-engine/engine/ (Pages enabled 2026-10-20). The engine is MIT licensed (LICENSE, chosen
-2026-10-22); config.json's license links it.
+The docs users read are on the website, **crossfireengine.io** (the workspace's
+`../crossfire_astro`, bcrowe306/crossfire-astro; its CLAUDE.md and README have the details):
+- **The API reference** is generated from these doc comments at the engine's **newest tag**
+  (`scripts/build-api.mjs` with the site's `tools/docgen`, an Odin program reading `odin doc`'s
+  output). **Every engine file belongs to an API area** (the site's `scripts/api-groups.json`): a
+  new file needs an entry there, or the build complains.
+- **Every `Example:` block is type-checked** on the site (`npm run docs && node
+  scripts/check-examples.mjs`, run by its CI before deploying), with the `// Given:` convention
+  above: an example that doesn't compile fails the deploy.
+- **When it updates:** with each editor release (the editor's `website` job calls the site's
+  deploy workflow), on the site's own pushes, and hourly when a newer editor release exists. An
+  engine doc fix reaches the site once the engine is tagged and the site deploys again.
+- The editor's manual (its `docs/manual/`) is published beside it.
+
+**The older GitHub Pages reference** still builds: `tools/build_docs.sh <generator>` makes it
+into `docs/build/` (gitignored) with Odin's pkg.odin-lang.org generator (built with `odin build .
+-out:odin-doc`; it links libcmark: `apt install libcmark-dev`, or build cmark and pass
+`-extra-linker-flags:-L<cmark>/build/src`): `odin doc docs/all -all-packages -doc-format`, then
+the generator with `docs/config.json`. `.github/workflows/docs.yml` deploys it on pushes to main
+to https://bcrowe306.github.io/crossfire-engine/engine/ (the generator pinned by commit). It's a
+mirror; the website is the reference. The engine is MIT licensed (LICENSE, chosen 2026-10-22);
+config.json's license links it.
 
 ## Web build (js_wasm32 + Emscripten)
 
@@ -1098,8 +1120,8 @@ comment. What was needed, and why:
   exported executable).
 - **Scene loading limits.** These are documented in `project_format.odin`, and the editor's
   writer must stay in sync with it.
-  - Menus and labels in a scene with a camera are drawn through it, because scene files can't set
-    `screenLayers` yet.
+  - Menus and labels in a scene with a camera are drawn through it unless their layer is one of
+    the scene's `screenLayers` (the scene file's own settings, format 13).
   - Sound nodes load their sound when the scene is built (`Scene_Build` with scripts attached; the
     editor's viewport doesn't); `Game_PlaySound` still plays any sound from code, loaded on first use.
 - **Format version 14** gives each AnimatedSprite animation its own sheet: `<animation>`'s

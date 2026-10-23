@@ -50,8 +50,11 @@ publishes the player for each as a [release](https://github.com/bcrowe306/crossf
 ## Documentation
 
 `doc.odin` is the package overview, and every public declaration and struct field has an Odin
-doc comment (`odin doc .`; the editor's code editor shows them through OLS). `CLAUDE.md`
-describes the architecture and the rules that keep the engine correct. `odin run bench -o:speed`
+doc comment (`odin doc .`; the editor's code editor shows them through OLS). The API reference
+made from them is on the website, [crossfireengine.io](https://crossfireengine.io), with the
+editor's manual. `CLAUDE.md` describes the architecture and the rules that keep the engine
+correct. Every change updates the docs it touches (doc comments, CLAUDE.md, this README, the
+website's pages). `odin run bench -o:speed`
 measures the per-frame costs.
 
 ## License
