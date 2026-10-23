@@ -1476,6 +1476,8 @@ RichRun :: struct {
 	size: f32,
 	// Zero: the theme's text color
 	color: sdl.Color,
+	// Its width without the spaces after it
+	width: f32,
 }
 
 // Rich text laid out: its runs and the size they take
@@ -1494,18 +1496,33 @@ Inputs:
 - font: The font
 - size: Its text size where no `[size]` says otherwise
 - width: Where lines wrap (0: only at line breaks)
+- align: Where each line goes across the width (or, with no width, the widest line): Left
+  (and Auto), Center or Right
 
 Returns:
 - The runs (temp allocated) and their size
+
+Example:
+	lines := e.RichText_Layout(&game.resourceManager, "[size=40]Credits[/size]\nArt: Anokolisa", e.DEFAULT_FONT, 24, 400, .Center)
+	for run in lines.runs do e.DrawText(&game.resourceManager, run.at, run.text, e.DEFAULT_FONT, run.size, {255, 255, 255, 255})
 */
-RichText_Layout :: proc(rm: ^ResourceManager, text, font: string, size, width: f32) -> RichLines {
+RichText_Layout :: proc(rm: ^ResourceManager, text, font: string, size, width: f32, align := UITextAlign.Left) -> RichLines {
 	runs := make([dynamic]RichRun, context.temp_allocator)
+	// Each line's first run and its width, for the alignment
+	lineSpans := make([dynamic]RichLineSpan, context.temp_allocator)
 	colors := make([dynamic]sdl.Color, context.temp_allocator)
 	sizes := make([dynamic]f32, context.temp_allocator)
 	x, y, lineHeight, widest: f32
 	lineStart := 0
-	newLine :: proc(runs: [dynamic]RichRun, lineStart: int, x, y, lineHeight, size: ^f32, widest: ^f32) {
+	newLine :: proc(runs: [dynamic]RichRun, spans: ^[dynamic]RichLineSpan, lineStart: int, x, y, lineHeight, size: ^f32, widest: ^f32) {
 		h := lineHeight^ > 0 ? lineHeight^ : size^ * 1.25
+		lineWidth := x^
+		if len(runs) > lineStart {
+			// Trailing spaces don't count toward where a line is centered
+			last := runs[len(runs) - 1]
+			lineWidth = last.at.x + last.width
+		}
+		append(spans, RichLineSpan{lineStart, len(runs), lineWidth})
 		// The line's words sit on its tallest's baseline (their tops: by their size's difference)
 		for &r in runs[lineStart:] do r.at.y = y^ + (h - r.size * 1.25)
 		widest^ = max(widest^, x^)
@@ -1545,7 +1562,7 @@ RichText_Layout :: proc(rm: ^ResourceManager, text, font: string, size, width: f
 		}
 		if rest[0] == '\n' {
 			s := current(sizes, size)
-			newLine(runs, lineStart, &x, &y, &lineHeight, &s, &widest)
+			newLine(runs, &lineSpans, lineStart, &x, &y, &lineHeight, &s, &widest)
 			lineStart = len(runs)
 			rest = rest[1:]
 			continue
@@ -1561,22 +1578,37 @@ RichText_Layout :: proc(rm: ^ResourceManager, text, font: string, size, width: f
 		m := MeasureText(rm, word, font, s)
 		trimmed := MeasureText(rm, strings.trim_right(word, " "), font, s).x
 		if width > 0 && x > 0 && x + trimmed > width {
-			newLine(runs, lineStart, &x, &y, &lineHeight, &s, &widest)
+			newLine(runs, &lineSpans, lineStart, &x, &y, &lineHeight, &s, &widest)
 			lineStart = len(runs)
 		}
 		color := len(colors) > 0 ? colors[len(colors) - 1] : sdl.Color{}
-		append(&runs, RichRun{word, {x, y}, s, color})
+		append(&runs, RichRun{word, {x, y}, s, color, trimmed})
 		x += m.x
 		lineHeight = max(lineHeight, s * 1.25)
 	}
 	s := size
-	if x > 0 || len(runs) > lineStart do newLine(runs, lineStart, &x, &y, &lineHeight, &s, &widest)
-	return {runs[:], {width > 0 ? width : widest, y}}
+	if x > 0 || len(runs) > lineStart do newLine(runs, &lineSpans, lineStart, &x, &y, &lineHeight, &s, &widest)
+	across := width > 0 ? width : widest
+	if align == .Center || align == .Right {
+		for span in lineSpans {
+			shift := across - span.width
+			if align == .Center do shift *= 0.5
+			for &r in runs[span.first:span.end] do r.at.x += math.round(max(shift, 0))
+		}
+	}
+	return {runs[:], {across, y}}
+}
+
+// A laid-out line of rich text: its runs (first to end) and how wide it is
+@(private="file")
+RichLineSpan :: struct {
+	first, end: int,
+	width: f32,
 }
 
 
 @(private="file")
 richLayout :: proc(c: ^Control, rm: ^ResourceManager, font: string, size, width: f32) -> RichLines {
 	if rm == nil do return {}
-	return RichText_Layout(rm, Tr_Text(c.text, c.scene.game), font, size, width)
+	return RichText_Layout(rm, Tr_Text(c.text, c.scene.game), font, size, width, c.settings.textAlign)
 }

@@ -217,6 +217,16 @@ ui_themes_and_rich_text :: proc(t: ^testing.T) {
 	}
 	narrow := RichText_Layout(rm, "one two three four", DEFAULT_FONT, 20, 60)
 	testing.expect(t, narrow.size.x == 60 && narrow.size.y > 40, "wrapped onto lines")
+	// Aligned: each line centered (or right) in the width, or in the widest line without one
+	short := MeasureText(rm, "ab", DEFAULT_FONT, 20).x
+	long := MeasureText(rm, "abcdef", DEFAULT_FONT, 20).x
+	centered := RichText_Layout(rm, "ab\nabcdef", DEFAULT_FONT, 20, 200, .Center)
+	testing.expect_value(t, centered.runs[0].at.x, math.round((200 - short) * 0.5))
+	testing.expect_value(t, centered.runs[1].at.x, math.round((200 - long) * 0.5))
+	right := RichText_Layout(rm, "ab \nabcdef", DEFAULT_FONT, 20, 0, .Right)
+	testing.expect_value(t, right.size.x, long)
+	testing.expect_value(t, right.runs[0].at.x, math.round(long - short))
+	testing.expect_value(t, right.runs[1].at.x, f32(0))
 	free_all(context.temp_allocator)
 }
 
