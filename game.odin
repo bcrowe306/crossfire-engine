@@ -48,7 +48,8 @@ Game :: struct {
 	// Set it to end the game: the application stops after the current frame. Closing the window
 	// sets it
 	shouldQuit: bool,
-	// Quit when Escape is pressed. Set to false in build if the game uses Escape itself
+	// Quit when Escape is pressed (Game_Init sets it). Set it to false in build if the game uses
+	// Escape itself; a project whose input actions bind Escape has it off (Game_LoadProject)
 	quitOnEscape: bool,
 	// Developer keys, for games run from the editor (the player's --dev; never in exports):
 	// F9 shows / hides the physics shapes (DEV_KEY_PHYSICS_DEBUG), F10 the debug overlay

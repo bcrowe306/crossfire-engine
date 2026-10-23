@@ -117,6 +117,9 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 	currentGame = game
 	// The project's input actions (input.odin) and mix buses (audio_nodes.odin)
 	Input_SetActions(game, project.actions[:])
+	// Escape quits a game (Game_Init's default) unless one of its actions uses it: a menu's
+	// ui_cancel, a pause key. Then it's the game's to handle
+	for action in project.actions do for b in action.bindings do if b == InputBinding(KeyBinding{.Escape}) do game.quitOnEscape = false
 	Audio_SetBuses(game, project.buses[:])
 	// Steam's achievements, stats and cloud files (steam.odin: the stub until Steamworks is in)
 	Steam_Setup(game, project.steam, project.achievements[:])

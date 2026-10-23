@@ -221,6 +221,11 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 
 ## Rules that keep the engine correct
 
+**Escape quits only games that don't use it** (`Game.quitOnEscape`: Game_Init turns it on;
+`Game_LoadProject` turns it off when any project action binds Escape, such as a menu's
+ui_cancel or a pause key). It was on for every project game: a pause menu closed with Escape
+quit the whole game (the demo's playtest found it). Test: `escape_quits_only_games_that_dont_use_it`.
+
 **The data pack** (pack.odin): a single-file export is the player with the project's files
 appended (ELF and PE ignore trailing bytes; macOS games will keep theirs in the .app, since
 appending breaks code signing). `Player_FindExportedProject` takes the pack first. Everything

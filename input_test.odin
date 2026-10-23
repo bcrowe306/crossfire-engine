@@ -1,6 +1,7 @@
 #+build !js
 package crossfire
 
+import "core:fmt"
 import "core:testing"
 import sdl "vendor:sdl3"
 
@@ -184,4 +185,24 @@ actions_in_project_files :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(attrs), 3)
 	testing.expect_value(t, InputBinding_Describe(jump.bindings[3]), "Gamepad 2 LeftY −")
 	testing.expect_value(t, InputBinding_Describe(jump.bindings[1]), "Mouse Left")
+}
+
+@(test)
+escape_quits_only_games_that_dont_use_it :: proc(t: ^testing.T) {
+	for uses in ([2]bool{false, true}) {
+		text := fmt.tprintf(`<project formatVersion="14" name="Esc" width="320" height="180">
+			<action name="jump"><key key="Space"/></action>
+			%s
+		</project>`, uses ? `<action name="pause"><key key="Escape"/></action>` : "")
+		project, err := ParseProject(text)
+		testing.expect_value(t, err, ProjectError.None)
+		game := testGame("testdata")
+		game.quitOnEscape = true // as Game_Init leaves it
+		Game_LoadProject(game, &project, "testdata")
+		// A game whose actions use Escape (a pause menu, a menu's ui_cancel) handles it itself
+		testing.expect_value(t, game.quitOnEscape, !uses)
+		Game_Destroy(game)
+		free(game)
+		ProjectData_Destroy(&project)
+	}
 }
