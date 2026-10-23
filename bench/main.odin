@@ -337,7 +337,7 @@ main :: proc() {
 		for a in args do if a == name do return true
 		return false
 	}
-	ldtkFile := "../odin_sdl_editor/examples/demo_project/assets/forest/forest.ldtk"
+	ldtkFile := "../odin_sdl_editor/examples/demo_project/assets/levels/legacy.ldtk"
 	for a, i in args do if strings.has_suffix(a, ".ldtk") do ldtkFile = args[i]
 
 	surface := sdl.CreateSurface(1280, 720, .RGBA32)

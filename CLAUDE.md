@@ -1209,6 +1209,7 @@ machine: Intel UHD 620 laptop, -o:speed):
 | GPU particles (offscreen GPU renderer, a frame's update + draw + wait) | 500 on the CPU: 1.6 ms | GPU: 500 0.8 ms, 20 000 2.1 ms, 100 000 5.2 ms, 200 000 9.1 ms |
 | physics, 500 static + 500 dynamic bodies, a frame | 0.37 ms | 0.29 ms |
 | LDtk forest, software renderer: a screenful (3x) / the whole level | 101-130 ms / 19-21 ms (SDL's pixel work) | 33 ms / 13-15 ms (tile layers cached; copies clipped to the screen) |
+| LDtk: the demo's Forest level (2026-10-23: 210 x 30, no tree layers), software: a screenful (3x) / the whole level | | 11.7 ms / 5.9 ms |
 | text: 30 centered labels a frame (software) | 0.36 ms | (no cache needed) |
 
 Measured and left alone (not worth it at these numbers): particles' `#soa` layout and update
