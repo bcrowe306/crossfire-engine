@@ -165,7 +165,11 @@ pushed_scenes_start_fresh_and_ignore_the_press_that_opened_them :: proc(t: ^test
 	</project>`)
 	game := testGame(dir)
 	Game_LoadProject(game, &project, dir)
-	defer { Game_Destroy(game); free(game); ProjectData_Destroy(&project); removeTestDir(dir) }
+	defer {
+		Game_Destroy(game); free(game); ProjectData_Destroy(&project)
+		for name in ([2]string{"Menu.scene.xml", "Popup.scene.xml"}) do _ = os.remove(JoinPath(dir, name))
+		_ = os.remove(dir)
+	}
 	enter: sdl.Event
 	enter.type = .KEY_DOWN
 	enter.key.scancode = .RETURN
