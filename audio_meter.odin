@@ -116,7 +116,7 @@ Example:
 	bar := sdl.FRect{20, 20, 200 * max(1 + db / 60, 0), 8}
 	e.DrawRectangle(renderer, &bar, {80, 220, 120, 255})
 */
-Audio_GetBusLevel :: proc(name: string, game: ^Game = nil) -> (left, right: f32) {
+Audio_GetBusLevel :: proc(name: BusName, game: ^Game = nil) -> (left, right: f32) {
 	if b := Audio_GetBus(name, game); b != nil do return AudioMeter_Read(b.meter)
 	return 0, 0
 }

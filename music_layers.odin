@@ -70,7 +70,7 @@ Inputs:
 Returns:
 - The layer (nil when the player isn't a MusicPlayer); valid until a layer is added or removed
 */
-MusicPlayer_AddLayer :: proc(player: ^MusicPlayer, name, path: string, volume: f32 = 1) -> ^MusicLayer {
+MusicPlayer_AddLayer :: proc(player: ^MusicPlayer, name: string, path: SoundPath, volume: f32 = 1) -> ^MusicLayer {
 	if player == nil || player.kind != .Music do return nil
 	MusicPlayer_RemoveLayer(player, name)
 	allocator := Node_GetAllocator(player)
@@ -163,7 +163,7 @@ Example:
 	// Given: music: ^e.MusicPlayer
 	e.MusicPlayer_CrossfadeTo(music, "music/boss.ogg", 3)
 */
-MusicPlayer_CrossfadeTo :: proc(player: ^MusicPlayer, path: string, seconds: f32) {
+MusicPlayer_CrossfadeTo :: proc(player: ^MusicPlayer, path: SoundPath, seconds: f32) {
 	if player == nil || player.kind != .Music do return
 	allocator := Node_GetAllocator(player)
 	if !player.playing || player.track == nil {

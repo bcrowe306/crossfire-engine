@@ -196,31 +196,31 @@ Players_Get :: proc(index: int, game: ^Game = nil) -> ^Player {
 }
 
 // Whether a player's action is held
-Player_IsActionPressed :: proc(player: int, name: string, game: ^Game = nil) -> bool {
+Player_IsActionPressed :: proc(player: int, name: ActionName, game: ^Game = nil) -> bool {
 	a := playerAction(player, name, game)
 	return a != nil && a.down
 }
 
 // Whether a player's action went down this frame
-Player_IsActionJustPressed :: proc(player: int, name: string, game: ^Game = nil) -> bool {
+Player_IsActionJustPressed :: proc(player: int, name: ActionName, game: ^Game = nil) -> bool {
 	a := playerAction(player, name, game)
 	return a != nil && a.pressed
 }
 
 // Whether a player's action was let go this frame
-Player_IsActionJustReleased :: proc(player: int, name: string, game: ^Game = nil) -> bool {
+Player_IsActionJustReleased :: proc(player: int, name: ActionName, game: ^Game = nil) -> bool {
 	a := playerAction(player, name, game)
 	return a != nil && a.released
 }
 
 // How strongly a player's action is pressed (0 to 1)
-Player_GetActionStrength :: proc(player: int, name: string, game: ^Game = nil) -> f32 {
+Player_GetActionStrength :: proc(player: int, name: ActionName, game: ^Game = nil) -> f32 {
 	a := playerAction(player, name, game)
 	return a != nil ? a.strength : 0
 }
 
 // A player's axis from two actions: positive minus negative (-1 to 1)
-Player_GetAxis :: proc(player: int, negative, positive: string, game: ^Game = nil) -> f32 {
+Player_GetAxis :: proc(player: int, negative, positive: ActionName, game: ^Game = nil) -> f32 {
 	return Player_GetActionStrength(player, positive, game) - Player_GetActionStrength(player, negative, game)
 }
 
@@ -235,7 +235,7 @@ Inputs:
 Returns:
 - The direction (y down)
 */
-Player_GetVector :: proc(player: int, negativeX, positiveX, negativeY, positiveY: string, game: ^Game = nil) -> [2]f32 {
+Player_GetVector :: proc(player: int, negativeX, positiveX, negativeY, positiveY: ActionName, game: ^Game = nil) -> [2]f32 {
 	v := [2]f32{Player_GetAxis(player, negativeX, positiveX, game), Player_GetAxis(player, negativeY, positiveY, game)}
 	length := math.sqrt(v.x * v.x + v.y * v.y)
 	if length > 1 do v /= length

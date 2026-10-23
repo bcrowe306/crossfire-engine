@@ -194,7 +194,7 @@ Inputs:
 - player: The player
 - path: A sound or music file, relative to the project folder ("" for none)
 */
-AudioPlayer_SetSound :: proc(player: ^AudioPlayer, path: string) {
+AudioPlayer_SetSound :: proc(player: ^AudioPlayer, path: SoundPath) {
 	AudioPlayer_Stop(player, fade = false)
 	releaseAudio(player)
 	allocator := Node_GetAllocator(player)
@@ -219,7 +219,7 @@ Inputs:
 - player: The player
 - bus: The bus's name ("" or "Master" for Master; an unknown bus is Master too)
 */
-AudioPlayer_SetBus :: proc(player: ^AudioPlayer, bus: string) {
+AudioPlayer_SetBus :: proc(player: ^AudioPlayer, bus: BusName) {
 	player.bus = strings.clone(bus, Node_GetAllocator(player))
 	if player.track != nil do _ = mix.SetTrackGroup(player.track, busGroup(player.scene.game, bus))
 }
@@ -437,7 +437,7 @@ Example:
 	e.Audio_AddBus("Voices", 0.9)
 	e.Audio_SetBusMute("Voices", true)
 */
-Audio_AddBus :: proc(name: string, volume: f32 = 1, game: ^Game = nil) -> ^AudioBus {
+Audio_AddBus :: proc(name: BusName, volume: f32 = 1, game: ^Game = nil) -> ^AudioBus {
 	game := game != nil ? game : currentGame
 	if game == nil do return nil
 	// "" is Master, like Audio_GetBus says
@@ -465,7 +465,7 @@ Inputs:
 Returns:
 - The bus, or nil if there's none by that name. The pointer is valid until a bus is added
 */
-Audio_GetBus :: proc(name: string, game: ^Game = nil) -> ^AudioBus {
+Audio_GetBus :: proc(name: BusName, game: ^Game = nil) -> ^AudioBus {
 	game := game != nil ? game : currentGame
 	if game == nil do return nil
 	if len(game.buses) == 0 do Audio_SetBuses(game, nil)
@@ -485,7 +485,7 @@ Inputs:
 Example:
 	e.Audio_SetBusVolume("Music", 0.5)
 */
-Audio_SetBusVolume :: proc(name: string, volume: f32, game: ^Game = nil) {
+Audio_SetBusVolume :: proc(name: BusName, volume: f32, game: ^Game = nil) {
 	if b := Audio_GetBus(name, game); b != nil do b.volume = max(volume, 0)
 }
 
@@ -497,7 +497,7 @@ Inputs:
 - pan: -1 left, 0 center, 1 right (clamped)
 - game: The game (nil: the current game)
 */
-Audio_SetBusPan :: proc(name: string, pan: f32, game: ^Game = nil) {
+Audio_SetBusPan :: proc(name: BusName, pan: f32, game: ^Game = nil) {
 	if b := Audio_GetBus(name, game); b != nil do b.pan = math.clamp(pan, -1, 1)
 }
 
@@ -509,7 +509,7 @@ Inputs:
 - mute: Silence it
 - game: The game (nil: the current game)
 */
-Audio_SetBusMute :: proc(name: string, mute: bool, game: ^Game = nil) {
+Audio_SetBusMute :: proc(name: BusName, mute: bool, game: ^Game = nil) {
 	if b := Audio_GetBus(name, game); b != nil do b.mute = mute
 }
 
@@ -527,7 +527,7 @@ Inputs:
 Returns:
 - The track gain, and the left and right gains
 */
-Audio_Output :: proc(game: ^Game, bus: string, volume, pan: f32, master := true) -> (gain, left, right: f32) {
+Audio_Output :: proc(game: ^Game, bus: BusName, volume, pan: f32, master := true) -> (gain, left, right: f32) {
 	gain = max(volume, 0)
 	left, right = balance(pan)
 	stage :: proc(b: ^AudioBus, gain, left, right: ^f32) {
@@ -605,7 +605,7 @@ Example:
 	// Under water: everything muffled
 	e.Audio_SetBusEffects("", {e.AudioEffect_Make(.LowPass)})
 */
-Audio_SetBusEffects :: proc(name: string, effects: []AudioEffect, game: ^Game = nil) {
+Audio_SetBusEffects :: proc(name: BusName, effects: []AudioEffect, game: ^Game = nil) {
 	if b := Audio_GetBus(name, game); b != nil do AudioEffects_Set(b.effects, effects)
 }
 
@@ -618,12 +618,12 @@ Example:
 	muffle.cutoff = 4000 - depth * 30
 	e.Audio_SetBusEffect("Music", 0, muffle)
 */
-Audio_SetBusEffect :: proc(name: string, index: int, effect: AudioEffect, game: ^Game = nil) {
+Audio_SetBusEffect :: proc(name: BusName, index: int, effect: AudioEffect, game: ^Game = nil) {
 	if b := Audio_GetBus(name, game); b != nil do AudioEffects_SetOne(b.effects, index, effect)
 }
 
 // A bus's effects (a temp copy; none for a bus that doesn't exist)
-Audio_GetBusEffects :: proc(name: string, game: ^Game = nil) -> []AudioEffect {
+Audio_GetBusEffects :: proc(name: BusName, game: ^Game = nil) -> []AudioEffect {
 	if b := Audio_GetBus(name, game); b != nil do return AudioEffects_Get(b.effects)
 	return nil
 }

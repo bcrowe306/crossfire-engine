@@ -214,7 +214,7 @@ Example:
 	jump := e.CreateTouchButton(scene, "jump", "A")
 	jump.position = {1160, 620}
 */
-CreateTouchButton :: proc(scene: ^Scene, action := "", text := "", settings := TouchControlSettings{}) -> ^TouchButton {
+CreateTouchButton :: proc(scene: ^Scene, action: ActionName = "", text := "", settings := TouchControlSettings{}) -> ^TouchButton {
 	b := CreateNode(scene, TouchButton)
 	s := settings
 	if s == {} {

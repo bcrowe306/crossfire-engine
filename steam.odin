@@ -174,7 +174,7 @@ Inputs:
 Returns:
 - Whether it's unlocked now
 */
-Steam_UnlockAchievement :: proc(name: string, game: ^Game = nil) -> bool {
+Steam_UnlockAchievement :: proc(name: AchievementName, game: ^Game = nil) -> bool {
 	steam := steamOf(game)
 	if steam == nil do return false
 	steamCheckName(steam, name)
@@ -185,13 +185,13 @@ Steam_UnlockAchievement :: proc(name: string, game: ^Game = nil) -> bool {
 }
 
 // Whether an achievement is unlocked
-Steam_IsAchievementUnlocked :: proc(name: string, game: ^Game = nil) -> bool {
+Steam_IsAchievementUnlocked :: proc(name: AchievementName, game: ^Game = nil) -> bool {
 	steam := steamOf(game)
 	return steam != nil && steam.backend.isUnlocked != nil && steam.backend.isUnlocked(steam, name)
 }
 
 // Locks an achievement again (testing). Returns whether it worked
-Steam_ClearAchievement :: proc(name: string, game: ^Game = nil) -> bool {
+Steam_ClearAchievement :: proc(name: AchievementName, game: ^Game = nil) -> bool {
 	steam := steamOf(game)
 	return steam != nil && steam.backend.clear != nil && steam.backend.clear(steam, name)
 }

@@ -266,7 +266,7 @@ Inputs:
 Example:
 	e.Input_AddAction("dash", e.KeyBinding{.LeftShift}, e.GamepadButtonBinding{.East, -1})
 */
-Input_AddAction :: proc(name: string, bindings: ..InputBinding, deadzone: f32 = DEFAULT_ACTION_DEADZONE, game: ^Game = nil) {
+Input_AddAction :: proc(name: ActionName, bindings: ..InputBinding, deadzone: f32 = DEFAULT_ACTION_DEADZONE, game: ^Game = nil) {
 	game := game != nil ? game : currentGame
 	if game == nil do return
 	allocator := Game_GetAllocator(game)
@@ -295,7 +295,7 @@ Inputs:
 Returns:
 - true if it exists
 */
-Input_HasAction :: proc(name: string, game: ^Game = nil) -> bool {
+Input_HasAction :: proc(name: ActionName, game: ^Game = nil) -> bool {
 	return findAction(game, name, warn = false) != nil
 }
 
@@ -313,7 +313,7 @@ Returns:
 Example:
 	if e.Input_IsActionPressed("fire") do log.info("firing")
 */
-Input_IsActionPressed :: proc(name: string, game: ^Game = nil) -> bool {
+Input_IsActionPressed :: proc(name: ActionName, game: ^Game = nil) -> bool {
 	a := findAction(game, name)
 	return a != nil && a.down
 }
@@ -332,7 +332,7 @@ Returns:
 Example:
 	if e.Input_IsActionJustPressed("jump") do log.info("jump")
 */
-Input_IsActionJustPressed :: proc(name: string, game: ^Game = nil) -> bool {
+Input_IsActionJustPressed :: proc(name: ActionName, game: ^Game = nil) -> bool {
 	a := findAction(game, name)
 	return a != nil && a.pressed
 }
@@ -348,7 +348,7 @@ Inputs:
 Returns:
 - true on the frame it was released
 */
-Input_IsActionJustReleased :: proc(name: string, game: ^Game = nil) -> bool {
+Input_IsActionJustReleased :: proc(name: ActionName, game: ^Game = nil) -> bool {
 	a := findAction(game, name)
 	return a != nil && a.released
 }
@@ -363,7 +363,7 @@ Inputs:
 Returns:
 - 0 to 1: 1 for keys and buttons, a stick's or trigger's travel past the deadzone (rescaled so it starts at 0 there); 0 for an unknown action
 */
-Input_GetActionStrength :: proc(name: string, game: ^Game = nil) -> f32 {
+Input_GetActionStrength :: proc(name: ActionName, game: ^Game = nil) -> f32 {
 	a := findAction(game, name)
 	return a != nil ? a.strength : 0
 }
@@ -382,7 +382,7 @@ Returns:
 Example:
 	steer := e.Input_GetAxis("turn_left", "turn_right")
 */
-Input_GetAxis :: proc(negative, positive: string, game: ^Game = nil) -> f32 {
+Input_GetAxis :: proc(negative, positive: ActionName, game: ^Game = nil) -> f32 {
 	return Input_GetActionStrength(positive, game) - Input_GetActionStrength(negative, game)
 }
 
@@ -404,7 +404,7 @@ Example:
 	velocity := e.Input_GetVector("move_left", "move_right", "move_up", "move_down") * speed
 	node.position += velocity * f32(dt)
 */
-Input_GetVector :: proc(negativeX, positiveX, negativeY, positiveY: string, game: ^Game = nil) -> [2]f32 {
+Input_GetVector :: proc(negativeX, positiveX, negativeY, positiveY: ActionName, game: ^Game = nil) -> [2]f32 {
 	v := [2]f32{Input_GetAxis(negativeX, positiveX, game), Input_GetAxis(negativeY, positiveY, game)}
 	length := math.sqrt(v.x * v.x + v.y * v.y)
 	return length > 1 ? v / length : v

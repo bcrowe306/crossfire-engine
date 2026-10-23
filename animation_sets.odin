@@ -134,7 +134,7 @@ Inputs:
 Returns:
 - false (logged) if a sheet can't be loaded (its animation is there, drawing nothing)
 */
-AnimatedSprite_SetAnimations :: proc(sprite: ^AnimatedSprite, set: ^AnimationSetData, projectDir: string, autoplay := "") -> bool {
+AnimatedSprite_SetAnimations :: proc(sprite: ^AnimatedSprite, set: ^AnimationSetData, projectDir: string, autoplay: AnimationName = "") -> bool {
 	player := &sprite.animation
 	if player.allocator.procedure == nil do AnimationPlayer_Init(player, Node_GetAllocator(sprite))
 	AnimationPlayer_Clear(player)
@@ -204,7 +204,7 @@ Example:
 	// Given: sprite: ^e.AnimatedSprite, ANIMATION_HERO_ARMORED: e.AnimationAsset
 	e.AnimatedSprite_UseAnimations(sprite, ANIMATION_HERO_ARMORED, "idle")
 */
-AnimatedSprite_UseAnimations :: proc(sprite: ^AnimatedSprite, asset: AnimationAsset, autoplay := "") -> bool {
+AnimatedSprite_UseAnimations :: proc(sprite: ^AnimatedSprite, asset: AnimationAsset, autoplay: AnimationName = "") -> bool {
 	if asset.path == "" do return false
 	game := sprite.scene.game
 	set, ok := Game_LoadAnimationSet(game, asset.path)

@@ -370,7 +370,7 @@ DialogueData_Equal :: proc(a, b: DialogueData) -> bool {
 }
 
 // A node's index by name (-1 when there's none)
-Dialogue_FindNode :: proc(data: ^DialogueData, name: string) -> int {
+Dialogue_FindNode :: proc(data: ^DialogueData, name: DialogueNodeName) -> int {
 	if data == nil do return -1
 	for n, i in data.nodes do if n.name == name do return i
 	return -1
@@ -388,7 +388,7 @@ Inputs:
 Returns:
 - false when there's no such node (the runner is Finished)
 */
-Dialogue_Start :: proc(runner: ^DialogueRunner, data: ^DialogueData, node := "") -> bool {
+Dialogue_Start :: proc(runner: ^DialogueRunner, data: ^DialogueData, node: DialogueNodeName = "") -> bool {
 	if runner.allocator.procedure == nil do runner.allocator = context.allocator
 	runner.data = data
 	name := node != "" ? node : data.start

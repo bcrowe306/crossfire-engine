@@ -112,6 +112,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `project_format.odin` | **Project/scene XML format spec** (doc comment) and parser: `ParseProject`, `ParseScene` → plain data (`ProjectData`, `SceneData`), no SDL; `SCENE_NODE_KINDS` (each kind's description and `SceneNodeCategory`, for tools' pickers) |
 | `project_loader.odin` | Builds scenes from parsed data: `LoadProjectFile`, `Game_LoadProject`, `Scene_Build`; data-driven `Sprite` and `AnimatedSprite` nodes; menu actions `scene:<Name>` / `quit` |
 | `script.odin` | **Scripts**: Odin game code attached to nodes. `Script_Register`, the registry, exported fields (`export:""` tags) set from scene files by reflection, `Node_AttachScript` (several per node: `node.moreScripts`), `Node_Scripts`, `Node_GetScript`, `Script_DescribeJSON` |
+| `names.odin` | **Name types**: what kind of name a string parameter takes (`NodePath`, `ChildPath`, `ScenePath`, `AnimationName`, `ActionName`, `GroupName`, `BusName`, `SceneName`, `StateName`, `StateParamName`, `ClipName`, `DialogueNodeName`, `AchievementName`, `SoundPath`): aliases of `string`, read by the editor's code editor from this source |
+| `names_test.odin` | Tests (on the package's own source, `core:odin/parser`): every name type is an alias of string, the procedures that take names use them (a few per type), no public procedure takes an `action`, `bus`, `group`, `state`, `startNode` or `autoplay` as a plain string |
 | `custom_nodes.odin` | **Node types from game code**: `NodeType_Register(T, base, hooks)` (a struct embedding a built-in node type), `NodeType_Find` / `All`, the loader's override (`nodeTypeBegin` / `nodeTypeAttach`) |
 | `hot_reload.odin` | **Hot reload's snapshots**: `Game_Snapshot`, `Game_RestoreSnapshot`, `Snapshot_Parse`, `Node_NamePath`; `GAME_SNAPSHOT_VERSION` |
 | `custom_nodes_test.odin`, `hot_reload_test.odin` | Tests: a node type from a scene file (its fields, ready, hooks before the scripts), two scripts (fields, a listener on the second, Animator fields), unregistered types, the catalog; a snapshot of a game restored into a fresh one (globals, positions, script fields) |
@@ -383,6 +385,18 @@ after they finish. Time past a group's end carries into the next group and loop.
   and zones mean what they did); a Camera node's `CameraSettings.limits` says which sides are on.
   A shake's `frequency` (`shakeSettings`) eases between random points instead of a new one each
   frame.
+
+**Name types** (names.odin, 2026-10-23): **a parameter that takes a name of the project has
+its name type** (`Game_ChangeScene(game, name: SceneName)`, `bus: BusName = ""`, not `bus :=
+""`), so the editor completes and checks the string literals passed there (it parses this
+source: its name_kinds.odin). They're aliases, not distinct types: any `string` still goes in (a
+variable, `fmt.tprintf`), so no caller had to change, and `odin doc` / the website show the
+alias in the signature. **Procedures with `_Add` or `_Create` in the name declare the names they're
+given** (`Node_AddToGroup`, `Audio_AddBus`, `Input_AddAction`, `Game_CreateScene`): the editor
+doesn't report those and counts them as known. A new procedure taking such a name uses the type;
+names_test.odin fails on a public `action` / `bus` / `group` / `state` / `startNode` /
+`autoplay` parameter typed `string` (exceptions listed there: `Game_RunAction`'s and
+`CreateButton`'s `action` are menu actions).
 
 **Node types** embed `using node: e.Node` as their **first** field. Casting and node allocation both
 depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).

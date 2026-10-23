@@ -192,7 +192,7 @@ StateMachine_Current :: proc(sm: ^StateMachine) -> string {
 /*
 Whether it's in a state.
 */
-StateMachine_Is :: proc(sm: ^StateMachine, state: string) -> bool {
+StateMachine_Is :: proc(sm: ^StateMachine, state: StateName) -> bool {
 	return StateMachine_Current(sm) == state
 }
 
@@ -206,7 +206,7 @@ StateMachine_TimeInState :: proc(sm: ^StateMachine) -> f32 {
 /*
 A state's index by name (-1: none).
 */
-StateMachine_StateIndex :: proc(sm: ^StateMachine, name: string) -> int {
+StateMachine_StateIndex :: proc(sm: ^StateMachine, name: StateName) -> int {
 	for st, i in sm.states do if st.name == name do return i
 	return -1
 }
@@ -221,7 +221,7 @@ Example:
 	// Given: brain: ^e.StateMachine
 	e.StateMachine_Travel(brain, "hurt")
 */
-StateMachine_Travel :: proc(sm: ^StateMachine, state: string) -> bool {
+StateMachine_Travel :: proc(sm: ^StateMachine, state: StateName) -> bool {
 	i := StateMachine_StateIndex(sm, state)
 	if i < 0 do return false
 	enterState(sm, i)
@@ -235,7 +235,7 @@ Example:
 	// Given: brain: ^e.StateMachine, velocity: [2]f32
 	e.StateMachine_SetFloat(brain, "speed", abs(velocity.x))
 */
-StateMachine_SetFloat :: proc(sm: ^StateMachine, name: string, value: f32) {
+StateMachine_SetFloat :: proc(sm: ^StateMachine, name: StateParamName, value: f32) {
 	if i := paramIndex(sm, name); i >= 0 do sm.values[i] = value
 }
 
@@ -246,7 +246,7 @@ Example:
 	// Given: brain: ^e.StateMachine, mover: ^e.CharacterMover
 	e.StateMachine_SetBool(brain, "grounded", mover.onFloor)
 */
-StateMachine_SetBool :: proc(sm: ^StateMachine, name: string, value: bool) {
+StateMachine_SetBool :: proc(sm: ^StateMachine, name: StateParamName, value: bool) {
 	if i := paramIndex(sm, name); i >= 0 do sm.values[i] = value ? 1 : 0
 }
 
@@ -257,14 +257,14 @@ Example:
 	// Given: brain: ^e.StateMachine
 	e.StateMachine_SetTrigger(brain, "jump")
 */
-StateMachine_SetTrigger :: proc(sm: ^StateMachine, name: string) {
+StateMachine_SetTrigger :: proc(sm: ^StateMachine, name: StateParamName) {
 	if i := paramIndex(sm, name); i >= 0 do sm.values[i] = 1
 }
 
 /*
 A parameter's value (Bools and Triggers: 1 or 0).
 */
-StateMachine_GetParam :: proc(sm: ^StateMachine, name: string) -> f32 {
+StateMachine_GetParam :: proc(sm: ^StateMachine, name: StateParamName) -> f32 {
 	if i := paramIndex(sm, name); i >= 0 do return sm.values[i]
 	return 0
 }

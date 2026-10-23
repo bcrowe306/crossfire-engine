@@ -211,7 +211,7 @@ Example:
 	// On the project's "SFX" bus, a little quieter and higher than recorded
 	e.Game_PlaySound(game, "assets/coin.ogg", bus = "SFX", volume = 0.8, pitch = 1.1)
 */
-Game_PlaySoundFile :: proc(game: ^Game, path: string, bus := "", volume: f32 = 1, pitch: f32 = 1, pan: f32 = 0) -> bool {
+Game_PlaySoundFile :: proc(game: ^Game, path: SoundPath, bus: BusName = "", volume: f32 = 1, pitch: f32 = 1, pan: f32 = 0) -> bool {
 	if game.mixer == nil do return false
 	audio := game.resourceManager->loadAudio(game.projectDir == "" ? path : JoinPath(game.projectDir, path))
 	if audio == nil do return false

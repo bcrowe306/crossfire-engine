@@ -89,7 +89,7 @@ DialogueBox :: struct {
 }
 
 // Makes a DialogueBox for a dialogue asset (path relative to the project)
-CreateDialogueBox :: proc(scene: ^Scene, dialogue: string, startNode := "", settings := DEFAULT_DIALOGUE_BOX_SETTINGS) -> ^DialogueBox {
+CreateDialogueBox :: proc(scene: ^Scene, dialogue: string, startNode: DialogueNodeName = "", settings := DEFAULT_DIALOGUE_BOX_SETTINGS) -> ^DialogueBox {
 	b := CreateNode(scene, DialogueBox)
 	allocator := Node_GetAllocator(b)
 	b.settings = settings
@@ -123,7 +123,7 @@ Inputs:
 Returns:
 - false when the dialogue or the node isn't there (logged)
 */
-DialogueBox_Start :: proc(box: ^DialogueBox, node := "") -> bool {
+DialogueBox_Start :: proc(box: ^DialogueBox, node: DialogueNodeName = "") -> bool {
 	box.started = true
 	data, ok := Game_LoadDialogue(box.scene.game, box.dialogue)
 	if !ok do return false

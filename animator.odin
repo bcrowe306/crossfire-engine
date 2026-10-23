@@ -346,7 +346,7 @@ Example:
 	// Given: anim: ^e.Animator
 	e.Animator_Play(anim, "open")
 */
-Animator_Play :: proc(animator: ^Animator, name: string, restart := false) -> bool {
+Animator_Play :: proc(animator: ^Animator, name: ClipName, restart := false) -> bool {
 	index := Animator_FindClip(animator, name)
 	if index < 0 {
 		log.warnf("Animator %s has no clip %q", animator.name, name)
@@ -455,7 +455,7 @@ Inputs:
 Returns:
 - Its index in `animator.clips`, or -1
 */
-Animator_FindClip :: proc(animator: ^Animator, name: string) -> int {
+Animator_FindClip :: proc(animator: ^Animator, name: ClipName) -> int {
 	for clip, i in animator.clips do if clip.name == name do return i
 	return -1
 }

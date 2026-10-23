@@ -230,7 +230,7 @@ Example:
 	e.Node_AddToGroup(node, "enemies")
 	for enemy in e.Scene_GetGroup(scene, "enemies") do enemy.tint = {255, 80, 80, 255}
 */
-Node_AddToGroup :: proc(node: ^Node, group: string) {
+Node_AddToGroup :: proc(node: ^Node, group: GroupName) {
 	if Node_IsInGroup(node, group) do return
 	append(&node.groups, strings.clone(group, Node_GetAllocator(node)))
 }
@@ -242,7 +242,7 @@ Inputs:
 - node: The node
 - group: The group's name
 */
-Node_RemoveFromGroup :: proc(node: ^Node, group: string) {
+Node_RemoveFromGroup :: proc(node: ^Node, group: GroupName) {
 	for name, i in node.groups do if name == group {
 		ordered_remove(&node.groups, i)
 		return
@@ -259,7 +259,7 @@ Inputs:
 Returns:
 - true if it's in the group
 */
-Node_IsInGroup :: proc(node: ^Node, group: string) -> bool {
+Node_IsInGroup :: proc(node: ^Node, group: GroupName) -> bool {
 	for name in node.groups do if name == group do return true
 	return false
 }

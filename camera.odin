@@ -541,7 +541,7 @@ Example:
 	// Given: camera: ^e.Camera2D
 	e.Camera2D_SetFollowTargetPath(camera, "../Hero")
 */
-Camera2D_SetFollowTargetPath :: proc(camera: ^Camera2D, path: string) {
+Camera2D_SetFollowTargetPath :: proc(camera: ^Camera2D, path: NodePath) {
 	Camera2D_SetFollowTarget(camera, nil)
 	camera.followTargetPath = strings.clone(path, Node_GetAllocator(camera))
 }

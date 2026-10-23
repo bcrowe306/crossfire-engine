@@ -211,7 +211,7 @@ Example:
 AnimationPlayer_Play :: proc{AnimationPlayer_PlayByName, AnimationPlayer_PlayByIndex}
 
 // `AnimationPlayer_Play` by the animation's name
-AnimationPlayer_PlayByName :: proc(player: ^AnimationPlayer, name: string, restart := false) -> bool {
+AnimationPlayer_PlayByName :: proc(player: ^AnimationPlayer, name: AnimationName, restart := false) -> bool {
 	index, ok := player.names[name]
 	if !ok {
 		log.warnf("AnimationPlayer has no animation named '%s'", name)
@@ -424,7 +424,7 @@ Returns:
 AnimationPlayer_Get :: proc{AnimationPlayer_GetByName, AnimationPlayer_GetByIndex}
 
 // `AnimationPlayer_Get` by name
-AnimationPlayer_GetByName :: proc(player: ^AnimationPlayer, name: string) -> ^Animation {
+AnimationPlayer_GetByName :: proc(player: ^AnimationPlayer, name: AnimationName) -> ^Animation {
 	index, ok := player.names[name]
 	return ok ? player.animations[index] : nil
 }
@@ -445,7 +445,7 @@ Inputs:
 Returns:
 - The index and true, or -1 and false if there is no such animation
 */
-AnimationPlayer_IndexOf :: proc(player: ^AnimationPlayer, name: string) -> (int, bool) {
+AnimationPlayer_IndexOf :: proc(player: ^AnimationPlayer, name: AnimationName) -> (int, bool) {
 	index, ok := player.names[name]
 	return ok ? index : -1, ok
 }
@@ -487,7 +487,7 @@ Inputs:
 Returns:
 - true if it is playing
 */
-AnimationPlayer_IsPlaying :: proc(player: ^AnimationPlayer, name: string) -> bool {
+AnimationPlayer_IsPlaying :: proc(player: ^AnimationPlayer, name: AnimationName) -> bool {
 	return player.playing && AnimationPlayer_CurrentName(player) == name
 }
 

@@ -164,7 +164,7 @@ Asset_Font :: proc(game: ^Game, asset: FontAsset, size: f32) -> ^ttf.Font {
 }
 
 // `Game_PlaySound` for a `SoundAsset` (see `Game_PlaySoundFile`); false (logged) for an empty one
-Game_PlaySoundAsset :: proc(game: ^Game, asset: SoundAsset, bus := "", volume: f32 = 1, pitch: f32 = 1, pan: f32 = 0) -> bool {
+Game_PlaySoundAsset :: proc(game: ^Game, asset: SoundAsset, bus: BusName = "", volume: f32 = 1, pitch: f32 = 1, pan: f32 = 0) -> bool {
 	if asset.path == "" {
 		log.warn("Game_PlaySound: an empty SoundAsset")
 		return false

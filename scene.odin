@@ -476,7 +476,7 @@ Returns:
 Example:
 	for enemy in e.Scene_GetGroup(scene, "enemies") do enemy.visible = false
 */
-Scene_GetGroup :: proc(scene: ^Scene, group: string) -> []^Node {
+Scene_GetGroup :: proc(scene: ^Scene, group: GroupName) -> []^Node {
 	found := make([dynamic]^Node, context.temp_allocator)
 	for list in ([2][]^Node{scene.nodes[:], scene.addQueue[:]}) {
 		for node in list do if Node_IsInGroup(node, group) do append(&found, node)
@@ -702,7 +702,7 @@ Returns:
 Example:
 	if flame := e.Scene_FindNode(scene, "Ship/Flame"); flame != nil do flame.visible = false
 */
-Scene_FindNode :: proc(scene: ^Scene, path: string) -> ^Node {
+Scene_FindNode :: proc(scene: ^Scene, path: ScenePath) -> ^Node {
 	lists := [2][]^Node{scene.nodes[:], scene.addQueue[:]}
 	// From the top level, said outright: a top-level node of that name
 	if len(path) > 1 && path[0] == '/' {
@@ -739,7 +739,7 @@ Example:
 	// Given: self: ^e.Script
 	camera := e.Node_FindPath(self.node, "../Camera")
 */
-Node_FindPath :: proc(from: ^Node, path: string) -> ^Node {
+Node_FindPath :: proc(from: ^Node, path: NodePath) -> ^Node {
 	path := strings.trim_space(path)
 	if from == nil || path == "" do return nil
 	scene := from.scene
@@ -794,7 +794,7 @@ Inputs:
 Returns:
 - The node, or nil
 */
-Node_FindChild :: proc(node: ^Node, path: string) -> ^Node {
+Node_FindChild :: proc(node: ^Node, path: ChildPath) -> ^Node {
 	if path == "" do return node
 	first, _, rest := strings.partition(path, "/")
 	for child in node.children {

@@ -315,7 +315,7 @@ Example:
 	level.screenLayers = {.Layer8}
 	_ = game->switchScene("Level")
 */
-Game_CreateScene :: proc(game: ^Game, name: string) -> ^Scene {
+Game_CreateScene :: proc(game: ^Game, name: SceneName) -> ^Scene {
 	if name in game.scenes {
 		log.warn("Scene with name already exists: ", name)
 		return nil
@@ -348,7 +348,7 @@ Returns:
 Example:
 	if !game->switchScene("GameOver") do log.error("no GameOver scene")
 */
-Game_SwitchScene :: proc(game: ^Game, name: string) -> bool {
+Game_SwitchScene :: proc(game: ^Game, name: SceneName) -> bool {
 	scene, exists := game.scenes[name]
 	if !exists {
 		log.warn("Scene with name does not exist: ", name)

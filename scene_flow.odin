@@ -120,7 +120,7 @@ Returns:
 Example:
 	e.Game_ChangeScene(game, "Level2", e.Transition{kind = .Fade, duration = 0.6, color = {0, 0, 0, 255}})
 */
-Game_ChangeScene :: proc(game: ^Game, name: string, transition: Maybe(Transition) = nil) -> bool {
+Game_ChangeScene :: proc(game: ^Game, name: SceneName, transition: Maybe(Transition) = nil) -> bool {
 	if name not_in game.scenes {
 		log.warnf("No scene named '%s'", name)
 		return false
@@ -164,7 +164,7 @@ Returns:
 Example:
 	e.Game_PushScene(game, "PauseMenu")
 */
-Game_PushScene :: proc(game: ^Game, name: string, pauseBelow := true) -> bool {
+Game_PushScene :: proc(game: ^Game, name: SceneName, pauseBelow := true) -> bool {
 	scene, exists := game.scenes[name]
 	if !exists {
 		log.warnf("No scene named '%s'", name)

@@ -132,7 +132,7 @@ Inputs:
 Returns:
 - The game's list (don't keep it past a change), nil when there's no such action
 */
-Input_GetBindings :: proc(name: string, game: ^Game = nil) -> []InputBinding {
+Input_GetBindings :: proc(name: ActionName, game: ^Game = nil) -> []InputBinding {
 	a := findAction(game, name)
 	return a != nil ? a.data.bindings[:] : nil
 }
@@ -151,7 +151,7 @@ Returns:
 Example:
 	e.Input_SetBindings("jump", {e.KeyBinding{.Space}, e.GamepadButtonBinding{.South, -1}})
 */
-Input_SetBindings :: proc(name: string, bindings: []InputBinding, game: ^Game = nil) -> bool {
+Input_SetBindings :: proc(name: ActionName, bindings: []InputBinding, game: ^Game = nil) -> bool {
 	a := findAction(game, name)
 	if a == nil do return false
 	clear(&a.data.bindings)
