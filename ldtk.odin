@@ -445,9 +445,9 @@ Returns:
 */
 LDtk_Parse :: proc(text, path: string) -> (^LDtkProject, string) {
 	// On the heap whatever the caller's allocator: LDtk_Destroy frees it there
-	project := new(LDtkProject, runtime.heap_allocator())
+	project := new(LDtkProject, heapAllocator())
 	if !MemoryArena_InitGrowing(&project.arena) {
-		free(project, runtime.heap_allocator())
+		free(project, heapAllocator())
 		return nil, "out of memory"
 	}
 	allocator := MemoryArena_Allocator(&project.arena)
@@ -527,7 +527,7 @@ Inputs:
 LDtk_Destroy :: proc(project: ^LDtkProject) {
 	if project == nil do return
 	MemoryArena_Destroy(&project.arena)
-	free(project, runtime.heap_allocator())
+	free(project, heapAllocator())
 }
 
 /*

@@ -1,7 +1,6 @@
 #+build !js
 package crossfire
 
-import "base:runtime"
 import "core:encoding/endian"
 import "core:os"
 import "core:strings"
@@ -101,7 +100,7 @@ Example:
 Pack_OpenFile :: proc(p: ^Pack, path: string) -> bool {
 	Pack_CloseFile(p)
 	p.opened = true
-	allocator := runtime.heap_allocator()
+	allocator := heapAllocator()
 	file, openErr := os.open(path)
 	if openErr != nil do return false
 	size, sizeErr := os.file_size(file)
@@ -146,7 +145,7 @@ Inputs:
 - p: The pack (a closed or zero one is fine)
 */
 Pack_CloseFile :: proc(p: ^Pack) {
-	allocator := runtime.heap_allocator()
+	allocator := heapAllocator()
 	if p.file != nil do os.close(p.file)
 	for path, data in p.loaded {
 		delete(path, allocator)
@@ -206,12 +205,12 @@ Pack_FileBytes :: proc(p: ^Pack, path: string) -> ([]byte, bool) {
 	if data, loaded := p.loaded[key]; loaded do return data, true
 	entry, known := p.entries[key]
 	if !known do return nil, false
-	data := make([]byte, int(entry.size), runtime.heap_allocator())
+	data := make([]byte, int(entry.size), heapAllocator())
 	if !readAt(p.file, data, i64(entry.offset)) {
-		delete(data, runtime.heap_allocator())
+		delete(data, heapAllocator())
 		return nil, false
 	}
-	p.loaded[strings.clone(key, runtime.heap_allocator())] = data
+	p.loaded[strings.clone(key, heapAllocator())] = data
 	return data, true
 }
 

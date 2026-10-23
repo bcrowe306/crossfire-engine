@@ -323,13 +323,28 @@ Node_Destroy :: proc(node: ^Node) {
 	runtime.arena_destroy(&arena)
 }
 
+/*
+The program's heap: what outlives frames and scenes whatever the caller's allocator is (node
+arenas, tweens, packed files, LDtk projects, debug shapes). Odin's `runtime.heap_allocator` on
+the desktop; in the browser Emscripten's malloc (`Web_Context`'s), since Odin's runtime has no
+heap on js and stops the game ("heap_alloc is not supported on this platform").
+*/
+@(private)
+heapAllocator :: proc() -> runtime.Allocator {
+	when ODIN_OS == .JS {
+		return runtime.Allocator{procedure = webAllocatorProc}
+	} else {
+		return runtime.heap_allocator()
+	}
+}
+
 // Allocates a node of type T inside a new arena that the node owns
 @(private)
 allocateNode :: proc($T: typeid) -> ^T {
 	// The arena's blocks come from the heap whatever the caller's allocator is (a temp allocator
 	// would free a live node at the end of the frame)
 	arena: runtime.Arena
-	if runtime.arena_init(&arena, NODE_ARENA_BLOCK_SIZE, runtime.heap_allocator()) != nil {
+	if runtime.arena_init(&arena, NODE_ARENA_BLOCK_SIZE, heapAllocator()) != nil {
 		log.panicf("Failed to allocate node %v", typeid_of(T))
 	}
 	// A custom node type (custom_nodes.odin) is bigger: the base kind's node is the start of it

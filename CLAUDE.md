@@ -1124,6 +1124,12 @@ comment. What was needed, and why:
   as an Emscripten library, and `web/odin_env_pre.js` passes Emscripten's imports under that name.
 - Memory comes from Emscripten's `malloc` (`Web_Context`; it honors alignments above 8 through
   `aligned_alloc`, which Odin's maps need), and the temp allocator is an arena on it.
+- **Never call `runtime.heap_allocator()`**: Odin's runtime has no heap on js, and the game stops
+  at the first allocation ("heap_alloc is not supported on this platform"). Memory that must
+  outlive the caller's allocator uses `heapAllocator()` (node.odin: the runtime's heap on the
+  desktop, `webAllocatorProc` in the browser). Node arenas, tweens, packed files, LDtk projects
+  and debug shapes once called the runtime's directly, and every web export stopped before its
+  first scene (found exporting the demo, 2026-10-23).
 - The browser can't block, so `Application_Run` is `for app.running do Application_Frame(app)`
   and the web calls `Application_Frame` from `emscripten_set_main_loop`.
 - `SetRenderVSync` must come after the main loop exists (`Player_StartWeb`); before it, the first

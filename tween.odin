@@ -1,6 +1,5 @@
 package crossfire
 
-import "base:runtime"
 import sdl "vendor:sdl3"
 
 /*
@@ -117,9 +116,9 @@ Scene_CreateTween :: proc(scene: ^Scene) -> ^Tween {
 @(private="file")
 makeTween :: proc(scene: ^Scene) -> ^Tween {
 	// The heap, not the node's or scene's arena: tweens come and go, and arenas don't give memory back
-	tween := new(Tween, runtime.heap_allocator())
+	tween := new(Tween, heapAllocator())
 	tween.scene = scene
-	tween.steps = make([dynamic]TweenStep, runtime.heap_allocator())
+	tween.steps = make([dynamic]TweenStep, heapAllocator())
 	tween.speed = 1
 	append(&scene.tweens, tween)
 	return tween
@@ -348,7 +347,7 @@ destroyTweens :: proc(scene: ^Scene) {
 @(private="file")
 freeTween :: proc(tween: ^Tween) {
 	delete(tween.steps)
-	free(tween, runtime.heap_allocator())
+	free(tween, heapAllocator())
 }
 
 @(private="file")

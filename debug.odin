@@ -1,6 +1,5 @@
 package crossfire
 
-import "base:runtime"
 import "core:fmt"
 import sdl "vendor:sdl3"
 
@@ -137,7 +136,7 @@ Inputs:
 - scene: The scene
 */
 Debug_Clear :: proc(scene: ^Scene) {
-	for shape in scene.debugShapes do delete(shape.text, runtime.heap_allocator())
+	for shape in scene.debugShapes do delete(shape.text, heapAllocator())
 	clear(&scene.debugShapes)
 }
 
@@ -177,8 +176,8 @@ queueDebug :: proc(scene: ^Scene, shape: DebugShape) {
 	if scene == nil do return
 	shape := shape
 	// The heap, like tweens: shapes come and go every frame
-	if shape.text != "" do shape.text = fmt.aprint(shape.text, allocator = runtime.heap_allocator())
-	if scene.debugShapes == nil do scene.debugShapes = make([dynamic]DebugShape, runtime.heap_allocator())
+	if shape.text != "" do shape.text = fmt.aprint(shape.text, allocator = heapAllocator())
+	if scene.debugShapes == nil do scene.debugShapes = make([dynamic]DebugShape, heapAllocator())
 	append(&scene.debugShapes, shape)
 }
 
@@ -188,7 +187,7 @@ debugExpire :: proc(scene: ^Scene, deltaTime: f64) {
 	kept := 0
 	for shape in scene.debugShapes {
 		if shape.remaining <= 0 {
-			delete(shape.text, runtime.heap_allocator())
+			delete(shape.text, heapAllocator())
 			continue
 		}
 		scene.debugShapes[kept] = shape

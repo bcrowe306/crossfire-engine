@@ -128,7 +128,8 @@ webFrame :: proc "c" () {
 @(private="file")
 WEB_MALLOC_ALIGNMENT :: 8
 
-@(private="file")
+// Emscripten's malloc as an Odin allocator (Web_Context's; heapAllocator's in the browser)
+@(private)
 webAllocatorProc :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, alignment: int, old: rawptr, oldSize: int, loc := #caller_location) -> ([]byte, runtime.Allocator_Error) {
 	alloc :: proc(size, alignment: int) -> rawptr {
 		if alignment <= WEB_MALLOC_ALIGNMENT do return web_calloc(1, c.size_t(max(size, 1)))
