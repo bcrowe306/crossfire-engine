@@ -230,6 +230,8 @@ SCENE_NODE_TYPES := [SceneNodeKind]typeid{
 	.TextField       = TextField,
 	.ScrollBox       = ScrollBox,
 	.RichText        = RichText,
+	.Slider          = Slider,
+	.CheckBox        = CheckBox,
 	.Light2D         = Light2D,
 	.LightOccluder   = LightOccluder,
 	.NavRegion       = NavRegion,
@@ -677,7 +679,7 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			o.radius = node.radius
 			append(&o.points, ..node.points[:])
 			n = o
-		case .Panel, .Button, .ProgressBar, .TextField, .ScrollBox, .RichText:
+		case .Panel, .Button, .ProgressBar, .TextField, .ScrollBox, .RichText, .Slider, .CheckBox:
 			n = uiBuildNode(scene, &node, projectDir, attachScripts)
 		case .Animator:
 			animator := CreateAnimator(scene)

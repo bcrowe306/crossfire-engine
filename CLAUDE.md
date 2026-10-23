@@ -205,9 +205,9 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `navigation_test.odin` | Tests: paths around a wall through a gap (clear legs, straightened), targets in walls, walled off, no corner cutting; a scene file's region blocked by a static body, an agent walking around it and arriving, failing outside any region |
 | `lighting.odin` | **2D lighting**: `Light2D` (`LightSettings`: point or spot, color, energy, radius, cone, shadows), `LightOccluder` (a CollisionShape's shapes), `SceneLighting` (`Scene.lighting`: `Scene_SetLighting`, ambient, static bodies' shadows), `Light_Visibility` (the polygon a light reaches), the light map (`Lighting_Apply`) |
 | `lighting_test.odin` | Tests: occluders stopping rays, lights without shadows, spot cones turned with the node, scene files; pixels: bright at a light, fading, dark past its reach and behind an occluder, screen layers unlit |
-| `ui_controls.odin` | **UI controls**: `Control` (settings `UISettings`, laid-out `size`, `offset` from its anchor) and its types `Panel`, `Button`, `ProgressBar`, `TextField`, `ScrollBox`, `RichText`; anchors (`UIAnchor`), layouts (`UILayout`: Row, Column, Grid; align, justify, expand), the mouse, focus moved by the ui_* actions or keys, typing, scroll boxes, rich text (`RichText_Layout`), 9-patch images; `Create*`, `Control_SetText`, `ProgressBar_SetValue`, `Control_Focus`, `Control_GetRect`, `Control_Theme` |
-| `ui_theme.odin` | **UI themes**: `UITheme` (tagged fields for editors: `UITheme_Fields` / `Get` / `Set`), `DEFAULT_UI_THEME`, `.theme.xml` files (`ParseTheme`, `FormatTheme`), `Game_LoadTheme` (`Game.themes`), the project's `uiTheme` |
-| `ui_controls_test.odin` | Tests: a scene file's controls laid out (a stretched column, a row with an expanding child, a corner with an offset, a scroll box hiding what doesn't fit), mouse presses, focus by keys, typing with a limit, the wheel, offsets; themes' text round trip; rich text tags and wrapping |
+| `ui_controls.odin` | **UI controls**: `Control` (settings `UISettings`, laid-out `size`, `offset` from its anchor) and its types `Panel`, `Button`, `ProgressBar`, `TextField`, `ScrollBox`, `RichText`, `Slider`, `CheckBox`; anchors (`UIAnchor`), layouts (`UILayout`: Row, Column, Grid; align, justify, expand), the mouse, focus moved by the ui_* actions or keys, typing, scroll boxes, rich text (`RichText_Layout`), sliders (dragged; left / right while focused, snapped to `step`), check boxes, 9-patch images; `Create*`, `Control_SetText`, `ProgressBar_SetValue`, `Slider_SetValue`, `CheckBox_SetChecked`, `Control_Focus`, `Control_GetRect`, `Control_Theme` |
+| `ui_theme.odin` | **UI themes**: `UITheme` (tagged fields for editors; `checkColor` for check boxes: `UITheme_Fields` / `Get` / `Set`), `DEFAULT_UI_THEME`, `.theme.xml` files (`ParseTheme`, `FormatTheme`), `Game_LoadTheme` (`Game.themes`), the project's `uiTheme` |
+| `ui_controls_test.odin` | Tests: a scene file's controls laid out (a stretched column, a row with an expanding child, a corner with an offset, a scroll box hiding what doesn't fit), mouse presses, focus by keys, typing with a limit, the wheel, offsets; themes' text round trip (the check mark's color too); rich text tags and wrapping; sliders and check boxes from a scene file (`step` and `checked` only for their kinds), a slider pressed and dragged outside it (clamped, snapped, its events), moved by Left / Right or ui_left / ui_right while up / down still move the focus, check boxes ticked by clicks, Enter, Space and ui_accept, disabled ones ignoring input, changes from code sending no event |
 | `animator.odin` | **Animator nodes**: keyframe clips (`AnimatorSettings` / `AnimatorClipData` / `AnimatorTrackData` / `AnimatorKeyData`: scene files' `<clip>` / `<track>` / `<key>`) of any node's properties (`ANIMATOR_PROPERTIES`, `script.<field>`), eased (`EaseType`) or stepping; event tracks (`onEvent`), `onFinished`; `Animator_Play` / `Stop` / `Pause` / `Seek` / `Apply` (editors' scrubbing), `Animator_SetClips`, value text (`Animator_ParseValue` / `FormatValue` / `ReadProperty`), settings clone / destroy / equal |
 | `animator_test.odin` | Tests: a scene file's clips playing (positions, opacity's curve, visibility, a script's float, enum and color fields, stepping rotation, events at the start, middle and end, finishing), looping, pausing, seeking, resuming, scrubbing, a removed target; values' text; clips from code at double speed |
 | `tile_batch.odin` | `TileBatch` / `TileQuad`: tiles of one texture with Aseprite's flips drawn as one `RenderGeometry`, culled to the screen; the software renderer's cache (as LDtk's layers) |
@@ -691,7 +691,9 @@ CharacterMover_Move); RayCast onHitEnter/onHitExit (a removed body sends its exi
 physicsForgetBody); AudioPlayer onFinished (a natural end, in its update); Menu
 onButtonPressed, onValueChanged, onFocusChanged (noticed in its update), onBackPressed (data:
 the item's index); Camera2D onPanFinished, onShakeFinished; LDtkLevelNode onEntitySpawned,
-onReloaded; ParticleEmitter onFinished; AnimatedSprite its player's animation.* events.
+onReloaded; ParticleEmitter onFinished; AnimatedSprite its player's animation.* events; UI
+controls onFocusChanged, Button onPressed, TextField onChanged / onSubmitted, Slider
+onValueChanged (data: the f32 value), CheckBox onToggled (data: the bool).
 Scene files' `<listener event target handler/>` (`NodeListenerData`) are bound by
 `Scene_ReadyScripts` before any ready: the handler (`Script_Listener(T, name, proc)`, a registry
 by type and name) is subscribed through a trampoline that finds the listening node by id on
@@ -868,7 +870,11 @@ it's placed from its anchor plus `offset` (the scene file's x, y), or by its par
 and the Animator move `offset`. A top-level control's parent area is the screen (`game.size`); under
 a node that isn't a control, a point at that node. Input: the last control to update that's under
 a press takes it; one focus move per update pass (`Scene.ui.navigated`), done by the focused
-control (or the first focusable one when none is). Text fields start SDL text input on focus
+control (or the first focusable one when none is). **A focused Slider takes left / right** (the
+ui_left / ui_right actions, or the keys without them) to move its value, so they don't move the
+focus from it; up and down still do. A pressed slider follows the held mouse anywhere (its
+`pressed` flag, cleared on release). Changes from code (`Slider_SetValue`,
+`CheckBox_SetChecked`) send no event. Text fields start SDL text input on focus
 (`game.window`) and stop it on blur. Scroll boxes hide children that don't fit wholly
 (`Control.clipped`) instead of clipping them: the engine draws nodes in a flat sorted list, with
 no place to restore a clip rect after a subtree. Themes resolve per draw (`Control_Theme`: own,
@@ -1135,7 +1141,11 @@ comment. What was needed, and why:
   `maxSpeed`, `deadzoneX` / `Y`, `targetOffsetX` / `Y`, `lookAheadX` / `Y`,
   `lookAheadSmoothing`, `limitLeft` / `Top` / `Right` / `Bottom` (present: that side limited,
   unless `limitsOff` lists it: "Left,Top", the value kept for an editor's unticked side),
-  `shakeStrength`, `shakeDuration`, `shakeFrequency`. Attribute names are global across kinds
+  `shakeStrength`, `shakeDuration`, `shakeFrequency`. Also **Slider and CheckBox** UI controls
+  (a Slider's `step`, a CheckBox's `checked`, read only for those kinds) and themes'
+  `checkColor`: an older reader takes the unknown kind for a custom node type with no base kind
+  and builds a plain Node2D in its place (the rest of the scene loads), so no bump. The parser's
+  `isControl` is the range `.Panel ..= .CheckBox` of `SceneNodeKind`: keep new controls in it. Attribute names are global across kinds
   (the parser reads every one for every node), so they avoid the others' (`deadzone` is a touch
   control's).
 - **Format version 13** adds every node's `processMode`, `blendMode`, `zIndex`, `ySort` and

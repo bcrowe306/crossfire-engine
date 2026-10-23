@@ -154,7 +154,11 @@ Version history:
   `lookAheadY`, `lookAheadSmoothing`, `limitLeft`, `limitTop`, `limitRight`, `limitBottom`
   (each one there limits that side), `limitsOff` (sides, comma-separated, whose value is there
   but which aren't limited: an editor's unticked side keeps its value; older readers limit
-  them), `shakeStrength`, `shakeDuration`, `shakeFrequency`.
+  them), `shakeStrength`, `shakeDuration`, `shakeFrequency`. Slider and CheckBox UI controls
+  (ui_controls.odin), with a Slider's `step` and a CheckBox's `checked` (beside the controls'
+  `value`, `min`, `max`, `showValue`, `disabled`, `text`); an older reader takes their unknown
+  kind for a custom node type without a base kind and builds a plain Node2D in their place, so
+  the rest of the scene loads as before. Themes' `checkColor`.
 - 13: every node's `processMode`, `blendMode`, `zIndex`, `ySort` and `groups`; CollisionShape
   `oneWay`; the project's window: `fullscreen`, `vsync` (default true), `highDPI`; assets of
   kind "Translation" (CSV tables: localization.odin), the project's `locale` and `icon`, and the
@@ -182,7 +186,8 @@ Version history:
   `touchMouse`, `touchColor`, `touchOpacity`; a button's label `text`: touch.odin); ParallaxLayer (`factorX`, `factorY`, `repeatX`,
   `repeatY`), CameraZone (`width`, `height`, `zoneTransition`) and CameraView (`width`, `height`,
   `viewCamera`, `viewZoom`, `border`) nodes (camera_tools.odin); StateMachine nodes (`start`, `animates`, `<param>`,
-  `<state>`, `<transition>`: state_machine.odin); UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText:
+  `<state>`, `<transition>`: state_machine.odin); UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText
+  (Slider and CheckBox added in 14):
   `width`, `height`, `anchor`, `margin`, `layout`, `align`, `justify`, `columns`, `padding`,
   `spacing`, `expand`, `disabled`, `value`, `min`, `max`, `direction`, `showValue`, `maxLength`,
   `patchMargins`, `textSize`, `textAlign`, `theme`, `placeholder`, `action`: ui_controls.odin),
@@ -293,13 +298,16 @@ SceneNodeKind :: enum {
 	CameraZone,
 	CameraView,
 	// UI controls (format 13; ui_controls.odin): a box laying out controls; a button; a bar
-	// showing a value; a line of text to type; a scrolling column; text with colors and sizes
+	// showing a value; a line of text to type; a scrolling column; text with colors and sizes; a
+	// value dragged along a track; a box to tick (the last two added to format 14)
 	Panel,
 	Button,
 	ProgressBar,
 	TextField,
 	ScrollBox,
 	RichText,
+	Slider,
+	CheckBox,
 	// Touch controls (format 13; touch.odin): an on-screen stick pushing input actions; a round
 	// button pressing one
 	VirtualJoystick,
@@ -391,6 +399,8 @@ SCENE_NODE_KINDS := [SceneNodeKind]SceneNodeKindInfo{
 	.TextField      = {"A box the player types a line of text in: names, chat, codes", .UI},
 	.ScrollBox      = {"A column of controls that scrolls: long lists, inventories, credits", .UI},
 	.RichText       = {"Text with colors and sizes that wraps: dialogue, descriptions, tooltips", .UI},
+	.Slider         = {"A value picked by dragging a knob along a track, or with the keys: volume, brightness, difficulty", .UI},
+	.CheckBox       = {"A box to tick, with its text beside it: on / off settings like fullscreen or subtitles", .UI},
 	.Light2D        = {"A light in a lit scene: a point or a spot cone, colored, with shadows from occluders", .Graphics},
 	.ParallaxLayer  = {"A background that moves slower than the world as the camera moves (depth), tiled if asked: skies, hills", .Graphics},
 	.CameraZone     = {"A room the camera stays inside while it's in it; moving to another slides the view over", .Scene},
@@ -659,8 +669,8 @@ SceneNodeData :: struct {
 	// children holding `<track node property step>` children holding `<key time value ease/>`
 	// (animator.odin)
 	animator: AnimatorSettings,
-	// UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText): their
-	// `UISettings` as attributes of the same names (`width` / `height` for size, `patchMargins`
+	// UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText, Slider, CheckBox):
+	// their `UISettings` as attributes of the same names (`width` / `height` for size, `patchMargins`
 	// "l t r b"); their text in `text`, an image in `texture` (ui_controls.odin)
 	ui: UISettings,
 	// Light2D: `lightKind`, `color`... see lighting.odin (`LightSettings`: `lightKind`,
@@ -1917,7 +1927,7 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	du := DEFAULT_UI_SETTINGS
 	node.ui = du
 	// Only controls read these: other kinds use some of the names (an AnimatedSprite's columns)
-	isControl := node.kind >= .Panel && node.kind <= .RichText
+	isControl := node.kind >= .Panel && node.kind <= .CheckBox
 	if isControl do node.ui = {
 		size = {max(attrF32(doc, element, "width", 0), 0), max(attrF32(doc, element, "height", 0), 0)},
 		anchor = attrEnum(doc, element, "anchor", du.anchor),
@@ -1936,6 +1946,9 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		direction = attrEnum(doc, element, "direction", du.direction),
 		showValue = attrBool(doc, element, "showValue", false),
 		showLoading = attrBool(doc, element, "showLoading", false),
+		// Sliders' and check boxes' own (added to format 14)
+		step = node.kind == .Slider ? max(attrF32(doc, element, "step", 0), 0) : 0,
+		checked = node.kind == .CheckBox ? attrBool(doc, element, "checked", false) : false,
 		maxLength = max(attrInt(doc, element, "maxLength", 0), 0),
 		textSize = max(attrF32(doc, element, "textSize", 0), 0),
 		textAlign = attrEnum(doc, element, "textAlign", du.textAlign),

@@ -10,7 +10,9 @@ import sdl "vendor:sdl3"
 
 /*
 UI themes: how the UI controls (ui_controls.odin) look. A theme is a font and a `UITheme`: text
-sizes, colors and spacing for panels, buttons, progress bars, text fields and scroll boxes.
+sizes, colors and spacing for panels, buttons, progress bars, text fields, scroll boxes and
+check boxes (sliders use the progress bars' colors for their track and the buttons' for their
+knob).
 
 Themes are assets of kind "Theme" (`.theme.xml` files):
 
@@ -75,6 +77,9 @@ UITheme :: struct {
 
 	// A scroll box's bar
 	scrollbarColor: sdl.Color `label:"Scrollbar" group:"Scroll boxes"`,
+
+	// A ticked check box's mark (its box is the field color, the button colors under the mouse)
+	checkColor: sdl.Color `label:"Check mark" group:"Check boxes"`,
 }
 
 // The engine's UI theme: light text on dark blue panels, like `DEFAULT_MENU_STYLE`
@@ -100,6 +105,7 @@ DEFAULT_UI_THEME :: UITheme{
 	progressBackColor = {14, 18, 30, 255},
 	progressFillColor = {90, 200, 120, 255},
 	scrollbarColor = {90, 104, 150, 200},
+	checkColor = {90, 200, 120, 255},
 }
 
 /*

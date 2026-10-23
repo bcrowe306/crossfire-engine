@@ -2,13 +2,15 @@
 package crossfire
 
 import "core:fmt"
+import "core:math"
 import "core:sync"
 import "core:testing"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
 // UI controls (ui_controls.odin): layouts and anchors from a scene file, the mouse, keyboard
-// focus and typing, scroll boxes, rich text, themes
+// focus and typing, scroll boxes, rich text, themes; sliders and check boxes (the mouse, keys,
+// ui_* actions, disabled ones)
 
 @(private="file")
 UI_SCENE :: `<scene formatVersion="13" name="S">
@@ -179,6 +181,14 @@ ui_themes_and_rich_text :: proc(t: ^testing.T) {
 	delete(back.font)
 	testing.expect_value(t, FormatTheme({theme = DEFAULT_UI_THEME}, context.temp_allocator), fmt.tprintf("<theme formatVersion=\"%d\"/>\n", PROJECT_FORMAT_VERSION))
 	testing.expect(t, !UITheme_Set(&data.theme, "textSize", "big"), "not a number")
+	// The check mark's color: parsed, written when it isn't the default
+	checked, _ := ParseTheme(`<theme formatVersion="14" checkColor="#ff8000"/>`)
+	testing.expect_value(t, checked.theme.checkColor, sdl.Color{255, 128, 0, 255})
+	checkedText := FormatTheme(checked, context.temp_allocator)
+	testing.expect_value(t, checkedText, fmt.tprintf("<theme formatVersion=\"%d\" checkColor=\"#ff8000\"/>\n", PROJECT_FORMAT_VERSION))
+	again, _ := ParseTheme(checkedText)
+	testing.expect(t, again.theme == checked.theme, "the check mark's round trip")
+	testing.expect_value(t, UITheme_Fields()[len(UITheme_Fields()) - 1].group, "Check boxes")
 	testing.expect(t, len(UITheme_Fields()) > 10 && UITheme_Fields()[0].group == "Text", "fields")
 
 	// Rich text: tags, wrapping (measured with SDL_ttf)
@@ -207,5 +217,223 @@ ui_themes_and_rich_text :: proc(t: ^testing.T) {
 	}
 	narrow := RichText_Layout(rm, "one two three four", DEFAULT_FONT, 20, 60)
 	testing.expect(t, narrow.size.x == 60 && narrow.size.y > 40, "wrapped onto lines")
+	free_all(context.temp_allocator)
+}
+
+@(private="file")
+OPTIONS_SCENE :: `<scene formatVersion="14" name="Options">
+	<node kind="Panel" name="Options" anchor="Top_Left" layout="Column" padding="0" spacing="10">
+		<node kind="Slider" name="Music" width="220" height="20" value="0.5" step="0.25"/>
+		<node kind="Slider" name="Sfx" value="30" max="100" showValue="true"/>
+		<node kind="CheckBox" name="Full" text="Fullscreen" checked="true"/>
+		<node kind="CheckBox" name="Off" text="Off" disabled="true"/>
+		<node kind="Slider" name="Locked" width="100" height="20" value="5" max="10" disabled="true"/>
+		<node kind="ProgressBar" name="Bar" step="3" checked="true"/>
+	</node>
+</scene>`
+
+@(private="file")
+OptionEvents :: struct {
+	values: [dynamic]f32,
+	toggles: [dynamic]bool,
+}
+
+@(private="file")
+uiFrame :: proc(game: ^Game, scene: ^Scene, events: ..sdl.Event) {
+	Input_Update(&game.input, events)
+	Scene_Update(scene, events, 1.0 / 60)
+}
+
+// A key pressed in one frame and released in the next
+@(private="file")
+uiKey :: proc(game: ^Game, scene: ^Scene, scancode: sdl.Scancode) {
+	uiFrame(game, scene, keyEvent(scancode))
+	up := keyEvent(scancode)
+	up.type = .KEY_UP
+	up.key.down = false
+	uiFrame(game, scene, up)
+}
+
+@(private="file")
+optionsGame :: proc(t: ^testing.T, data: ^SceneData) -> (^Game, ^Scene) {
+	game := testGame("testdata")
+	game.size = {400, 300}
+	scene := game->createScene("Options")
+	parsed, err := ParseScene(OPTIONS_SCENE)
+	testing.expect_value(t, err, ProjectError.None)
+	data^ = parsed
+	Scene_Build(scene, data, "testdata")
+	uiFrame(game, scene)
+	return game, scene
+}
+
+@(private="file")
+optionsListen :: proc(scene: ^Scene, events: ^OptionEvents) {
+	for name in ([]string{"Music", "Sfx", "Locked"}) {
+		s := cast(^Slider)Scene_FindNode(scene, name)
+		Event_Subscribe(&s.onValueChanged, proc(_: ^EventSubject, _: rawptr, data: EventData, user: rawptr) {
+			append(&(cast(^OptionEvents)user).values, data.(f32))
+		}, events)
+	}
+	for name in ([]string{"Full", "Off"}) {
+		b := cast(^CheckBox)Scene_FindNode(scene, name)
+		Event_Subscribe(&b.onToggled, proc(_: ^EventSubject, _: rawptr, data: EventData, user: rawptr) {
+			append(&(cast(^OptionEvents)user).toggles, data.(bool))
+		}, events)
+	}
+}
+
+@(test)
+ui_sliders_and_check_boxes :: proc(t: ^testing.T) {
+	// Check boxes measure their text with SDL_ttf
+	sync.guard(&ttfLock)
+	if ttf.WasInit() == 0 do ttf.Init()
+	data: SceneData
+	game, scene := optionsGame(t, &data)
+	defer { Game_Destroy(game); free(game) }
+	defer SceneData_Destroy(&data)
+	events: OptionEvents
+	defer { delete(events.values); delete(events.toggles) }
+	optionsListen(scene, &events)
+	find :: proc(scene: ^Scene, name: string) -> ^Control { return cast(^Control)Scene_FindNode(scene, name) }
+
+	// Parsed: a slider's step, a check box's checked; not for other kinds
+	testing.expect_value(t, data.nodes[1].ui.step, f32(0.25))
+	testing.expect_value(t, data.nodes[2].ui.step, f32(0))
+	testing.expect(t, data.nodes[3].ui.checked && !data.nodes[4].ui.checked, "checked")
+	testing.expect(t, data.nodes[6].ui.step == 0 && !data.nodes[6].ui.checked, "a progress bar has no step or checked")
+
+	// Built and laid out: the default slider 220 x 20, the check box its box, gap and text
+	music, sfx := cast(^Slider)find(scene, "Music"), cast(^Slider)find(scene, "Sfx")
+	full, off := cast(^CheckBox)find(scene, "Full"), cast(^CheckBox)find(scene, "Off")
+	testing.expect_value(t, Control_GetRect(music), sdl.FRect{0, 0, 220, 20})
+	sfxRect := Control_GetRect(sfx)
+	testing.expect(t, sfxRect.y == 30 && sfxRect.h == 20 && sfxRect.w > 220, "the percentage's room right of the track")
+	fullRect := Control_GetRect(full)
+	side := math.round(DEFAULT_UI_THEME.textSize * 1.2)
+	testing.expect(t, fullRect.y == 60 && fullRect.h >= side && fullRect.w > side + DEFAULT_UI_THEME.spacing + 40, "box, gap and text")
+	testing.expect(t, full.settings.checked && music.settings.value == 0.5 && sfx.settings.value == 30, "values from the file")
+
+	// A press sets the value from x, snapped to the step: the track runs from 10 to 210
+	at := [2]f32{10 + 200 * 0.8, 10}
+	uiFrame(game, scene, mouseEvent(.MOUSE_MOTION, at), mouseEvent(.MOUSE_BUTTON_DOWN, at))
+	testing.expect_value(t, music.settings.value, f32(0.75))
+	testing.expect(t, Control_Focused(scene) == music, "a press focuses")
+	// Dragging follows it outside the slider, clamped to the range
+	uiFrame(game, scene, mouseEvent(.MOUSE_MOTION, {-50, 80}))
+	testing.expect_value(t, music.settings.value, f32(0))
+	uiFrame(game, scene, mouseEvent(.MOUSE_MOTION, {500, 80}))
+	testing.expect_value(t, music.settings.value, f32(1))
+	uiFrame(game, scene, mouseEvent(.MOUSE_BUTTON_UP, {500, 80}))
+	uiFrame(game, scene, mouseEvent(.MOUSE_MOTION, {60, 10}))
+	testing.expect_value(t, music.settings.value, f32(1))
+	testing.expect_value(t, len(events.values), 3)
+	if len(events.values) == 3 do testing.expect(t, events.values[0] == 0.75 && events.values[1] == 0 && events.values[2] == 1, "the values sent")
+
+	// The keys (no ui_* actions): Left and Right move the focused slider by its step
+	clear(&events.values)
+	uiKey(game, scene, .LEFT)
+	testing.expect_value(t, music.settings.value, f32(0.75))
+	uiKey(game, scene, .RIGHT)
+	uiKey(game, scene, .RIGHT)
+	testing.expect_value(t, music.settings.value, f32(1))
+	testing.expect_value(t, len(events.values), 2)
+	testing.expect(t, Control_Focused(scene) == music, "left and right keep the focus")
+	// Down still moves the focus; a slider without a step moves 1/20 of its range
+	uiKey(game, scene, .DOWN)
+	testing.expect(t, Control_Focused(scene) == sfx, "down to Sfx")
+	uiKey(game, scene, .RIGHT)
+	testing.expect_value(t, sfx.settings.value, f32(35))
+	uiKey(game, scene, .UP)
+	testing.expect(t, Control_Focused(scene) == music, "up to Music")
+
+	// The check box: accepted (Enter, Space) and clicked
+	uiKey(game, scene, .DOWN)
+	uiKey(game, scene, .DOWN)
+	testing.expect(t, Control_Focused(scene) == full, "down to the check box")
+	uiKey(game, scene, .RETURN)
+	testing.expect(t, !full.settings.checked, "unticked by Enter")
+	uiKey(game, scene, .SPACE)
+	testing.expect(t, full.settings.checked, "ticked by Space")
+	// Right moves the focus from a check box (to a wider slider's middle, right of its own)
+	uiKey(game, scene, .RIGHT)
+	testing.expect(t, Control_Focused(scene) != full && Control_Focused(scene) != nil, "right moves the focus")
+	Control_Focus(scene, full)
+	at = {fullRect.x + 5, fullRect.y + fullRect.h * 0.5}
+	uiFrame(game, scene, mouseEvent(.MOUSE_MOTION, at), mouseEvent(.MOUSE_BUTTON_DOWN, at))
+	testing.expect(t, full.settings.checked && full.pressed, "pressed, not yet toggled")
+	uiFrame(game, scene, mouseEvent(.MOUSE_BUTTON_UP, at))
+	testing.expect(t, !full.settings.checked, "unticked by a click")
+	testing.expect_value(t, len(events.toggles), 3)
+	if len(events.toggles) == 3 do testing.expect(t, !events.toggles[0] && events.toggles[1] && !events.toggles[2], "the states sent")
+
+	// Disabled ones ignore the mouse and can't take the focus
+	clear(&events.values)
+	clear(&events.toggles)
+	locked := cast(^Slider)find(scene, "Locked")
+	for name in ([]string{"Off", "Locked"}) {
+		r := Control_GetRect(find(scene, name))
+		at = {r.x + r.w * 0.9, r.y + r.h * 0.5}
+		uiFrame(game, scene, mouseEvent(.MOUSE_MOTION, at), mouseEvent(.MOUSE_BUTTON_DOWN, at))
+		uiFrame(game, scene, mouseEvent(.MOUSE_BUTTON_UP, at))
+	}
+	testing.expect(t, !off.settings.checked && locked.settings.value == 5, "disabled: unchanged")
+	testing.expect(t, len(events.values) == 0 && len(events.toggles) == 0, "no events")
+	Control_Focus(scene, full)
+	uiKey(game, scene, .DOWN)
+	testing.expect(t, Control_Focused(scene) == full, "the disabled ones below are skipped")
+
+	// From code: clamped and snapped, no events
+	Slider_SetValue(music, 0.4)
+	testing.expect_value(t, music.settings.value, f32(0.5))
+	Slider_SetValue(music, 7)
+	testing.expect_value(t, music.settings.value, f32(1))
+	CheckBox_SetChecked(full, true)
+	testing.expect(t, full.settings.checked && len(events.values) == 0 && len(events.toggles) == 0, "no events from code")
+	free_all(context.temp_allocator)
+}
+
+@(test)
+ui_sliders_and_check_boxes_by_actions :: proc(t: ^testing.T) {
+	// Check boxes measure their text with SDL_ttf
+	sync.guard(&ttfLock)
+	if ttf.WasInit() == 0 do ttf.Init()
+	data: SceneData
+	game, scene := optionsGame(t, &data)
+	defer { Game_Destroy(game); free(game) }
+	defer SceneData_Destroy(&data)
+	events: OptionEvents
+	defer { delete(events.values); delete(events.toggles) }
+	optionsListen(scene, &events)
+	Input_AddAction(MENU_ACTION_UP, KeyBinding{.W}, game = game)
+	Input_AddAction(MENU_ACTION_DOWN, KeyBinding{.S}, game = game)
+	Input_AddAction(MENU_ACTION_LEFT, KeyBinding{.A}, game = game)
+	Input_AddAction(MENU_ACTION_RIGHT, KeyBinding{.D}, game = game)
+	Input_AddAction(MENU_ACTION_ACCEPT, KeyBinding{.J}, game = game)
+	music := cast(^Slider)Scene_FindNode(scene, "Music")
+	full := cast(^CheckBox)Scene_FindNode(scene, "Full")
+
+	// The first press focuses the first control; ui_right and ui_left then move its value
+	uiKey(game, scene, .D)
+	testing.expect(t, Control_Focused(scene) == &music.control, "focused")
+	testing.expect_value(t, music.settings.value, f32(0.5))
+	uiKey(game, scene, .D)
+	testing.expect_value(t, music.settings.value, f32(0.75))
+	uiKey(game, scene, .A)
+	uiKey(game, scene, .A)
+	testing.expect_value(t, music.settings.value, f32(0.25))
+	// The arrow keys aren't bound: nothing
+	uiKey(game, scene, .RIGHT)
+	testing.expect_value(t, music.settings.value, f32(0.25))
+	testing.expect_value(t, len(events.values), 3)
+	// ui_down moves the focus; ui_accept ticks the check box
+	uiKey(game, scene, .S)
+	uiKey(game, scene, .S)
+	testing.expect(t, Control_Focused(scene) == &full.control, "down to the check box")
+	uiKey(game, scene, .J)
+	testing.expect(t, !full.settings.checked && len(events.toggles) == 1, "toggled by ui_accept")
+	uiKey(game, scene, .W)
+	uiKey(game, scene, .W)
+	testing.expect(t, Control_Focused(scene) == &music.control, "up to Music")
 	free_all(context.temp_allocator)
 }

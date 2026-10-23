@@ -10,9 +10,10 @@ import sdl "vendor:sdl3"
 
 /*
 UI controls: panels that lay out what's in them, buttons, progress bars, text fields, scroll
-boxes and rich text, for menus, HUDs and dialogs. They're nodes like any others (kinds Panel,
-Button, ProgressBar, TextField, ScrollBox, RichText), drawn in the scene; put them on a screen
-layer (the scene's `screenLayers`) so the camera doesn't move them.
+boxes, rich text, sliders and check boxes, for menus, HUDs, dialogs and options screens. They're
+nodes like any others (kinds Panel, Button, ProgressBar, TextField, ScrollBox, RichText, Slider,
+CheckBox), drawn in the scene; put them on a screen layer (the scene's `screenLayers`) so the
+camera doesn't move them.
 
 - **Sizes and places** (`UISettings`): a control's `size` (0 on an axis: as big as what's in it),
   and where it goes in its parent: by its `anchor` (a corner, an edge's middle, the middle, or
@@ -33,17 +34,27 @@ layer (the scene's `screenLayers`) so the camera doesn't move them.
 - **Input:** the mouse (hover, press, release on the control; the wheel over a scroll box), the
   keyboard and gamepads through the game's ui_* actions (`MENU_ACTION_*`: ui_up / down / left /
   right move the focus to the nearest focusable control that way, ui_accept presses), else the
-  arrow keys, Tab, Enter and Space. Buttons and text fields take focus; a focused one is
-  outlined. A text field takes typing while it has focus.
+  arrow keys, Tab, Enter and Space. Buttons, text fields, sliders and check boxes take focus;
+  a focused one is outlined. A text field takes typing while it has focus.
+- **Sliders** (`value` between `minValue` and `maxValue`, snapped to `step` when it isn't 0):
+  a press sets the value from the mouse's x and dragging follows it, even outside the slider
+  while the button is held. While a slider has focus, ui_left / ui_right (or the Left and Right
+  keys) move its value by `step` (1/20 of the range when 0) instead of moving the focus; up and
+  down still move it. `showValue` writes the percentage right of its track.
+- **Check boxes** (`checked`, their `text` right of the box): a click or ui_accept (Enter,
+  Space) ticks or unticks them.
 - **Events:** Button `onPressed` (data: its action), TextField `onChanged` and `onSubmitted`
-  (data: the text), every control's `onFocusChanged` (data: true when it got focus). A button's
-  `action` "scene:<Name>" switches scene and "quit" quits, like a Menu's.
-- **Text:** a Button's, TextField's or RichText's `text` ("@key" translates: `Tr_Text`). RichText
+  (data: the text), Slider `onValueChanged` (data: the f32 value), CheckBox `onToggled` (data:
+  true when ticked), every control's `onFocusChanged` (data: true when it got focus). A button's
+  `action` "scene:<Name>" switches scene and "quit" quits, like a Menu's. Changes from code
+  (`Slider_SetValue`, `CheckBox_SetChecked`) send no event.
+- **Text:** a Button's, TextField's, RichText's or CheckBox's `text` ("@key" translates: `Tr_Text`). RichText
   takes tags: `[color=#ff8000]...[/color]`, `[size=28]...[/size]`; it wraps at its width (0:
   only at line breaks).
 - **Code:** `CreatePanel`, `CreateButton`, `CreateProgressBar`, `CreateTextField`,
-  `CreateScrollBox`, `CreateRichText`; `Control_SetText`, `ProgressBar_SetValue`,
-  `Control_Focus`, `Control_GetRect`. Move a control with its `offset` (its position is set by
+  `CreateScrollBox`, `CreateRichText`, `CreateSlider`, `CreateCheckBox`; `Control_SetText`,
+  `ProgressBar_SetValue`, `Slider_SetValue`, `CheckBox_SetChecked`, `Control_Focus`,
+  `Control_GetRect`. Move a control with its `offset` (its position is set by
   the layout).
 */
 
@@ -55,6 +66,8 @@ ControlKind :: enum {
 	TextField,
 	ScrollBox,
 	RichText,
+	Slider,
+	CheckBox,
 }
 
 // Where a control goes in its parent when the parent doesn't lay it out
@@ -142,13 +155,18 @@ UISettings :: struct {
 	spacing: f32,
 	// In a Row or Column: takes the room left along it
 	expand: bool,
-	// Buttons and text fields: can't be used
+	// Buttons, text fields, sliders and check boxes: can't be used
 	disabled: bool,
-	// Progress bars: the value and its range
+	// Progress bars and sliders: the value and its range
 	value, minValue, maxValue: f32,
+	// Sliders: the steps the value snaps to and keys move it by (0: continuous; keys move 1/20
+	// of the range)
+	step: f32,
+	// Check boxes: ticked
+	checked: bool,
 	// Progress bars: which way it fills
 	direction: ProgressDirection,
-	// Progress bars: the value as a percentage on it
+	// Progress bars and sliders: the value as a percentage on it (a slider's right of its track)
 	showValue: bool,
 	// Progress bars: show the loading screen's progress (`Game_LoadingProgress`) instead of `value`
 	showLoading: bool,
@@ -173,7 +191,8 @@ DEFAULT_UI_SETTINGS :: UISettings{padding = -1, spacing = -1, maxValue = 1, colu
 
 /*
 The part every control type starts with: its settings, its laid-out size, its state. Control
-types: `Panel`, `Button`, `ProgressBar`, `TextField`, `ScrollBox`, `RichText`.
+types: `Panel`, `Button`, `ProgressBar`, `TextField`, `ScrollBox`, `RichText`, `Slider`,
+`CheckBox`.
 */
 Control :: struct {
 	// The node part: transform, hierarchy, hooks
@@ -247,6 +266,20 @@ ScrollBox :: struct {
 // Text with colors and sizes (`[color=#ff8000]...[/color]`, `[size=28]...[/size]`), wrapped
 RichText :: struct {
 	using control: Control,
+}
+
+// A value picked by dragging a knob along a track: volume, brightness, difficulty
+Slider :: struct {
+	using control: Control,
+	// Its value changed: pressed, dragged, or moved with the keys or a gamepad (not by `Slider_SetValue`)
+	onValueChanged: EventSubject `event:"Its value changed: dragged, or moved with the keys or a gamepad (data: the value)" data:"value := data.(f32)"`,
+}
+
+// A box to tick, with its text right of it: on / off settings
+CheckBox :: struct {
+	using control: Control,
+	// It was ticked or unticked: clicked, or accepted while focused (not by `CheckBox_SetChecked`)
+	onToggled: EventSubject `event:"It was ticked or unticked: clicked, or accepted with the keyboard or a gamepad (data: true when ticked)" data:"checked := data.(bool)"`,
 }
 
 // Pixels a wheel step scrolls a scroll box
@@ -387,6 +420,57 @@ CreateRichText :: proc(scene: ^Scene, text: string, width: f32 = 0) -> ^RichText
 }
 
 /*
+Creates a Slider and adds it to the scene (at the start of the next update).
+
+Inputs:
+- scene: The scene
+- value: Its value (kept in its range, snapped to its step)
+- minValue: Its value at the left end
+- maxValue: Its value at the right end
+- step: The steps its value snaps to (0: any value; keys then move it by 1/20 of the range)
+
+Returns:
+- The slider
+
+Example:
+	volume := e.CreateSlider(scene, 80, 0, 100, 5)
+	volume.settings.showValue = true
+	e.Event_Subscribe(&volume.onValueChanged, proc(_: ^e.EventSubject, _: rawptr, data: e.EventData, _: rawptr) {
+		e.Audio_SetBusVolume("Music", data.(f32) / 100)
+	}, nil)
+*/
+CreateSlider :: proc(scene: ^Scene, value: f32 = 0, minValue: f32 = 0, maxValue: f32 = 1, step: f32 = 0) -> ^Slider {
+	c := createControl(scene, Slider, .Slider)
+	EventSubject_Init(&c.onValueChanged, Node_GetAllocator(c))
+	c.settings.minValue, c.settings.maxValue, c.settings.step = minValue, maxValue, max(step, 0)
+	Slider_SetValue(c, value)
+	return c
+}
+
+/*
+Creates a CheckBox and adds it to the scene (at the start of the next update).
+
+Inputs:
+- scene: The scene
+- text: Its text, right of the box ("@key" translates)
+- checked: Whether it starts ticked
+
+Returns:
+- The check box
+
+Example:
+	fullscreen := e.CreateCheckBox(scene, "Fullscreen", e.Game_IsFullscreen(game))
+	fullscreen.settings.anchor = .Center
+*/
+CreateCheckBox :: proc(scene: ^Scene, text: string, checked := false) -> ^CheckBox {
+	c := createControl(scene, CheckBox, .CheckBox)
+	EventSubject_Init(&c.onToggled, Node_GetAllocator(c))
+	Control_SetText(c, text)
+	c.settings.checked = checked
+	return c
+}
+
+/*
 Sets a control's text (a text field's too: its caret goes to the end).
 
 Inputs:
@@ -418,8 +502,38 @@ ProgressBar_SetValue :: proc(bar: ^ProgressBar, value: f32) {
 }
 
 /*
+Sets a slider's value: kept in its range and snapped to its step. Sends no `onValueChanged`.
+
+Inputs:
+- slider: The slider
+- value: The value
+
+Example:
+	// Given: slider: ^e.Slider, volume: f32
+	e.Slider_SetValue(slider, volume * 100)
+*/
+Slider_SetValue :: proc(slider: ^Slider, value: f32) {
+	slider.settings.value = sliderSnap(slider.settings, value)
+}
+
+/*
+Ticks or unticks a check box. Sends no `onToggled`.
+
+Inputs:
+- box: The check box
+- checked: Ticked or not
+
+Example:
+	// Given: box: ^e.CheckBox
+	e.CheckBox_SetChecked(box, e.Game_IsFullscreen(game))
+*/
+CheckBox_SetChecked :: proc(box: ^CheckBox, checked: bool) {
+	box.settings.checked = checked
+}
+
+/*
 Gives a control the keyboard's and gamepads' focus (nil takes it from whatever has it). Only
-buttons and text fields take it.
+buttons, text fields, sliders and check boxes take it (not disabled ones).
 
 Inputs:
 - scene: The scene
@@ -479,12 +593,12 @@ Inputs:
 - node: The node
 
 Returns:
-- true for Panel, Button, ProgressBar, TextField, ScrollBox and RichText nodes
+- true for Panel, Button, ProgressBar, TextField, ScrollBox, RichText, Slider and CheckBox nodes
 */
 Node_IsControl :: proc(node: ^Node) -> bool {
 	if node == nil do return false
 	switch node.type {
-	case Panel, Button, ProgressBar, TextField, ScrollBox, RichText: return true
+	case Panel, Button, ProgressBar, TextField, ScrollBox, RichText, Slider, CheckBox: return true
 	}
 	return false
 }
@@ -582,13 +696,16 @@ uiBuildNode :: proc(scene: ^Scene, data: ^SceneNodeData, projectDir: string, att
 	case .TextField: c = CreateTextField(scene, data.text)
 	case .ScrollBox: c = CreateScrollBox(scene)
 	case .RichText: c = CreateRichText(scene, data.text)
+	case .Slider: c = CreateSlider(scene)
+	case .CheckBox: c = CreateCheckBox(scene, data.text)
 	case: return CreateNode(scene, Node)
 	}
 	allocator := Node_GetAllocator(c)
 	c.settings = UISettings_Clone(data.ui, allocator)
-	if c.kind == .Panel || c.kind == .ScrollBox do c.text = ""
+	if c.kind == .Panel || c.kind == .ScrollBox || c.kind == .Slider do c.text = ""
+	if c.kind == .Slider do Slider_SetValue(cast(^Slider)c, c.settings.value)
 	c.offset = data.position
-	if data.texture != "" do c.texture = loadAsset(&scene.game.resourceManager, projectDir, data.texture)
+	if data.texture != "" && c.kind != .Slider && c.kind != .CheckBox do c.texture = loadAsset(&scene.game.resourceManager, projectDir, data.texture)
 	return c
 }
 
@@ -609,7 +726,17 @@ uiFocused :: proc(scene: ^Scene) -> ^Control {
 
 @(private="file")
 controlFocusable :: proc(c: ^Control) -> bool {
-	return (c.kind == .Button || c.kind == .TextField) && !c.settings.disabled && Node_IsVisibleInTree(c) && !c.clipped
+	return takesInput(c) && Node_IsVisibleInTree(c) && !c.clipped
+}
+
+// The kinds the mouse and the keyboard use (not disabled ones)
+@(private="file")
+takesInput :: proc(c: ^Control) -> bool {
+	switch c.kind {
+	case .Button, .TextField, .Slider, .CheckBox: return !c.settings.disabled
+	case .Panel, .ProgressBar, .ScrollBox, .RichText:
+	}
+	return false
 }
 
 @(private="file")
@@ -676,6 +803,17 @@ measure :: proc(c: ^Control) -> [2]f32 {
 		content = {textSize * 10, textSize * 1.3 + padding * 2}
 	case .ProgressBar:
 		content = {200, 20}
+	case .Slider:
+		// A 200 pixel track, a knob as tall as the slider at each end, the percentage right of it
+		height := size.y > 0 ? size.y : 20
+		content = {200 + height + sliderTextRoom(c, rm, font, height, theme), 20}
+	case .CheckBox:
+		side := checkBoxSide(textSize)
+		content = {side, side}
+		if c.text != "" && rm != nil {
+			m := MeasureText(rm, Tr_Text(c.text, c.scene.game), font, textSize)
+			content = {side + spacing + m.x, max(side, m.y)}
+		}
 	case .RichText:
 		lines := richLayout(c, rm, font, textSize, c.settings.size.x)
 		content = lines.size
@@ -871,10 +1009,9 @@ controlUpdate :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 		box := cast(^ScrollBox)c
 		box.scroll -= game.input.wheel.y * UI_SCROLL_STEP
 	}
-	// The mouse: a press on a button or field (the topmost: the last to update), a release
-	// on the button it pressed
-	interactive := (c.kind == .Button || c.kind == .TextField) && !c.settings.disabled
-	if interactive {
+	// The mouse: a press on a button, field, slider or check box (the topmost: the last to
+	// update), a release on the button or check box it pressed; a pressed slider follows it
+	if takesInput(c) {
 		if Input_IsMouseButtonJustPressed(.Left, game) {
 			if inside {
 				c.pressed = true
@@ -884,10 +1021,15 @@ controlUpdate :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 				Control_Focus(scene, nil)
 			}
 		}
-		if c.pressed && !Input_IsMouseButtonPressed(.Left, game) {
+		held := Input_IsMouseButtonPressed(.Left, game)
+		if c.pressed && held && c.kind == .Slider do sliderChange(cast(^Slider)c, sliderValueAt(c, mouse.x - rect.x))
+		if c.pressed && !held {
 			c.pressed = false
 			if inside && c.kind == .Button do press(cast(^Button)c)
+			if inside && c.kind == .CheckBox do toggle(cast(^CheckBox)c)
 		}
+	} else {
+		c.pressed = false
 	}
 	if c.kind == .TextField && scene.ui.focus == c.id do typeInto(cast(^TextField)c, events, f32(deltaTime))
 	// The keyboard and gamepads: whichever focusable control updates first does this frame's move
@@ -905,28 +1047,47 @@ navigate :: proc(c: ^Control, game: ^Game, events: []sdl.Event) {
 	dir: [2]f32
 	accept := false
 	typing := focus != nil && focus.kind == .TextField
+	// A focused slider takes left and right: they move its value, not the focus
+	sliding := focus != nil && focus.kind == .Slider
+	left, right: bool
 	if Input_HasAction(MENU_ACTION_ACCEPT, game) {
 		if Input_IsActionJustPressed(MENU_ACTION_UP, game) do dir = {0, -1}
 		if Input_IsActionJustPressed(MENU_ACTION_DOWN, game) do dir = {0, 1}
-		if !typing && Input_IsActionJustPressed(MENU_ACTION_LEFT, game) do dir = {-1, 0}
-		if !typing && Input_IsActionJustPressed(MENU_ACTION_RIGHT, game) do dir = {1, 0}
+		left = !typing && Input_IsActionJustPressed(MENU_ACTION_LEFT, game)
+		right = !typing && Input_IsActionJustPressed(MENU_ACTION_RIGHT, game)
 		accept = !typing && Input_IsActionJustPressed(MENU_ACTION_ACCEPT, game)
 	} else {
 		if Input_IsKeyJustPressed(.Up, game) do dir = {0, -1}
 		if Input_IsKeyJustPressed(.Down, game) || Input_IsKeyJustPressed(.Tab, game) do dir = {0, 1}
-		if !typing && Input_IsKeyJustPressed(.Left, game) do dir = {-1, 0}
-		if !typing && Input_IsKeyJustPressed(.Right, game) do dir = {1, 0}
+		left = !typing && Input_IsKeyJustPressed(.Left, game)
+		right = !typing && Input_IsKeyJustPressed(.Right, game)
 		accept = !typing && (Input_IsKeyJustPressed(.Enter, game) || Input_IsKeyJustPressed(.Space, game))
 	}
-	if dir == {} && !accept do return
+	nudge: f32
+	if sliding {
+		if left do nudge -= 1
+		if right do nudge += 1
+	} else {
+		if left do dir = {-1, 0}
+		if right do dir = {1, 0}
+	}
+	if dir == {} && !accept && nudge == 0 && !(sliding && (left || right)) do return
 	scene.ui.navigated = scene.ui.stamp
 	if focus == nil {
 		// Nothing focused: the first control takes it
 		Control_Focus(scene, c)
 		return
 	}
+	if dir == {} && sliding && (left || right) {
+		s := c.settings
+		by := s.step > 0 ? s.step : abs(s.maxValue - s.minValue) / 20
+		if s.maxValue < s.minValue do by = -by
+		sliderChange(cast(^Slider)c, s.value + nudge * by)
+		return
+	}
 	if accept {
 		if c.kind == .Button do press(cast(^Button)c)
+		if c.kind == .CheckBox do toggle(cast(^CheckBox)c)
 		return
 	}
 	// The nearest focusable control that way (by centers; across the way counts double)
@@ -975,6 +1136,69 @@ press :: proc(b: ^Button) {
 	game := b.scene.game
 	action := b.settings.action
 	if action != "" && !Game_RunAction(game, action) do log.warnf("Button %s: unknown action '%s'", b.name, action)
+}
+
+// A check box clicked or accepted
+@(private="file")
+toggle :: proc(b: ^CheckBox) {
+	b.settings.checked = !b.settings.checked
+	Event_Notify(&b.onToggled, b, b.settings.checked)
+}
+
+// A slider's value kept in its range, snapped to its step
+@(private="file")
+sliderSnap :: proc(s: UISettings, value: f32) -> f32 {
+	v := value
+	if s.step > 0 do v = s.minValue + math.round((v - s.minValue) / s.step) * s.step
+	return clamp(v, min(s.minValue, s.maxValue), max(s.minValue, s.maxValue))
+}
+
+// A slider's value set by the player: snapped, `onValueChanged` when it changed
+@(private="file")
+sliderChange :: proc(s: ^Slider, value: f32) {
+	v := sliderSnap(s.settings, value)
+	if v == s.settings.value do return
+	s.settings.value = v
+	Event_Notify(&s.onValueChanged, s, v)
+}
+
+// The width a slider leaves right of its track for its percentage ("100%" and a gap)
+@(private="file")
+sliderTextRoom :: proc(c: ^Control, rm: ^ResourceManager, font: string, height: f32, theme: UITheme) -> f32 {
+	if !c.settings.showValue || rm == nil do return 0
+	_, spacing := gaps(c, theme)
+	return MeasureText(rm, "100%", font, sliderTextSize(c, theme, height)).x + spacing
+}
+
+@(private="file")
+sliderTextSize :: proc(c: ^Control, theme: UITheme, height: f32) -> f32 {
+	return min(textSizeOf(c, theme), max(height, 8) * 0.8)
+}
+
+// Where a slider's track runs (from the knob's center at the left end to the right end's), and
+// the knob's size: as tall as the slider
+@(private="file")
+sliderTrack :: proc(c: ^Control) -> (left, right, knob: f32) {
+	theme, font := Control_Theme(c)
+	rm := c.scene != nil && c.scene.game != nil ? &c.scene.game.resourceManager : nil
+	knob = c.size.y
+	left = knob * 0.5
+	right = max(c.size.x - sliderTextRoom(c, rm, font, c.size.y, theme) - knob * 0.5, left)
+	return
+}
+
+// The value at an x from a slider's left
+@(private="file")
+sliderValueAt :: proc(c: ^Control, x: f32) -> f32 {
+	left, right, _ := sliderTrack(c)
+	t := right > left ? clamp((x - left) / (right - left), 0, 1) : 0
+	return c.settings.minValue + (c.settings.maxValue - c.settings.minValue) * t
+}
+
+// A check box's box: a little taller than its text
+@(private="file")
+checkBoxSide :: proc(textSize: f32) -> f32 {
+	return math.round(textSize * 1.2)
 }
 
 // Typing into a focused text field: text events, Backspace, Delete, the arrows, Home, End, Enter
@@ -1124,6 +1348,60 @@ controlDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 		lines := richLayout(c, rm, font, textSize, c.size.x)
 		for run in lines.runs {
 			DrawText(rm, {run.at.x, run.at.y}, run.text, font, run.size, run.color != {} ? run.color : theme.textColor)
+		}
+	case .Slider:
+		s := c.settings
+		left, right, knob := sliderTrack(c)
+		span := s.maxValue - s.minValue
+		t := span != 0 ? clamp((s.value - s.minValue) / span, 0, 1) : 0
+		thick := max(math.round(c.size.y * 0.35), 2)
+		track := sdl.FRect{left, (c.size.y - thick) * 0.5, right - left, thick}
+		DrawRoundedRectangle(renderer, &track, thick * 0.5, theme.progressBackColor)
+		filled := track
+		filled.w = track.w * t
+		if filled.w > 0 do DrawRoundedRectangle(renderer, &filled, min(thick * 0.5, filled.w * 0.5), s.disabled ? theme.buttonDisabledColor : theme.progressFillColor)
+		color := theme.buttonColor
+		switch {
+		case s.disabled: color = theme.buttonDisabledColor
+		case c.pressed: color = theme.buttonPressedColor
+		case c.hovered: color = theme.buttonHoverColor
+		}
+		center := sdl.FPoint{left + (right - left) * t, c.size.y * 0.5}
+		DrawCircle(renderer, center, knob * 0.5, color)
+		if theme.borderWidth > 0 && theme.borderColor.a > 0 do DrawCircleOutline(renderer, center, knob * 0.5, theme.borderColor)
+		if s.showValue {
+			size := sliderTextSize(c, theme, c.size.y)
+			text := fmt.tprintf("%d%%", int(math.round(t * 100)))
+			m := MeasureText(rm, text, font, size)
+			DrawText(rm, {c.size.x - m.x, (c.size.y - m.y) * 0.5}, text, font, size, s.disabled ? theme.disabledTextColor : theme.textColor)
+		}
+	case .CheckBox:
+		s := c.settings
+		side := checkBoxSide(textSize)
+		box := sdl.FRect{0, (c.size.y - side) * 0.5, side, side}
+		color := theme.fieldColor
+		switch {
+		case s.disabled: color = theme.buttonDisabledColor
+		case c.pressed && c.hovered: color = theme.buttonPressedColor
+		case c.hovered: color = theme.buttonHoverColor
+		}
+		radius := min(theme.cornerRadius, side * 0.25)
+		DrawRoundedRectangle(renderer, &box, radius, color)
+		if theme.borderWidth > 0 && theme.borderColor.a > 0 do DrawRoundedRectangleOutline(renderer, &box, radius, theme.borderColor)
+		if s.checked {
+			mark := s.disabled ? theme.disabledTextColor : theme.checkColor
+			at :: proc(box: sdl.FRect, x, y: f32) -> sdl.FPoint { return {box.x + box.w * x, box.y + box.h * y} }
+			thickness := max(side * 0.14, 2)
+			DrawLineThick(renderer, at(box, 0.22, 0.52), at(box, 0.42, 0.72), thickness, mark)
+			DrawLineThick(renderer, at(box, 0.42, 0.72), at(box, 0.78, 0.3), thickness, mark)
+			// The joint's gap filled
+			DrawCircle(renderer, at(box, 0.42, 0.72), thickness * 0.5, mark)
+		}
+		if c.text != "" {
+			_, spacing := gaps(c, theme)
+			text := Tr_Text(c.text, c.scene.game)
+			m := MeasureText(rm, text, font, textSize)
+			DrawText(rm, {side + spacing, (c.size.y - m.y) * 0.5}, text, font, textSize, s.disabled ? theme.disabledTextColor : theme.textColor)
 		}
 	}
 	if focused {
