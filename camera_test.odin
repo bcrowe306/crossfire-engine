@@ -175,7 +175,7 @@ FOLLOW_SCENE :: `<scene formatVersion="14" name="S">
 	</node>
 	<node kind="Camera" name="Cam" x="0" y="0" zoom="2" target="../World/Hero" followMode="Snap"
 	      deadzoneX="40" deadzoneY="20" targetOffsetX="0" targetOffsetY="-30" lookAheadX="60"
-	      lookAheadSmoothing="0" limitLeft="0" limitBottom="400" shakeStrength="9" shakeDuration="0.5"
+	      lookAheadSmoothing="0" limitLeft="0" limitTop="-50" limitBottom="400" limitsOff="Top" shakeStrength="9" shakeDuration="0.5"
 	      shakeFrequency="20"/>
 	<node kind="Camera" name="Second" x="0" y="0" target="/World/Hero" followMode="Snap"/>
 	<node kind="Camera" name="Lost" target="Nobody"/>
@@ -189,7 +189,8 @@ camera_settings_from_scene_files :: proc(t: ^testing.T) {
 	c := data.nodes[2].camera
 	testing.expect(t, data.nodes[2].cameraTarget == "../World/Hero" && c.follow.mode == .Snap && c.follow.deadzone == {40, 20}, "follow parsed")
 	testing.expect(t, c.follow.offset == {0, -30} && c.follow.lookAhead == {60, 0} && c.follow.lookAheadSmoothing == 0, "offset and look-ahead parsed")
-	testing.expect(t, c.limits == {.Left, .Bottom} && c.limitMin.x == 0 && c.limitMax.y == 400, "limits parsed")
+	// limitsOff: the top's value is kept, but the top isn't limited
+	testing.expectf(t, c.limits == {.Left, .Bottom} && c.limitMin == {0, -50} && c.limitMax.y == 400, "limits parsed: %v", c)
 	testing.expect(t, c.shake == CameraShakeSettings{9, 0.5, 20}, "shake parsed")
 	testing.expect(t, data.nodes[4].camera == DEFAULT_CAMERA_SETTINGS && data.nodes[0].cameraTarget == "", "defaults elsewhere")
 

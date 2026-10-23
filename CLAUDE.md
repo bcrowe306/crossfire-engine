@@ -1108,7 +1108,8 @@ comment. What was needed, and why:
   without them mean what they did): a Camera's `target` and settings (`SceneNodeData.camera`, a
   `CameraSettings`, and `cameraTarget`): `followMode`, `smoothing`, `smoothTime`, `followSpeed`,
   `maxSpeed`, `deadzoneX` / `Y`, `targetOffsetX` / `Y`, `lookAheadX` / `Y`,
-  `lookAheadSmoothing`, `limitLeft` / `Top` / `Right` / `Bottom` (present: that side limited),
+  `lookAheadSmoothing`, `limitLeft` / `Top` / `Right` / `Bottom` (present: that side limited,
+  unless `limitsOff` lists it: "Left,Top", the value kept for an editor's unticked side),
   `shakeStrength`, `shakeDuration`, `shakeFrequency`. Attribute names are global across kinds
   (the parser reads every one for every node), so they avoid the others' (`deadzone` is a touch
   control's).

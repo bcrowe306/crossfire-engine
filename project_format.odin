@@ -113,7 +113,8 @@ the field, in `ParticleSettings_Get`'s format. The node's `texture` is the Textu
 
 A Camera (camera.odin) with a `target` (a path from it: `target="../Hero"`) follows that node by
 itself with its follow settings (`followMode="SmoothDamp" deadzoneX="120" lookAheadX="80"`), and
-never shows past the sides it has limits for (`limitLeft="0" limitBottom="720"`); `shakeStrength`,
+never shows past the sides it has limits for (`limitLeft="0" limitBottom="720"`; a side listed
+in `limitsOff="Left,Top"` keeps its value but isn't limited); `shakeStrength`,
 `shakeDuration` and `shakeFrequency` are how `Camera2D_Shake` shakes it by default.
 
 Physics (physics.odin, physics_nodes.odin): body nodes (StaticBody, DynamicBody, CharacterMover,
@@ -151,7 +152,9 @@ Version history:
   node it follows by itself), `followMode`, `smoothing`, `smoothTime`, `followSpeed`,
   `maxSpeed`, `deadzoneX`, `deadzoneY`, `targetOffsetX`, `targetOffsetY`, `lookAheadX`,
   `lookAheadY`, `lookAheadSmoothing`, `limitLeft`, `limitTop`, `limitRight`, `limitBottom`
-  (each one there limits that side), `shakeStrength`, `shakeDuration`, `shakeFrequency`.
+  (each one there limits that side), `limitsOff` (sides, comma-separated, whose value is there
+  but which aren't limited: an editor's unticked side keeps its value; older readers limit
+  them), `shakeStrength`, `shakeDuration`, `shakeFrequency`.
 - 13: every node's `processMode`, `blendMode`, `zIndex`, `ySort` and `groups`; CollisionShape
   `oneWay`; the project's window: `fullscreen`, `vsync` (default true), `highDPI`; assets of
   kind "Translation" (CSV tables: localization.odin), the project's `locale` and `icon`, and the
@@ -497,7 +500,8 @@ SceneNodeData :: struct {
 	// 14, camera.odin): `followMode` (a `CameraFollowMode`), `smoothing`, `smoothTime`,
 	// `followSpeed`, `maxSpeed`, `deadzoneX`, `deadzoneY`, `targetOffsetX`, `targetOffsetY`,
 	// `lookAheadX`, `lookAheadY`, `lookAheadSmoothing`; `limitLeft`, `limitTop`, `limitRight`,
-	// `limitBottom` (a side is limited when its attribute is there); `shakeStrength`,
+	// `limitBottom` (a side is limited when its attribute is there, unless `limitsOff` names it:
+	// "Left,Top", the value kept for when it's turned on again); `shakeStrength`,
 	// `shakeDuration`, `shakeFrequency`
 	camera: CameraSettings,
 	// Camera: `target`, the node it follows by itself, a path from it ("" for none)
@@ -2152,6 +2156,13 @@ parseCameraSettings :: proc(doc: ^xml.Document, element: xml.Element_ID, node: ^
 		case .Top:    node.camera.limitMin.y = value
 		case .Right:  node.camera.limitMax.x = value
 		case .Bottom: node.camera.limitMax.y = value
+		}
+	}
+	// Sides whose value is kept but which are turned off (an editor's unticked limit)
+	if text, found := xml.find_attribute_val_by_key(doc, element, "limitsOff"); found {
+		rest := text
+		for name in strings.split_iterator(&rest, ",") {
+			if side, ok := reflect.enum_from_name(CameraSide, strings.trim_space(name)); ok do node.camera.limits -= {side}
 		}
 	}
 	node.cameraTarget = cloneAttr(doc, element, "target", "")
