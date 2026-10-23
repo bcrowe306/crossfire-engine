@@ -29,7 +29,8 @@ Label :: struct {
 /*
 Creates a `Label` node and adds it to the scene (at the start of the next update).
 
-The text is copied into the label node's arena, so a temporary string is fine.
+The text and the font's path are copied into the label node's arena, so temporary strings are
+fine.
 
 Inputs:
 - scene: The scene that owns the label
@@ -58,7 +59,7 @@ CreateLabel :: proc(scene: ^Scene, text: string, pos: [2]f32, size: f32, color: 
 	label.size = size
 	label.color = color
 	label.centered = centered
-	label.font = font
+	label.font = strings.clone(font, Node_GetAllocator(label))
 	return label
 }
 

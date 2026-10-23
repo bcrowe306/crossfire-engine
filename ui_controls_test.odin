@@ -493,3 +493,16 @@ ui_scroll_box_rows_hide_and_scroll_to_the_focus :: proc(t: ^testing.T) {
 	testing.expect(t, focusedNow == find(scene, "B4"), "the focus is on the fourth row's button")
 	testing.expect(t, !find(scene, "Row4").clipped && find(scene, "Row1").clipped, "scrolled to it")
 }
+
+@(test)
+labels_keep_their_text_and_font :: proc(t: ^testing.T) {
+	game := testGame("testdata")
+	defer { Game_Destroy(game); free(game) }
+	scene := game->createScene("S")
+	// Both made in the frame's memory, which is freed at the frame's end
+	label := CreateLabel(scene, fmt.tprintf("+%d", 10), {0, 0}, 20, {255, 255, 255, 255}, true, JoinPath("assets", "font.ttf"))
+	free_all(context.temp_allocator)
+	_ = fmt.tprintf("%s", "something else in the frame's memory now")
+	testing.expect_value(t, label.text, "+10")
+	testing.expect_value(t, label.font, "assets/font.ttf")
+}
