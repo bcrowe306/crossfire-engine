@@ -152,6 +152,25 @@ Platform_LoadSurface :: proc(path: string) -> ^sdl.Surface {
 	return img.Load(fmt.ctprint(path))
 }
 
+/*
+Writes a finished log line (logging.odin) to standard output, in one write so lines from several
+threads don't mix, and with `platformLog` to the platform's log too: the debugger's output on
+Windows (`OutputDebugStringW`), the unified log on macOS (`syslog`). On Linux standard output is
+the log (a terminal, or the journal for a service).
+
+Inputs:
+- line: The line(s), without a final line break
+- level: The line's level (the platform log's priority)
+- platformLog: Also write it to the platform's log
+*/
+Platform_LogWrite :: proc(line: string, level: LogLevel, platformLog: bool) {
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+	_, _ = os.write_string(os.stdout, strings.concatenate({line, "\n"}, context.temp_allocator))
+	if platformLog {
+		when ODIN_OS == .Windows || ODIN_OS == .Darwin do platformSystemLog(line, level)
+	}
+}
+
 // A context for contextless code (`@(init)` procedures): Odin's default
 Platform_DefaultContext :: proc "contextless" () -> runtime.Context {
 	return runtime.default_context()

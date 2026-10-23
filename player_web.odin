@@ -3,7 +3,6 @@ package crossfire
 
 import "base:runtime"
 import "core:c"
-import "core:fmt"
 import "core:log"
 import "core:strings"
 import sdl "vendor:sdl3"
@@ -54,6 +53,7 @@ registration) and starts the project packaged under /data.
 odin_web_main :: proc "c" () {
 	context = Web_Context()
 	runtime._startup_runtime()
+	Log_HookSDL(&webLogSink)
 	Player_StartWeb()
 }
 
@@ -88,7 +88,7 @@ Web_Context :: proc "contextless" () -> runtime.Context {
 		_ = runtime.arena_init(&web.temp, 1024 * 1024, ctx.allocator)
 	}
 	ctx.temp_allocator = {procedure = runtime.arena_allocator_proc, data = &web.temp}
-	ctx.logger = {procedure = webLoggerProc, lowest_level = .Info}
+	ctx.logger = Log_CreateLogger(&webLogSink)
 	return ctx
 }
 
@@ -166,15 +166,20 @@ webAllocatorProc :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, align
 	return nil, nil
 }
 
-@(private="file")
-webLoggerProc :: proc(data: rawptr, level: runtime.Logger_Level, text: string, options: runtime.Logger_Options, location := #caller_location) {
-	tag := "INFO"
-	switch level {
-	case .Debug:   tag = "DEBUG"
-	case .Info:    tag = "INFO"
-	case .Warning: tag = "WARN"
-	case .Error:   tag = "ERROR"
-	case .Fatal:   tag = "FATAL"
-	}
-	web_puts(strings.clone_to_cstring(fmt.tprintf("[%s] %s", tag, text), context.temp_allocator))
+/*
+Writes a finished log line (logging.odin) to the browser's console: the browser's console is the
+platform's log there, so `platformLog` changes nothing.
+
+Inputs:
+- line: The line(s), without a final line break
+- level: The line's level
+- platformLog: Ignored
+*/
+Platform_LogWrite :: proc(line: string, level: LogLevel, platformLog: bool) {
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+	web_puts(strings.clone_to_cstring(line, context.temp_allocator))
 }
+
+// The browser's log sink (Web_Context's logger): info and up, like an exported desktop game
+@(private="file")
+webLogSink := LogSink{minimum = .Info, platformLog = true}

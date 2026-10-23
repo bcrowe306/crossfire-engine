@@ -16,7 +16,8 @@ and an overlay, physics queries and one-way platforms, levels made in the
 nodes with their LDtk fields, IntGrid collision), scripts in Odin (several per node, node types of
 your own, hot reload from the editor), texture atlases, image filtering per asset, bitmap (BMFont) and
 MSDF fonts, skeletal animation (bones, skinned meshes, IK, DragonBones import), dialogue (a dialogue
-asset, a typewriter DialogueBox, Yarn Spinner import), global game state with JSON saves, data resources, and a player
+asset, a typewriter DialogueBox, Yarn Spinner import), global game state with JSON saves, data resources, logging
+(levels and categories, SDL's messages included; the editor's Console filters them), and a player
 that runs projects made with [odin_sdl_editor](https://github.com/bcrowe306/crossfire-editor). It
 builds for Linux, Windows, macOS and the web (WebAssembly).
 

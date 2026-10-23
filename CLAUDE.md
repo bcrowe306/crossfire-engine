@@ -93,6 +93,9 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `localization_test.odin` | Tests: tables (quotes, comments, line breaks), merging, fallbacks, region matching, "@" text, a project's tables and locale |
 | `debug.odin` | **Debug drawing**: `Debug_Line` / `Rect` / `Circle` / `Text` (world space, over the scene, for a frame or `seconds`), `Debug_Clear`; the **debug overlay** (`Game.debugOverlay`, F10 with dev keys: fps, frame times, the scene's counts), `Game_GetFrameStats` |
 | `debug_test.odin` | Tests: debug shapes' lifetimes and freeing, drawing through the view, frame stats and the overlay |
+| `logging.odin` | **Logging for games**: `LogLevel` (Debug, Info, Warning, Error), `Log_Debug` / `Log_Info` / `Log_Warning` / `Log_Error` (fmt text, `category =`, "game" by default), `Log(level, category, ...)`, `LogSink` and `Log_CreateLogger` (the `core:log` logger the player installs), `Log_SetLevel` / `Log_GetLevel`, the line format (`Log_FormatLine` / `Log_ParseLine`: `[WARN ] [player] text`), `Log_HookSDL` (SDL's messages, category "SDL") |
+| `logging_windows.odin`, `logging_darwin.odin` | The platform's log for exported games (`platformSystemLog`, from `Platform_LogWrite`): `OutputDebugStringW`; `syslog` (the unified log) |
+| `logging_test.odin` | Tests: lines formatted and parsed back (every level, odd categories, several lines, non-log lines), categories (given, default, the engine's by location, not sticking), levels and the sink's minimum, another logger getting `[category] ` in the text, SDL's messages through the hook |
 | `easing.odin` | `Ease(EaseType, t)`, 18 curves |
 | `render_target.odin` | **Render targets**: `RenderTarget_Create` / `Destroy`, `RenderTarget_Begin` / `End` (draw into its texture; the game's logical presentation is off meanwhile and restored after), `Scene_DrawToTarget` (a scene through its camera fitted to the target, or a given view) |
 | `tween.odin` | **Tweens**: `Tween_Create(owner)` / `Scene_CreateTween`, steps `Tween_To` / `Tween_FromTo` (f32, [2]f32, sdl.Color), `Tween_Delay`, `Tween_Call`, `Tween_Parallel`, `Tween_SetLoops`, pause, kill; updated by `Scene_Update` after the nodes |
@@ -767,6 +770,28 @@ them after the scene and the cover (`SceneFlow_Draw`) after the globals. **A pro
 loading scene builds only its start and loading scenes at load** (`Scene.unbuilt`, built by
 `Game_RebuildScene` when entered), so nothing else may assume every scene has its nodes at the
 start. Menu and Button actions go through `Game_RunAction`.
+
+**Logging** (logging.odin; its doc comment has the details): **it builds on `core:log`**, so the
+engine's ~230 `log.info` / `log.warnf` calls didn't change. The player sets `context.logger =
+Log_CreateLogger(&playerLogSink)` (Web_Context the same with `webLogSink`); the logger's own
+`lowest_level` is Debug and it filters by the sink's `minimum` (Debug with `--dev`, else Info;
+`Log_SetLevel` changes it for the whole game, since every copy of the logger shares the sink).
+- **Categories:** `Log` puts its category in a thread-local (`pendingCategory`) around its
+  `log.logf` call; the logger proc reads it, else takes "engine" for calls from files under the
+  engine's folder (`#directory` against `location.file_path`) and "game" for the rest (scripts'
+  `core:log` calls). With another `context.logger` (tests, a game's own) `Log` writes
+  `[category] text` instead.
+- **One format** (`Log_FormatLine`): `[LEVEL] [category] text`, the level five wide; every line of
+  a several-line message gets the header; `]` and line breaks in a category become `_`. The
+  editor reads it back with `Log_ParseLine` (its Console). Readable enough for exports too.
+- **Where it goes:** the sink's `write` (tests capture there), else `Platform_LogWrite`: one
+  `os.write` of the line and its newline to stdout (so lines from SDL's threads don't mix; the
+  sink also locks), plus with `platformLog` (not `--dev`) `platformSystemLog` on Windows and
+  macOS; the web's `puts` goes to the browser's console. Not stderr: the editor merges both, and
+  stdout is what exports document.
+- **SDL:** `Log_HookSDL` (before SDL starts: Player_Run, odin_web_main) sets SDL's log output
+  function; it runs with `Platform_DefaultContext` (any thread). SDL's own priorities still
+  decide what it logs (`SDL_LOGGING=*=debug` shows more).
 
 **The live link** (live.odin; its doc comment has the details): `Game_Update` runs
 `LiveLink_Process` after input, the hitstop and file watching, before globals and the scene: a

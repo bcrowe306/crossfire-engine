@@ -45,8 +45,13 @@ Returns:
   or the project couldn't be loaded or started
 */
 Player_Run :: proc(args: []string) -> int {
-	context.logger = log.create_console_logger(.Info)
+	// The engine's logger (logging.odin): from the editor (--dev) debug lines too and standard
+	// output only; exported games also write to the platform's log
+	context.logger = Log_CreateLogger(&playerLogSink)
 	options, ok := Player_ParseArgs(args)
+	playerLogSink.minimum = options.dev ? .Debug : .Info
+	playerLogSink.platformLog = !options.dev
+	Log_HookSDL(&playerLogSink)
 	if !ok {
 		log.error("Usage: player <project folder> [--scene <name>] [--physics-debug] [--dev] [--renderer <name>] [--audio-device <name>] | player --describe-scripts | player --list-audio-devices")
 		return 1
@@ -73,6 +78,10 @@ Player_Run :: proc(args: []string) -> int {
 	log.info("Game closed")
 	return 0
 }
+
+// Where the player's log lines go (Player_Run's logger, and SDL's messages)
+@(private="file")
+playerLogSink: LogSink
 
 /*
 Loads the project `options` names and opens its window, with the start scene (or
