@@ -2,6 +2,7 @@ package crossfire
 
 import "core:encoding/uuid"
 import "core:fmt"
+import "core:log"
 import "core:strings"
 import "core:sync"
 import sdl "vendor:sdl3"
@@ -19,9 +20,11 @@ The channel is the game's standard input and output, one line per message:
   - `select <id>`: also send that node's properties with each tree (`select` alone: none)
   - `set <id> <property> <value>`: sets a property (`Node_WriteProperty`)
   - `pause`, `resume`, `step` (one frame of 1/60 s while paused)
+  - `shapes on`, `shapes off`: shows or hides the physics debug shapes (`Physics_SetDebugDraw`,
+    what F9 toggles in development runs); the next stats come at once and say so
 - **Replies** (lines on stdout starting `@@live `, then JSON):
-  - `{"type":"stats","fps":..,"frame":..,"update":..,"physics":..,"draw":..,"nodes":..,"drawn":..,"paused":..}`
-    (milliseconds, averaged over the last frames)
+  - `{"type":"stats","fps":..,"frame":..,"update":..,"physics":..,"draw":..,"nodes":..,"drawn":..,"paused":..,"shapes":..}`
+    (milliseconds, averaged over the last frames; `shapes`: the debug shapes are shown)
   - `{"type":"tree","scene":"..","nodes":[{"id":"..","name":"..","type":"..","parent":"..","visible":true}, ...]}`
   - `{"type":"node","id":"..","properties":[{"name":"..","value":".."}, ...]}`
   - `{"type":"set","ok":true,"id":"..","property":".."}`
@@ -181,6 +184,12 @@ liveCommand :: proc(game: ^Game, line: string) {
 		link.paused = false
 	case "step":
 		link.step = true
+	case "shapes":
+		// The physics debug shapes (an editor's toolbar button; F9 does the same in the game)
+		on := strings.trim_space(rest) == "on"
+		Physics_SetDebugDraw(game, on)
+		log.infof("Collision shapes %s (the editor)", on ? "shown" : "hidden")
+		link.statsTimer = 0
 	case "snapshot":
 		// A hot reload: the game's state into a file, for the restarted game (hot_reload.odin)
 		path := strings.trim_space(rest)
@@ -200,8 +209,8 @@ liveCommand :: proc(game: ^Game, line: string) {
 liveSendStats :: proc(game: ^Game) {
 	fps, frame, _ := Game_GetFrameStats(game)
 	p := game.profile
-	liveOutput(fmt.tprintf(`%s{{"type":"stats","fps":%.1f,"frame":%.2f,"update":%.2f,"physics":%.2f,"draw":%.2f,"nodes":%d,"drawn":%d,"paused":%v}}`,
-		LIVE_PREFIX, fps, frame, p.update, p.physics, p.draw, p.nodes, p.drawn, game.live.paused))
+	liveOutput(fmt.tprintf(`%s{{"type":"stats","fps":%.1f,"frame":%.2f,"update":%.2f,"physics":%.2f,"draw":%.2f,"nodes":%d,"drawn":%d,"paused":%v,"shapes":%v}}`,
+		LIVE_PREFIX, fps, frame, p.update, p.physics, p.draw, p.nodes, p.drawn, game.live.paused, game.physics.debugDraw))
 }
 
 @(private="file")

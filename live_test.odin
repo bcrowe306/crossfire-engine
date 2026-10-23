@@ -116,5 +116,19 @@ the_live_link_answers_an_editor :: proc(t: ^testing.T) {
 	LiveLink_Push(game, "resume")
 	Game_Update(game, nil, 1.0 / 60)
 	testing.expect(t, world.position.x > held + 1, "moving again")
+
+	// The debug shapes shown and hidden (the editor's toolbar button): the stats say so at once
+	stats, _ = reply("stats")
+	testing.expect(t, stats["shapes"].(json.Boolean) == false, "no shapes at first")
+	LiveLink_Push(game, "shapes on")
+	Game_Update(game, nil, 1.0 / 60)
+	testing.expect(t, game.physics.debugDraw, "shown")
+	stats, _ = reply("stats")
+	testing.expect(t, stats["shapes"].(json.Boolean) == true, "the stats say they're shown")
+	LiveLink_Push(game, "shapes off")
+	Game_Update(game, nil, 1.0 / 60)
+	testing.expect(t, !game.physics.debugDraw, "hidden")
+	stats, _ = reply("stats")
+	testing.expect(t, stats["shapes"].(json.Boolean) == false, "the stats say they're hidden")
 	free_all(context.temp_allocator)
 }
