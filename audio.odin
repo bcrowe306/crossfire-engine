@@ -189,23 +189,101 @@ Audio_Destroy :: proc(audio: ^mix.Audio) {
 Plays a sound file once, loading it the first time (it stays cached in the resource manager).
 `Game_PlaySound` with a path.
 
+The sound goes through a mix bus like a sound node's (`bus`: "" is Master), so the bus's
+volume, pan, mute and effects apply to it, and at the volume, pitch (playback speed: 1.1 a
+little higher and faster) and pan given. A bus's volume changing while it plays changes it too.
+Each sound plays on a track of the game's (`Game.sounds`), reused once its sound has ended; past
+`MAX_SOUND_TRACKS` at once the oldest is cut off.
+
 Inputs:
 - game: The game
 - path: The sound file, relative to the project folder (`game.projectDir`) like other assets
+- bus: The mix bus it plays on ("" is Master; an unknown one is Master, with a warning)
+- volume: 0 (silent) to 1 (as recorded), more boosts
+- pitch: The playback speed: 1 as recorded, 2 an octave up and twice as fast
+- pan: -1 left, 0 center, 1 right
 
 Returns:
 - false if there's no audio device, or (logged) it couldn't be loaded or played
 
 Example:
 	e.Game_PlaySound(game, "assets/laser.wav") // or a SoundAsset (assets.odin)
+	// On the project's "SFX" bus, a little quieter and higher than recorded
+	e.Game_PlaySound(game, "assets/coin.ogg", bus = "SFX", volume = 0.8, pitch = 1.1)
 */
-Game_PlaySoundFile :: proc(game: ^Game, path: string) -> bool {
+Game_PlaySoundFile :: proc(game: ^Game, path: string, bus := "", volume: f32 = 1, pitch: f32 = 1, pan: f32 = 0) -> bool {
 	if game.mixer == nil do return false
 	audio := game.resourceManager->loadAudio(game.projectDir == "" ? path : JoinPath(game.projectDir, path))
 	if audio == nil do return false
-	if !mix.PlayAudio(game.mixer, audio) {
+	if len(game.buses) == 0 do Audio_SetBuses(game, nil)
+	busIndex := 0
+	busName := bus == "" ? MASTER_BUS : bus
+	for b, i in game.buses do if b.name == busName do busIndex = i
+	if busIndex == 0 && busName != MASTER_BUS do log.warnf("Game_PlaySound: no bus named '%s': playing %s on Master", bus, path)
+
+	// A track whose sound ended, else a new one, else the oldest playing: the list is kept in
+	// the order the sounds started, so the one taken goes to its end
+	slot := -1
+	for s, i in game.sounds do if !mix.TrackPlaying(s.track) {
+		slot = i
+		break
+	}
+	if slot < 0 && len(game.sounds) >= MAX_SOUND_TRACKS do slot = 0
+	sound: SoundTrack
+	if slot >= 0 {
+		sound = game.sounds[slot]
+		ordered_remove(&game.sounds, slot)
+		if mix.TrackPlaying(sound.track) do _ = mix.StopTrack(sound.track, 0)
+	} else {
+		sound.track = mix.CreateTrack(game.mixer)
+		if sound.track == nil {
+			log.warnf("Couldn't play %s: %s", path, sdl.GetError())
+			return false
+		}
+	}
+	sound.bus, sound.volume, sound.pan = busIndex, max(volume, 0), clamp(pan, -1, 1)
+	if game.sounds == nil do game.sounds = make([dynamic]SoundTrack)
+	append(&game.sounds, sound)
+	_ = mix.SetTrackGroup(sound.track, game.buses[busIndex].group)
+	_ = mix.SetTrackAudio(sound.track, audio)
+	_ = mix.SetTrackFrequencyRatio(sound.track, clamp(pitch, 0.01, 100))
+	soundOutput(game, sound)
+	if !mix.PlayTrack(sound.track, 0) {
 		log.warnf("Couldn't play %s: %s", path, sdl.GetError())
 		return false
 	}
 	return true
+}
+
+// A sound `Game_PlaySound` plays (`Game.sounds`): its track, reused for later sounds once it ends
+SoundTrack :: struct {
+	// Its SDL3_mixer track
+	track: ^mix.Track,
+	// The bus it plays on: an index in `Game.buses` (0 is Master)
+	bus: int,
+	// Its volume, times its bus's
+	volume: f32,
+	// Its pan, with its bus's
+	pan: f32,
+}
+
+// The most sounds `Game_PlaySound` plays at once; another cuts the oldest off
+MAX_SOUND_TRACKS :: 32
+
+// A sound's gains from its volume, pan and bus (Master's go on the final mix, as for sound nodes)
+@(private)
+soundOutput :: proc(game: ^Game, sound: SoundTrack) {
+	if sound.bus >= len(game.buses) do return
+	gain, left, right := Audio_Output(game, game.buses[sound.bus].name, sound.volume, sound.pan, master = false)
+	_ = mix.SetTrackGain(sound.track, gain)
+	gains := mix.StereoGains{left, right}
+	_ = mix.SetTrackStereo(sound.track, &gains)
+}
+
+// Frees `Game_PlaySound`'s tracks (Audio_DestroyBuses, before the buses' groups go)
+@(private)
+soundsDestroy :: proc(game: ^Game) {
+	for s in game.sounds do mix.DestroyTrack(s.track)
+	delete(game.sounds)
+	game.sounds = nil
 }

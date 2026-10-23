@@ -418,6 +418,8 @@ Audio_Update :: proc(game: ^Game) {
 	gain := master.mute ? 0 : max(master.volume, 0)
 	left, right := balance(master.pan)
 	AudioMeter_SetGains(master.meter, gain * left, gain * right)
+	// Sounds from code follow their buses' volumes while they play
+	for s in game.sounds do if mix.TrackPlaying(s.track) do soundOutput(game, s)
 }
 
 /*
@@ -582,6 +584,7 @@ Audio_SceneExited :: proc(game: ^Game, scene: ^Scene) {
 @(private)
 Audio_DestroyBuses :: proc(game: ^Game) {
 	if game.mixer != nil do _ = mix.SetPostMixCallback(game.mixer, nil, nil)
+	soundsDestroy(game)
 	for b in game.buses do if b.group != nil do mix.DestroyGroup(b.group)
 	// After their groups are gone (nothing runs them now)
 	for b in game.buses do AudioEffects_Destroy(b.effects)

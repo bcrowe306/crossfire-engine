@@ -164,20 +164,25 @@ Asset_Font :: proc(game: ^Game, asset: FontAsset, size: f32) -> ^ttf.Font {
 }
 
 // `Game_PlaySound` for a `SoundAsset` (see `Game_PlaySoundFile`); false (logged) for an empty one
-Game_PlaySoundAsset :: proc(game: ^Game, asset: SoundAsset) -> bool {
+Game_PlaySoundAsset :: proc(game: ^Game, asset: SoundAsset, bus := "", volume: f32 = 1, pitch: f32 = 1, pan: f32 = 0) -> bool {
 	if asset.path == "" {
 		log.warn("Game_PlaySound: an empty SoundAsset")
 		return false
 	}
-	return Game_PlaySoundFile(game, asset.path)
+	return Game_PlaySoundFile(game, asset.path, bus, volume, pitch, pan)
 }
 
 /*
-Plays a sound once, loading it the first time (cached by the resource manager).
+Plays a sound once, loading it the first time (cached by the resource manager), on a mix bus
+at a volume, pitch and pan (`Game_PlaySoundFile` has the details).
 
 Inputs:
 - game: The game
 - asset or path: A `SoundAsset`, or a path relative to the project folder
+- bus: The mix bus ("" is Master)
+- volume: 0 to 1 (more boosts)
+- pitch: The playback speed (1 as recorded)
+- pan: -1 left, 0 center, 1 right
 
 Returns:
 - false if there's no audio device, or (logged) the sound couldn't be loaded or played
@@ -185,7 +190,7 @@ Returns:
 Example:
 	// Given: SOUND_LASER: e.SoundAsset
 	e.Game_PlaySound(game, SOUND_LASER)
-	e.Game_PlaySound(game, "assets/explosion.wav")
+	e.Game_PlaySound(game, "assets/explosion.wav", bus = "SFX", pitch = 0.9)
 */
 Game_PlaySound :: proc{Game_PlaySoundAsset, Game_PlaySoundFile}
 

@@ -4,6 +4,7 @@ package crossfire
 import "core:log"
 import "core:math"
 import "core:os"
+import "core:strings"
 import "core:sync"
 import "core:testing"
 import sdl "vendor:sdl3"
@@ -281,4 +282,65 @@ music_crossfades_between_songs :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(music.fading), 0)
 	testing.expectf(t, peakTail(block) > 0.35, "b alone: %v", peakTail(block))
 	AudioPlayer_Stop(music, fade = false)
+}
+
+@(test)
+sounds_from_code_play_on_buses :: proc(t: ^testing.T) {
+	sync.guard(&audioTestLock)
+	if !sdl.InitSubSystem({.AUDIO}) || !mix.Init() {
+		log.warnf("No SDL audio here (%s): skipped", sdl.GetError())
+		return
+	}
+	defer { mix.Quit(); sdl.QuitSubSystem({.AUDIO}) }
+	spec := sdl.AudioSpec{format = .F32, channels = 2, freq = RATE}
+	mixer := mix.CreateMixer(&spec)
+	if mixer == nil {
+		log.warnf("No offline mixer here (%s): skipped", sdl.GetError())
+		return
+	}
+	defer mix.DestroyMixer(mixer)
+	game := testGame("testdata")
+	defer { Audio_DestroyBuses(game); Game_Destroy(game); free(game) }
+	game.mixer = mixer
+	game.resourceManager.mixer = mixer
+	Audio_SetBuses(game, {{name = "SFX", volume = 0.5}, {name = "Quiet", volume = 1}})
+	// The sound, as if loaded from its file (the resource manager owns it from here)
+	tone := sine(440, RATE)
+	game.resourceManager.audio[strings.clone(JoinPath(game.projectDir, "beep.wav"))] = mix.LoadRawAudio(mixer, raw_data(tone), uint(len(tone) * size_of(f32)), spec)
+	render :: proc(mixer: ^mix.Mixer) -> f32 {
+		out := make([]f32, RATE / 10 * 2, context.temp_allocator)
+		_ = mix.Generate(mixer, raw_data(out), i32(len(out) * size_of(f32)))
+		return peakTail(out)
+	}
+
+	// On Master, as recorded: the tone's 0.5
+	testing.expect(t, Game_PlaySound(game, "beep.wav"), "played")
+	full := render(mixer)
+	testing.expectf(t, abs(full - 0.5) < 0.02, "as recorded: %v", full)
+	// On a bus at half volume, and a sound's own volume on top
+	Audio_Update(game)
+	for s in game.sounds do _ = mix.StopTrack(s.track, 0)
+	testing.expect(t, Game_PlaySound(game, "beep.wav", bus = "SFX"), "played on SFX")
+	half := render(mixer)
+	testing.expectf(t, abs(half - 0.25) < 0.02, "the bus's half: %v", half)
+	testing.expect_value(t, len(game.sounds), 1)
+	// The bus turned down while it plays: the sound follows (Audio_Update, every frame)
+	Audio_SetBusVolume("SFX", 0, game)
+	Audio_Update(game)
+	silent := render(mixer)
+	testing.expectf(t, silent < 0.01, "silenced with its bus: %v", silent)
+	for s in game.sounds do _ = mix.StopTrack(s.track, 0)
+	testing.expect(t, Game_PlaySound(game, "beep.wav", bus = "Quiet", volume = 0.5), "played on Quiet")
+	quarter := render(mixer)
+	testing.expectf(t, abs(quarter - 0.25) < 0.02, "its own volume: %v", quarter)
+	// The ended sound's track was reused
+	testing.expect_value(t, len(game.sounds), 1)
+	// Many at once: never more tracks than MAX_SOUND_TRACKS
+	for _ in 0 ..< MAX_SOUND_TRACKS + 5 do _ = Game_PlaySound(game, "beep.wav", bus = "Quiet", pitch = 1.5)
+	testing.expect_value(t, len(game.sounds), MAX_SOUND_TRACKS)
+	// An unknown bus plays on Master (with a warning)
+	context.logger = log.nil_logger()
+	for s in game.sounds do _ = mix.StopTrack(s.track, 0)
+	testing.expect(t, Game_PlaySound(game, "beep.wav", bus = "Nope"), "played on Master")
+	testing.expect_value(t, game.sounds[len(game.sounds) - 1].bus, 0)
 }

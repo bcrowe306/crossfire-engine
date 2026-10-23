@@ -100,6 +100,8 @@ Game :: struct {
 	steam: SteamState,
 	// Every sound player of every scene (audio_nodes.odin); the players belong to their scenes
 	audioPlayers: [dynamic]^AudioPlayer,
+	// Sounds played from code (`Game_PlaySound`), oldest first: their tracks, reused once they end (audio.odin)
+	sounds: [dynamic]SoundTrack,
 	// Components read so far, by path (nil: couldn't be read); in the game's memory (project_loader.odin)
 	components: map[string]^SceneData,
 	// Animation sets read so far, by path (nil: couldn't be read); in the game's memory
