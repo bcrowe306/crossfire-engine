@@ -726,7 +726,16 @@ uiFocused :: proc(scene: ^Scene) -> ^Control {
 
 @(private="file")
 controlFocusable :: proc(c: ^Control) -> bool {
-	return takesInput(c) && Node_IsVisibleInTree(c) && !c.clipped
+	return takesInput(c) && Node_IsVisibleInTree(c) && !controlClipped(c)
+}
+
+// Whether a scroll box hides it: it, or a control it's inside (a row of a list), doesn't fit
+@(private="file")
+controlClipped :: proc(c: ^Control) -> bool {
+	for node: ^Node = c; node != nil && Node_IsControl(node); node = node.parent {
+		if (cast(^Control)node).clipped do return true
+	}
+	return false
 }
 
 // The kinds the mouse and the keyboard use (not disabled ones)
@@ -997,7 +1006,7 @@ controlUpdate :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 	scene := c.scene
 	game := scene != nil ? scene.game : nil
 	if game == nil do return
-	usable := Node_IsVisibleInTree(c) && !c.clipped
+	usable := Node_IsVisibleInTree(c) && !controlClipped(c)
 	rect := Control_GetRect(c)
 	mouse := Input_GetMousePosition(game)
 	inside := usable && mouse.x >= rect.x && mouse.x < rect.x + rect.w && mouse.y >= rect.y && mouse.y < rect.y + rect.h
@@ -1098,7 +1107,8 @@ navigate :: proc(c: ^Control, game: ^Game, events: []sdl.Event) {
 	for node in scene.nodes {
 		if node == c || !Node_IsControl(node) do continue
 		other := cast(^Control)node
-		if !controlFocusable(other) do continue
+		// Hidden by a scroll box counts: focusing it scrolls it into view
+		if !takesInput(other) || !Node_IsVisibleInTree(other) do continue
 		r := Control_GetRect(other)
 		d := [2]f32{r.x + r.w * 0.5, r.y + r.h * 0.5} - center
 		ahead := d.x * dir.x + d.y * dir.y
@@ -1108,14 +1118,18 @@ navigate :: proc(c: ^Control, game: ^Game, events: []sdl.Event) {
 		if score < bestScore do best, bestScore = other, score
 	}
 	if best != nil {
-		Control_Focus(scene, best)
+		// Into view first: a control a scroll box hides can't take the focus
 		revealInScrollBox(best)
+		Control_Focus(scene, best)
 	}
 }
 
-// A control focused inside a scroll box is scrolled into view
+// A control focused inside a scroll box (or in a row of one) is scrolled into view
 @(private="file")
-revealInScrollBox :: proc(c: ^Control) {
+revealInScrollBox :: proc(focused: ^Control) {
+	// The scroll box's child that holds it: the control itself, or its row
+	c := focused
+	for c.parent != nil && Node_IsControl(c.parent) && !Node_Is(c.parent, ScrollBox) do c = cast(^Control)c.parent
 	parent := c.parent
 	if parent == nil || !Node_Is(parent, ScrollBox) do return
 	box := cast(^ScrollBox)parent
@@ -1278,7 +1292,7 @@ caretAt :: proc(f: ^TextField, x: f32) {
 controlDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 	c := cast(^Control)node
 	ensureLayout(c)
-	if c.clipped || c.scene == nil || c.scene.game == nil do return
+	if controlClipped(c) || c.scene == nil || c.scene.game == nil do return
 	theme, font := Control_Theme(c)
 	rm := &c.scene.game.resourceManager
 	padding, _ := gaps(c, theme)

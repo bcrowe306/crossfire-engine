@@ -447,3 +447,49 @@ ui_sliders_and_check_boxes_by_actions :: proc(t: ^testing.T) {
 	testing.expect(t, Control_Focused(scene) == &music.control, "up to Music")
 	free_all(context.temp_allocator)
 }
+
+@(test)
+ui_scroll_box_rows_hide_and_scroll_to_the_focus :: proc(t: ^testing.T) {
+	game := testGame("testdata")
+	defer { Game_Destroy(game); free(game) }
+	game.size = {400, 300}
+	scene := game->createScene("S")
+	// A list of rows (a label and a button each), three rows' room: an options screen's controls
+	data, err := ParseScene(`<scene formatVersion="14" name="S">
+	<node kind="ScrollBox" name="List" anchor="Top_Left" width="200" height="100" padding="0" spacing="0">
+		<node kind="Panel" name="Row1" layout="Row" padding="0" height="30"><node kind="Button" name="B1" width="80" height="30"/></node>
+		<node kind="Panel" name="Row2" layout="Row" padding="0" height="30"><node kind="Button" name="B2" width="80" height="30"/></node>
+		<node kind="Panel" name="Row3" layout="Row" padding="0" height="30"><node kind="Button" name="B3" width="80" height="30"/></node>
+		<node kind="Panel" name="Row4" layout="Row" padding="0" height="30"><node kind="Button" name="B4" width="80" height="30"/></node>
+		<node kind="Panel" name="Row5" layout="Row" padding="0" height="30"><node kind="Button" name="B5" width="80" height="30"/></node>
+	</node>
+</scene>`)
+	defer SceneData_Destroy(&data)
+	testing.expect_value(t, err, ProjectError.None)
+	Scene_Build(scene, &data, "testdata")
+	frame :: proc(game: ^Game, scene: ^Scene, events: ..sdl.Event) {
+		Input_Update(&game.input, events)
+		Scene_Update(scene, events, 1.0 / 60)
+	}
+	find :: proc(scene: ^Scene, name: string) -> ^Control { return cast(^Control)Scene_FindNode(scene, name) }
+	frame(game, scene)
+	// Rows past the box are hidden, and so are the buttons in them: they take no clicks or focus
+	testing.expect(t, find(scene, "Row4").clipped && !find(scene, "Row3").clipped, "the fourth row is hidden")
+	b4 := Control_GetRect(find(scene, "B4"))
+	at := [2]f32{b4.x + 5, b4.y + 5}
+	presses := 0
+	Event_Subscribe(&(cast(^Button)find(scene, "B4")).onPressed, proc(_: ^EventSubject, _: rawptr, _: EventData, user: rawptr) {
+		(cast(^int)user)^ += 1
+	}, &presses)
+	frame(game, scene, mouseEvent(.MOUSE_MOTION, at), mouseEvent(.MOUSE_BUTTON_DOWN, at))
+	frame(game, scene, mouseEvent(.MOUSE_BUTTON_UP, at))
+	testing.expect_value(t, presses, 0)
+	// The keys move the focus down the rows, and onto a hidden one: the box scrolls to show it
+	Control_Focus(scene, find(scene, "B3"))
+	frame(game, scene)
+	frame(game, scene, keyEvent(.DOWN))
+	frame(game, scene)
+	focusedNow := Control_Focused(scene)
+	testing.expect(t, focusedNow == find(scene, "B4"), "the focus is on the fourth row's button")
+	testing.expect(t, !find(scene, "Row4").clipped && find(scene, "Row1").clipped, "scrolled to it")
+}
