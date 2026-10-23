@@ -1,6 +1,7 @@
 #+build !js
 package crossfire
 
+import "core:fmt"
 import "core:sync"
 import "core:testing"
 import sdl "vendor:sdl3"
@@ -176,7 +177,7 @@ ui_themes_and_rich_text :: proc(t: ^testing.T) {
 	testing.expect(t, back.theme == data.theme && back.font == data.font, "round trip")
 	delete(data.font)
 	delete(back.font)
-	testing.expect_value(t, FormatTheme({theme = DEFAULT_UI_THEME}, context.temp_allocator), `<theme formatVersion="13"/>` + "\n")
+	testing.expect_value(t, FormatTheme({theme = DEFAULT_UI_THEME}, context.temp_allocator), fmt.tprintf("<theme formatVersion=\"%d\"/>\n", PROJECT_FORMAT_VERSION))
 	testing.expect(t, !UITheme_Set(&data.theme, "textSize", "big"), "not a number")
 	testing.expect(t, len(UITheme_Fields()) > 10 && UITheme_Fields()[0].group == "Text", "fields")
 

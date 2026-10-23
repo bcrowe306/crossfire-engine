@@ -4,8 +4,8 @@ import "core:log"
 import "core:strings"
 
 /*
-Animation assets: a sheet and named animations that AnimatedSprite nodes share, so one set of
-animations (a hero's idle, run, jump) is made once and used anywhere.
+Animation assets: named animations, each on its own sheet, that AnimatedSprite nodes share, so one
+set of animations (a hero's idle, run, jump) is made once and used anywhere.
 
 - **Files:** an `.anim.xml` file (asset kind "Animation": `ParseAnimationSet`, its format there),
   or an **Aseprite file**, read as one (`AnimationSet_FromAseprite`): its frames laid out on a sheet
@@ -14,7 +14,10 @@ animations (a hero's idle, run, jump) is made once and used anywhere.
   duration, its direction, its repeats; a tag that doesn't say how often loops, as in Aseprite),
   or, without tags, one "default" animation of every frame.
 - **Scene files:** an AnimatedSprite's `animations="assets/hero.aseprite"` plays the set instead
-  of its own sheet and animations; its `autoplay` (when set) picks the first one.
+  of its own animations; its `autoplay` (when set) picks the first one.
+- **Sheets:** every animation has its own (`AnimationData.sheet` and `grid`), loaded through the
+  resource manager (shared by the animations and sprites that use it); one that names an Aseprite
+  file gives the sprite that file's slices while it plays (`Animation.source`).
 - **Code:** `AnimatedSprite_UseAnimations(sprite, ANIMATION_HERO)` switches a sprite to a set.
 - `Game_LoadAnimationSet` reads each file once (`Game.animationSets`, in the game's arena);
   editors fill that map with their in-memory sets before building, as they do components.
@@ -37,11 +40,14 @@ Returns:
 */
 AnimationSet_FromAseprite :: proc(ase: ^Aseprite, path: string, allocator := context.allocator) -> AnimationSetData {
 	context.allocator = allocator
-	set := AnimationSetData{texture = strings.concatenate({path, ASEPRITE_SHEET_SUFFIX})}
-	set.columns, set.rows = Aseprite_SheetGrid(ase)
+	set: AnimationSetData
 	set.animations = make([dynamic]AnimationData)
-	clip :: proc(ase: ^Aseprite, name: string, from, to: int, direction: AsepriteDirection, repeat: int) -> AnimationData {
-		a := AnimationData{name = strings.clone(name), start = from, end = to}
+	// Every animation's sheet: the file's frames on a grid
+	columns, rows := Aseprite_SheetGrid(ase)
+	sheet := AnimationSheetOf{strings.concatenate({path, ASEPRITE_SHEET_SUFFIX}, context.temp_allocator), {mode = .Cells, columns = columns, rows = rows}}
+	AnimationSheetOf :: struct { path: string, grid: SheetGrid }
+	clip :: proc(ase: ^Aseprite, sheet: AnimationSheetOf, name: string, from, to: int, direction: AsepriteDirection, repeat: int) -> AnimationData {
+		a := AnimationData{name = strings.clone(name), sheet = strings.clone(sheet.path), grid = sheet.grid, start = from, end = to}
 		a.durations = make([dynamic]f32)
 		a.events = make([dynamic]string)
 		total := 0
@@ -60,7 +66,7 @@ AnimationSet_FromAseprite :: proc(ase: ^Aseprite, path: string, allocator := con
 			clear(&a.events)
 		}
 		// fps for whatever reads only it: the frames' average
-		a.fps = total > 0 ? f32(to - from + 1) * 1000 / f32(total) : DEFAULT_SCENE_NODE.fps
+		a.fps = total > 0 ? f32(to - from + 1) * 1000 / f32(total) : DEFAULT_ANIMATION_FPS
 		switch direction {
 		case .Forward:           a.playMode = .Forward
 		case .Reverse:           a.playMode = .Reverse
@@ -74,9 +80,9 @@ AnimationSet_FromAseprite :: proc(ase: ^Aseprite, path: string, allocator := con
 	}
 	for tag in ase.tags {
 		from, to := clamp(tag.from, 0, max(len(ase.frames) - 1, 0)), clamp(tag.to, 0, max(len(ase.frames) - 1, 0))
-		append(&set.animations, clip(ase, tag.name, min(from, to), max(from, to), tag.direction, tag.repeat))
+		append(&set.animations, clip(ase, sheet, tag.name, min(from, to), max(from, to), tag.direction, tag.repeat))
 	}
-	if len(set.animations) == 0 do append(&set.animations, clip(ase, "default", 0, max(len(ase.frames) - 1, 0), .Forward, 0))
+	if len(set.animations) == 0 do append(&set.animations, clip(ase, sheet, "default", 0, max(len(ase.frames) - 1, 0), .Forward, 0))
 	return set
 }
 
@@ -116,40 +122,71 @@ Game_LoadAnimationSet :: proc(game: ^Game, path: string) -> (^AnimationSetData, 
 }
 
 /*
-Makes a sprite play a set of animations: its animations become the set's (its old ones go), on
-the set's sheet, and it plays `autoplay` (else the set's own, else the first).
+Makes a sprite play a set of animations: its animations become the set's (its old ones go), each
+on its own sheet, and it plays `autoplay` (else the set's own, else the first).
 
 Inputs:
 - sprite: The AnimatedSprite
 - set: The animations (`Game_LoadAnimationSet`)
-- projectDir: The folder the set's texture path is relative to
+- projectDir: The folder the animations' sheet paths are relative to
 - autoplay: The animation to play ("": the set's choice)
 
 Returns:
-- false (logged) if the set's sheet can't be loaded
+- false (logged) if a sheet can't be loaded (its animation is there, drawing nothing)
 */
 AnimatedSprite_SetAnimations :: proc(sprite: ^AnimatedSprite, set: ^AnimationSetData, projectDir: string, autoplay := "") -> bool {
-	allocator := Node_GetAllocator(sprite)
 	player := &sprite.animation
-	if player.allocator.procedure == nil do AnimationPlayer_Init(player, allocator)
+	if player.allocator.procedure == nil do AnimationPlayer_Init(player, Node_GetAllocator(sprite))
 	AnimationPlayer_Clear(player)
-	// An Aseprite file's sheet: the sprite's layers of it, and its slices follow its frames
-	file, part, _ := asepriteTextureKey(set.texture)
-	fromAseprite := Aseprite_IsFile(file)
-	texture := loadAsset(&sprite.scene.game.resourceManager, projectDir, asepriteLayersKey(set.texture, fromAseprite ? sprite.layers : ""))
-	if texture == nil do return false
-	sprite.source = fromAseprite ? strings.clone(JoinPath(projectDir, file), allocator) : ""
-	sprite.sourceFrames = fromAseprite && part == .Sheet
-	for a in set.animations {
-		animation := CreateSpriteSheetAnimation(a.name, texture, set.columns, set.rows, a.fps, a.loop, a.start, a.end, a.playMode, set.margin, set.spacing, allocator)
+	loaded := animatedSpriteAdd(sprite, set.animations[:], projectDir)
+	first := autoplay != "" ? autoplay : set.autoplay
+	if len(player.animations) > 0 && (first == "" || !(first in player.names) || !AnimationPlayer_Play(player, first)) do AnimationPlayer_Play(player, 0)
+	return loaded
+}
+
+/*
+The Aseprite file the sprite's playing animation shows, if its sheet is one.
+
+Inputs:
+- sprite: The AnimatedSprite
+
+Returns:
+- The file's full path ("" when the animation's sheet isn't an Aseprite file, or nothing plays),
+  and whether its cells are the file's frames (a `#sheet`; false: the first frame cut into cells)
+*/
+AnimatedSprite_Source :: proc(sprite: ^AnimatedSprite) -> (file: string, frames: bool) {
+	animation := AnimationPlayer_Current(&sprite.animation)
+	if animation == nil do return "", false
+	return animation.source, animation.sourceFrames
+}
+
+// Adds animations to a sprite, each on its sheet (loaded through the resource manager; an
+// Aseprite file's with the sprite's layers): false (logged) if a sheet can't be loaded
+@(private)
+animatedSpriteAdd :: proc(sprite: ^AnimatedSprite, animations: []AnimationData, projectDir: string) -> bool {
+	allocator := Node_GetAllocator(sprite)
+	rm := &sprite.scene.game.resourceManager
+	loaded := true
+	for a in animations {
+		file, part, _ := asepriteTextureKey(a.sheet)
+		fromAseprite := Aseprite_IsFile(file)
+		texture := loadAsset(rm, projectDir, asepriteLayersKey(a.sheet, fromAseprite ? sprite.layers : ""))
+		if texture == nil {
+			loaded = false
+			if a.sheet != "" do log.warnf("%s: animation '%s' can't load its sheet %s", sprite.name, a.name, a.sheet)
+		}
+		animation := CreateSheetAnimation(a.name, texture, a.grid, a.fps, a.loop, a.start, a.end, a.playMode, allocator)
 		animation.repeat = a.repeat
 		if len(a.durations) > 0 do Animation_SetDurations(animation, a.durations[:])
 		if len(a.events) > 0 do Animation_SetEvents(animation, a.events[:])
-		AnimationPlayer_Add(player, animation)
+		// An Aseprite file's sheet: its slices follow the frames (the file's first frame: its own)
+		if fromAseprite {
+			animation.source = strings.clone(JoinPath(projectDir, file), allocator)
+			animation.sourceFrames = part == .Sheet
+		}
+		AnimationPlayer_Add(&sprite.animation, animation)
 	}
-	first := autoplay != "" ? autoplay : set.autoplay
-	if first == "" || !(first in player.names) || !AnimationPlayer_Play(player, first) do AnimationPlayer_Play(player, 0)
-	return true
+	return loaded
 }
 
 /*

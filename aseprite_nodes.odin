@@ -194,10 +194,11 @@ spritePicture :: proc(node: ^Node) -> (source, pivot: string, frame: int, size: 
 	if Node_Is(node, AnimatedSprite) {
 		s := cast(^AnimatedSprite)node
 		frame = 0
-		if s.sourceFrames {
+		file, frames := AnimatedSprite_Source(s)
+		if frames {
 			if animation := AnimationPlayer_Current(&s.animation); animation != nil do frame = animation.startFrame + s.animation.frame
 		}
-		return s.source, s.pivotSlice, frame, AnimationPlayer_FrameSize(&s.animation)
+		return file, s.pivotSlice, frame, AnimationPlayer_FrameSize(&s.animation)
 	}
 	return
 }

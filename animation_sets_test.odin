@@ -3,6 +3,7 @@ package crossfire
 
 import "core:log"
 import "core:os"
+import "core:strings"
 import "core:testing"
 import sdl "vendor:sdl3"
 
@@ -73,9 +74,11 @@ aseprite_tags_are_animations :: proc(t: ^testing.T) {
 	defer Aseprite_Destroy(ase)
 	set := AnimationSet_FromAseprite(ase, "assets/tags3.aseprite")
 	defer AnimationSetData_Destroy(&set)
-	testing.expect_value(t, set.texture, "assets/tags3.aseprite#sheet")
-	testing.expect(t, set.columns == 4 && set.rows == 3, "its sheet's grid")
 	testing.expect_value(t, len(set.animations), 3)
+	for a in set.animations {
+		testing.expect_value(t, a.sheet, "assets/tags3.aseprite#sheet")
+		testing.expect_value(t, a.grid, SheetGrid{mode = .Cells, columns = 4, rows = 3})
+	}
 	if len(set.animations) == 3 {
 		forward, reverse, pingpong := set.animations[0], set.animations[1], set.animations[2]
 		testing.expect(t, forward.name == "forward" && forward.start == 0 && forward.end == 3 && forward.playMode == .Forward, "forward 0-3")
@@ -109,7 +112,8 @@ animation_set_files_and_sprites_using_them :: proc(t: ^testing.T) {
 	set, err := ParseAnimationSet(text)
 	defer AnimationSetData_Destroy(&set)
 	testing.expect_value(t, err, ProjectError.None)
-	testing.expect(t, set.columns == 4 && set.rows == 3 && set.autoplay == "hit", "the sheet")
+	testing.expect(t, set.autoplay == "hit", "the first")
+	for a in set.animations do testing.expect(t, a.sheet == "tags3.aseprite#sheet" && a.grid.columns == 4 && a.grid.rows == 3, "the file's sheet is every animation's (format 13)")
 	testing.expect_value(t, len(set.animations), 2)
 	if len(set.animations) == 2 {
 		hit := set.animations[1]
@@ -131,6 +135,15 @@ animation_set_files_and_sprites_using_them :: proc(t: ^testing.T) {
 		<node kind="AnimatedSprite" name="Hero" animations="tags3.aseprite" autoplay="pingpong"/>
 		<node kind="AnimatedSprite" name="Plain" texture="tags3.aseprite" columns="2" rows="2"/>
 	</scene>`)
+	// Format 14: a sheet per animation (the file's frames; its first frame cut into 2 x 2 px cells)
+	twoData, twoErr := ParseScene(`<scene formatVersion="14" name="S">
+		<node kind="AnimatedSprite" name="Two" autoplay="frames">
+			<animation name="frames" sheet="tags3.aseprite#sheet" columns="4" rows="3" end="3" loop="true"/>
+			<animation name="cells" sheet="tags3.aseprite" grid="Size" cellWidth="2" cellHeight="2" loop="true"/>
+		</node>
+	</scene>`)
+	defer SceneData_Destroy(&twoData)
+	testing.expect_value(t, twoErr, ProjectError.None)
 	defer SceneData_Destroy(&data)
 	testing.expect_value(t, parseErr, ProjectError.None)
 	testing.expect_value(t, data.nodes[0].animationSet, "tags3.aseprite")
@@ -143,6 +156,16 @@ animation_set_files_and_sprites_using_them :: proc(t: ^testing.T) {
 	// Its own sheet and animations still work beside it: the file's first frame, 2 x 2 cells
 	plain := cast(^AnimatedSprite)created[1]
 	testing.expect_value(t, AnimationPlayer_FrameSize(&plain.animation), [2]f32{2, 2})
+	two := cast(^AnimatedSprite)Scene_Build(scene, &twoData, game.projectDir)[0]
+	testing.expect_value(t, AnimationPlayer_CurrentName(&two.animation), "frames")
+	testing.expect_value(t, AnimationPlayer_FrameSize(&two.animation), [2]f32{4, 4})
+	file, frames := AnimatedSprite_Source(two)
+	testing.expect(t, strings.has_suffix(file, "tags3.aseprite") && frames, "the file's frames: slices follow them")
+	testing.expect(t, AnimationPlayer_Play(&two.animation, "cells"), "the other sheet")
+	testing.expect_value(t, AnimationPlayer_FrameSize(&two.animation), [2]f32{2, 2})
+	testing.expect_value(t, AnimationPlayer_Current(&two.animation)->sourceFrameCount(), 4)
+	file, frames = AnimatedSprite_Source(two)
+	testing.expect(t, file != "" && !frames, "the file's first frame in cells")
 	// Read once
 	testing.expect_value(t, len(game.animationSets), 1)
 

@@ -55,6 +55,12 @@ Animation :: struct {
 	// Each frame's events, comma-separated ("" for none), sent by its player's `onFrameEvent` when
 	// the frame shows (relative frames; owned, with `allocator`)
 	events: []string,
+	// The Aseprite file its frames come from (its full path, owned with `allocator`; "" when they
+	// don't): a sprite showing it takes its slices and pivots from that file
+	source: string,
+	// Its frames are the source file's frames (an Aseprite sheet of every frame), so slices follow
+	// the frame playing; false: the file's first frame cut into cells
+	sourceFrames: bool,
 
 	// Number of frames this animation plays: endFrame - startFrame + 1
 	totalFrames: proc(animation: ^Animation) -> int,
@@ -154,6 +160,7 @@ Animation_Destroy :: proc(animation: ^Animation) {
 	delete(animation.durations, allocator)
 	for event in animation.events do delete(event, allocator)
 	delete(animation.events, allocator)
+	delete(animation.source, allocator)
 	delete(animation.name, allocator)
 	free(animation, allocator)
 }
@@ -185,6 +192,9 @@ SpriteSheetAnimation :: struct {
 	margin: f32,
 	// Pixels between neighboring cells
 	spacing: f32,
+	// Each cell's size in pixels (0: the sheet divided into columns x rows; set by
+	// `CreateSheetAnimation` for a grid of cell sizes)
+	cellSize: [2]f32,
 }
 
 /*
@@ -241,6 +251,155 @@ CreateSpriteSheetAnimation :: proc(
 }
 
 /*
+Creates an animation from a sprite sheet cut by a `SheetGrid`: columns x rows, or cells of a size
+in pixels (the columns and rows that fit the texture).
+
+Inputs:
+- name: Name used to play the animation from an AnimationPlayer
+- texture: The sprite sheet
+- grid: How the sheet is cut into cells
+- fps: Frames per second
+- loop: Restart after the last frame instead of ending
+- startFrame: First cell played, inclusive
+- endFrame: Last cell played, inclusive. -1 means the last cell of the sheet
+- playMode: Forward, Reverse, PingPong or PingPongReverse
+- allocator: Allocator for the animation. Use the owning node's (`Node_GetAllocator`) to free it with the node
+
+Returns:
+- The new animation. Add it to a player with `AnimationPlayer_Add`
+
+Example:
+	// 32 x 32 px cells, however many fit the sheet
+	rm := &game.resourceManager
+	sheet := rm->loadTexture("hero_run.png")
+	run := e.CreateSheetAnimation("run", sheet, {mode = .Size, cellSize = {32, 32}}, fps = 12, loop = true)
+*/
+CreateSheetAnimation :: proc(
+	name: string,
+	texture: ^sdl.Texture,
+	grid: SheetGrid,
+	fps: f32,
+	loop := false,
+	startFrame := 0,
+	endFrame := -1,
+	playMode := AnimationPlayMode.Forward,
+	allocator := context.allocator,
+) -> ^SpriteSheetAnimation {
+	size := texture != nil ? [2]f32{f32(texture.w), f32(texture.h)} : {}
+	columns, rows, cell := SheetGrid_Layout(grid, size)
+	animation := new(SpriteSheetAnimation, allocator)
+	animation.texture = texture
+	animation.columns = columns
+	animation.rows = rows
+	animation.margin = grid.margin
+	animation.spacing = grid.spacing
+	if grid.mode == .Size do animation.cellSize = cell
+	animation.sourceFrameCount = spriteSheetFrameCount
+	animation.frameSize = spriteSheetFrameSize
+	animation.drawFrame = spriteSheetDrawFrame
+	initAnimation(animation, name, fps, loop, startFrame, endFrame, playMode, allocator)
+	return animation
+}
+
+/*
+How a sprite sheet is cut into cells.
+*/
+SheetGridMode :: enum {
+	// A number of columns and rows: the cells share the sheet (less its margin and gaps) evenly
+	Cells,
+	// Cells of a size in pixels: as many columns and rows as fit the sheet
+	Size,
+}
+
+/*
+How a sprite sheet is cut into cells: `columns` x `rows`, or cells of `cellSize` pixels (`mode`),
+`margin` pixels around them and `spacing` between them. Cells are numbered left to right, then
+top to bottom, from 0. The other mode's values are worked out from the sheet's size
+(`SheetGrid_Layout`). The zero value is one cell (columns and rows below 1 count as 1).
+*/
+SheetGrid :: struct {
+	// Which values cut the sheet: columns x rows, or the cell size
+	mode: SheetGridMode,
+	// Cells across and down (.Cells)
+	columns, rows: int,
+	// A cell's width and height in pixels (.Size)
+	cellSize: [2]f32,
+	// Pixels around the grid
+	margin: f32,
+	// Pixels between neighboring cells
+	spacing: f32,
+}
+
+// One cell: the whole sheet
+DEFAULT_SHEET_GRID :: SheetGrid{mode = .Cells, columns = 1, rows = 1}
+
+/*
+A grid's columns, rows and cell size on a sheet of a given size: the cells of a .Cells grid share
+the sheet evenly; a .Size grid has as many columns and rows as fit (at least one each).
+
+Inputs:
+- grid: The grid
+- sheetSize: The sheet's size in pixels (0 when unknown: a .Size grid is then one cell)
+
+Returns:
+- Its columns, rows (at least 1 each) and the size of a cell in pixels
+
+Example:
+	columns, rows, cell := e.SheetGrid_Layout({mode = .Size, cellSize = {16, 16}, spacing = 2}, {70, 34})
+	// 4 x 2 cells of 16 x 16
+*/
+SheetGrid_Layout :: proc(grid: SheetGrid, sheetSize: [2]f32) -> (columns, rows: int, cell: [2]f32) {
+	switch grid.mode {
+	case .Cells:
+		columns, rows = max(grid.columns, 1), max(grid.rows, 1)
+		cells := [2]f32{f32(columns), f32(rows)}
+		cell = (sheetSize - grid.margin * 2 - grid.spacing * (cells - 1)) / cells
+	case .Size:
+		cell = grid.cellSize
+		fit :: proc(sheet, cell, margin, spacing: f32) -> int {
+			if cell <= 0 || sheet <= 0 do return 1
+			return max(int((sheet - margin * 2 + spacing) / (cell + spacing)), 1)
+		}
+		columns = fit(sheetSize.x, cell.x, grid.margin, grid.spacing)
+		rows = fit(sheetSize.y, cell.y, grid.margin, grid.spacing)
+	}
+	return
+}
+
+/*
+How many cells a grid cuts a sheet into.
+
+Inputs:
+- grid: The grid
+- sheetSize: The sheet's size in pixels
+
+Returns:
+- columns x rows (at least 1)
+*/
+SheetGrid_CellCount :: proc(grid: SheetGrid, sheetSize: [2]f32) -> int {
+	columns, rows, _ := SheetGrid_Layout(grid, sheetSize)
+	return columns * rows
+}
+
+/*
+A cell's rectangle in a sheet cut by a grid (editors use it for thumbnails).
+
+Inputs:
+- grid: The grid
+- sheetSize: The sheet's size in pixels
+- frame: The cell (left to right, top to bottom, from 0)
+
+Returns:
+- The cell's rectangle in texture pixels
+*/
+SheetGrid_CellRect :: proc(grid: SheetGrid, sheetSize: [2]f32, frame: int) -> sdl.FRect {
+	columns, _, cell := SheetGrid_Layout(grid, sheetSize)
+	column := frame % columns
+	row := frame / columns
+	return {grid.margin + f32(column) * (cell.x + grid.spacing), grid.margin + f32(row) * (cell.y + grid.spacing), cell.x, cell.y}
+}
+
+/*
 Pixel rectangle of a cell in a sprite sheet. Useful for drawing a single cell yourself.
 
 Inputs:
@@ -278,11 +437,7 @@ Returns:
 - The cell's rectangle in texture pixels
 */
 SpriteSheet_CellRect :: proc(sheetSize: [2]f32, columns, rows: int, margin, spacing: f32, frame: int) -> sdl.FRect {
-	cells := [2]f32{f32(max(columns, 1)), f32(max(rows, 1))}
-	size := (sheetSize - margin * 2 - spacing * (cells - 1)) / cells
-	column := frame % max(columns, 1)
-	row := frame / max(columns, 1)
-	return {margin + f32(column) * (size.x + spacing), margin + f32(row) * (size.y + spacing), size.x, size.y}
+	return SheetGrid_CellRect({mode = .Cells, columns = columns, rows = rows, margin = margin, spacing = spacing}, sheetSize, frame)
 }
 
 @(private="file")
@@ -294,6 +449,7 @@ spriteSheetFrameCount :: proc(animation: ^Animation) -> int {
 @(private="file")
 spriteSheetFrameSize :: proc(animation: ^Animation, frame: int) -> [2]f32 {
 	sheet := cast(^SpriteSheetAnimation)animation
+	if sheet.cellSize.x > 0 && sheet.cellSize.y > 0 do return sheet.cellSize
 	if sheet.texture == nil do return {}
 	usable := [2]f32{f32(sheet.texture.w), f32(sheet.texture.h)} - sheet.margin * 2
 	cells := [2]f32{f32(sheet.columns), f32(sheet.rows)}

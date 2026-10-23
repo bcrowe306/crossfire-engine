@@ -31,19 +31,17 @@ Sprite :: struct {
 }
 
 /*
-A sprite sheet animation drawn centered on the node's origin. Created from AnimatedSprite nodes:
-its player holds the node's animations (by name; "default" when the scene file has none) and
-starts the autoplay one. Scripts switch with `AnimationPlayer_Play(&sprite.animation, "jump")`.
+Sprite sheet animations drawn centered on the node's origin. Created from AnimatedSprite nodes:
+its player holds the node's animations (by name), each on its own sheet, and starts the autoplay
+one. Scripts switch with `AnimationPlayer_Play(&sprite.animation, "jump")`. An animation whose
+sheet is an Aseprite file (`Animation.source`) gives the sprite that file's slices and pivots
+while it plays (`AnimatedSprite_Source`).
 */
 AnimatedSprite :: struct {
 	// The node part: transform, hierarchy, hooks
 	using node: Node,
 	// Its animations and the one playing (updated with the node; allocated in the node's arena)
 	animation: AnimationPlayer,
-	// Its Aseprite file, when its sheet is one (full path, node arena; "" otherwise): its slices
-	source: string,
-	// Its cells are the file's frames (an Aseprite file's animations), so slices follow them
-	sourceFrames: bool,
 	// The slice whose pivot is drawn at the origin, frame by frame ("": the middle)
 	pivotSlice: string,
 	// The Aseprite layers it draws ("": every visible one; node arena)
@@ -508,26 +506,15 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 			AnimationPlayer_Init(&sprite.animation, allocator)
 			sprite.pivotSlice = strings.clone(node.pivotSlice, allocator)
 			sprite.layers = strings.clone(node.asepriteLayers, allocator)
-			// An animation asset's sheet and animations, else its own
-			ownAseprite := node.animationSet == "" && Aseprite_IsFile(node.texture)
-			texture := node.animationSet != "" ? nil : loadAsset(rm, projectDir, asepriteLayersKey(node.texture, ownAseprite ? node.asepriteLayers : ""))
-			if ownAseprite do sprite.source = strings.clone(JoinPath(projectDir, node.texture), allocator)
+			// An animation asset's animations, else its own (each on its own sheet)
 			if node.animationSet != "" {
 				if set, ok := Game_LoadAnimationSet(scene.game, node.animationSet); ok do AnimatedSprite_SetAnimations(sprite, set, projectDir, node.autoplay)
-			} else if texture != nil {
-				if len(node.animations) == 0 {
-					AnimationPlayer_Add(&sprite.animation, CreateSpriteSheetAnimation("default", texture, node.columns, node.rows,
-						node.fps, node.loop, playMode = node.playMode, margin = node.margin, spacing = node.spacing, allocator = allocator))
-				}
-				for a in node.animations {
-					animation := CreateSpriteSheetAnimation(a.name, texture, node.columns, node.rows, a.fps, a.loop, a.start, a.end, a.playMode, node.margin, node.spacing, allocator)
-					animation.repeat = a.repeat
-					if len(a.durations) > 0 do Animation_SetDurations(animation, a.durations[:])
-					if len(a.events) > 0 do Animation_SetEvents(animation, a.events[:])
-					AnimationPlayer_Add(&sprite.animation, animation)
-				}
+			} else {
+				animatedSpriteAdd(sprite, node.animations[:], projectDir)
 				// The autoplay animation, else the first
-				if node.autoplay == "" || !AnimationPlayer_Play(&sprite.animation, node.autoplay) do AnimationPlayer_Play(&sprite.animation, 0)
+				if len(node.animations) > 0 && (node.autoplay == "" || !(node.autoplay in sprite.animation.names) || !AnimationPlayer_Play(&sprite.animation, node.autoplay)) {
+					AnimationPlayer_Play(&sprite.animation, 0)
+				}
 			}
 			n = sprite
 

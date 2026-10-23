@@ -99,7 +99,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `easing.odin` | `Ease(EaseType, t)`, 18 curves |
 | `render_target.odin` | **Render targets**: `RenderTarget_Create` / `Destroy`, `RenderTarget_Begin` / `End` (draw into its texture; the game's logical presentation is off meanwhile and restored after), `Scene_DrawToTarget` (a scene through its camera fitted to the target, or a given view) |
 | `tween.odin` | **Tweens**: `Tween_Create(owner)` / `Scene_CreateTween`, steps `Tween_To` / `Tween_FromTo` (f32, [2]f32, sdl.Color), `Tween_Delay`, `Tween_Call`, `Tween_Parallel`, `Tween_SetLoops`, pause, kill; updated by `Scene_Update` after the nodes |
-| `animation.odin` | `Animation` base, `SpriteSheetAnimation`, `FrameAnimation` |
+| `animation.odin` | `Animation` base (its Aseprite `source`), `SpriteSheetAnimation` (`CreateSpriteSheetAnimation`, `CreateSheetAnimation` from a `SheetGrid`), `FrameAnimation`; **sheet grids**: `SheetGrid` / `SheetGridMode` (columns x rows, or cells of a size), `SheetGrid_Layout` / `CellCount` / `CellRect` |
 | `animation_player.odin` | Plays animations by name or index, with events |
 | `event.odin` | `EventSubject`: subscribe / unsubscribe / notify |
 | `node_events.odin` | **Node events for tools and scene files**: `NodeType_Events` / `SceneNodeKind_Events` (a type's EventSubject fields tagged `event:"..."`, with `data:"..."` hints), `Node_FindEvent`, `Node_AddListener`, `Script_Listener` (a script's handlers by name), binding scene files' `<listener>`s before ready |
@@ -187,8 +187,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `inflate.odin` | `Inflate_Exact`: a strict zlib inflater for untrusted data (exact size, no reading past the input, Adler-32 checked) |
 | `aseprite_conformance_test.odin`, `testdata/aseprite/conformance/`, `tools/aseprite_conformance.sh` | The engine against Aseprite itself: files Aseprite wrote and its exports of every frame (PNG) and of frames and tags (JSON); each frame byte for byte |
 | `aseprite_test.odin`, `testdata/aseprite/` | Tests on Aseprite's own test sprites (MIT, from its `tests/` folder; LICENSE.txt beside them): its z-order test's colors, groups, tags, linked cels, indexed transparency, tilemaps and flips, user data, slices; damaged files; textures drawn; the inflater |
-| `animation_sets.odin` | **Animation assets**: `AnimationSetData` (`.anim.xml`, `ParseAnimationSet`), `AnimationSet_FromAseprite` (an Aseprite file's tags), `Game_LoadAnimationSet` (`Game.animationSets`), `AnimatedSprite_SetAnimations`, `AnimatedSprite_UseAnimations` (scripts), `Asset_Animations`, `ASEPRITE_SHEET_SUFFIX` |
-| `animation_sets_test.odin` | Tests: frame durations, repeats, reverse ping-pong, clearing; Aseprite tags as animations (directions, repeats); `.anim.xml` files; scene files' AnimatedSprites playing an Aseprite file; switching sets from code |
+| `animation_sets.odin` | **Animation assets**: `AnimationSetData` (`.anim.xml`, `ParseAnimationSet`), `AnimationSet_FromAseprite` (an Aseprite file's tags), `Game_LoadAnimationSet` (`Game.animationSets`), `AnimatedSprite_SetAnimations`, `AnimatedSprite_UseAnimations` (scripts), `AnimatedSprite_Source` (the playing animation's Aseprite file), `animatedSpriteAdd` (animations on their own sheets), `Asset_Animations`, `ASEPRITE_SHEET_SUFFIX` |
+| `animation_sets_test.odin` | Tests: frame durations, repeats, reverse ping-pong, clearing; Aseprite tags as animations (directions, repeats); `.anim.xml` files; scene files' AnimatedSprites playing an Aseprite file, and two animations on two sheets (a grid of cell sizes; each one's source); switching sets from code |
 | `aseprite_nodes.odin` | **Aseprite in a running game**: `Game_LoadAseprite` (files kept for slices and events; `Game_ReloadChangedAseprites`), `Aseprite_SliceAt`, `Aseprite_FrameEvents`, `Aseprite_LayersNamed`; sprites' pivot slices (`Sprite_Origin`) and 9-patches, CollisionShapes following slices (hitboxes), layer-filtered texture keys (`?layers=`); Sprite / AnimatedSprite drawing |
 | `aseprite_nodes_test.odin` | Tests (on Aseprite's files): frame events through `animation.onFrameEvent`, layers drawn, pivot and 9-patch slices, hitboxes following a moving slice (mirrored, hidden), animated tilemaps and tiles set while they play |
 | `tilemap.odin` | **TileMap nodes**: an Aseprite file's tilemap layers (`TileMapSettings`: `tilemap`, `frame`, `layers`, `tileCollision`), a `TileMapLayer` per layer drawn in one batch, collision from tile properties (`TileMap_TileCollision`: StaticBody "Collision" for solid and one-way tiles, an Area per area name), `TileMap_TileAt`, `TileMap_TileProperty`, `TileMap_Rebuild`, painted layers (`TileLayerData`), terrains (`Terrain_TileFor`, `TileGrid_PaintTerrain`, `TileMap_SetTerrain`), reloading saved files in development runs |
@@ -216,7 +216,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `sdl_static.odin` | Links the static SDL (tools/build_sdl_static.sh) when it's built: `SDL_STATIC`, `SDL_LINKED_STATICALLY` |
 | `player/main.odin` | The **player** for projects without scripts: calls `Player_Main` (`Player_Run` with the command line; nothing in the browser). A project with scripts gets its own generated main that also imports its `scripts` package. Used by the editor's Play and, later, exports |
 | `script_test.odin` | Tests: script registration, fields and tags, lifecycle on a node, bad values, `Scene_FindNode` paths, format v3 scripts |
-| `project_format_test.odin`, `transform_test.odin` | Tests: parser and v1 migration; transform math, hierarchy, subtree removal, draw order/transform/tint/visibility, camera node |
+| `project_format_test.odin`, `transform_test.odin` | Tests: parser and v1 migration, format 14's sheets per animation (and older files' node and `.anim.xml` sheets migrated), sheet grids; transform math, hierarchy, subtree removal, draw order/transform/tint/visibility, camera node |
 
 ## Rules that keep the engine correct
 
@@ -714,11 +714,24 @@ savedFields).
 - Textures from Aseprite files get nearest filtering (pixel art).
 
 **Animation assets** (animation_sets.odin; its doc comment has the details):
+- **Every animation has its own sheet** (format 14, 2026-10-23: the user wanted it from the
+  start): `AnimationData.sheet` and `grid` (`SheetGrid`: `.Cells` columns x rows, or `.Size` cells
+  of `cellSize` px, as many as fit; margin, spacing). Nodes and `.anim.xml` files have none;
+  older files' (`texture`, `columns`, `rows`, `margin`, `spacing`) become every animation's in the
+  parser (`oldSheet`, `parseAnimation`'s inherited sheet; version-gated, so a format 14 animation
+  without a `sheet` has none), and a pre-7 node gets its "default" animation there too.
+  `animatedSpriteAdd` (shared by the loader and `AnimatedSprite_SetAnimations`) makes each one with
+  `CreateSheetAnimation` on its own texture (the resource manager shares them); a sheet that won't
+  load leaves its animation drawing nothing (logged). A Size grid's leftover pixels are ignored:
+  frames are `cellSize` (`SpriteSheetAnimation.cellSize`).
+- **Aseprite per animation:** `Animation.source` / `sourceFrames` (a `#sheet`: the file's frames)
+  replace the sprite's old `source` fields; `AnimatedSprite_Source` reads the playing one, so slices,
+  pivots and hitboxes follow whichever file the current animation shows.
 - An `Animation` has optional per-frame `durations` (seconds; `Animation_FrameDuration`,
   `Animation_SetDurations`) overriding fps, and `repeat` (plays a non-looping one that often:
   `AnimationPlayer.cycles`). `PingPongReverse` is Aseprite's "Ping-pong Reverse".
-- An Aseprite file is an animation set as it is: its texture is `<path>#sheet`
-  (ASEPRITE_SHEET_SUFFIX), which the resource manager makes from `Aseprite_SheetPixels` (and
+- An Aseprite file is an animation set as it is: every animation's sheet is `<path>#sheet`
+  (ASEPRITE_SHEET_SUFFIX, a Cells grid of `Aseprite_SheetGrid`), which the resource manager makes from `Aseprite_SheetPixels` (and
   reloads like any texture); a tag without a repeat count loops, as Aseprite's preview plays it.
 - Sets are read once per game (`Game.animationSets`, its arena), like components; editors put
   their in-memory sets there before building.
@@ -856,8 +869,8 @@ values) set a value only when the key changes (`applied`), so text isn't cloned 
 - Slices, events and layers are looked up through `Game_LoadAseprite` (the game keeps each file;
   nothing holds a file's pointer, so `Game_ReloadChangedAseprites` swaps them freely).
 - A sprite's picture is drawn with `Sprite_Origin` at the node's origin (its pivot slice's pivot,
-  else its middle); bounds follow. An AnimatedSprite playing an Aseprite file's tags shows its
-  frames (`sourceFrames`), so slices and pivots follow its frame.
+  else its middle); bounds follow. An AnimatedSprite's playing animation on an Aseprite file's
+  `#sheet` shows its frames (`Animation.sourceFrames`), so slices and pivots follow its frame.
 - Hitboxes: a CollisionShape's `slice` makes it a Rectangle updated by `sliceShapeUpdate` from the
   sprite found by `sliceSprite` (an ancestor, or a child of one), through the sprite's world
   transform into the shape's parent's (a mirrored sprite mirrors it); it rebuilds its body's
@@ -1068,6 +1081,11 @@ comment. What was needed, and why:
     `screenLayers` yet.
   - Sound nodes load their sound when the scene is built (`Scene_Build` with scripts attached; the
     editor's viewport doesn't); `Game_PlaySound` still plays any sound from code, loaded on first use.
+- **Format version 14** gives each AnimatedSprite animation its own sheet: `<animation>`'s
+  `sheet`, `grid` (Cells, Size), `columns`, `rows`, `cellWidth`, `cellHeight`, `margin`,
+  `spacing`, in scene and `.anim.xml` files; nodes and animation files lose theirs (migrated when
+  parsed). `SceneNodeData` has no `columns`, `rows`, `fps`, `loop`, `playMode`, `margin`,
+  `spacing` any more; `AnimationSetData` no `texture` or grid. `DEFAULT_ANIMATION_FPS` (8).
 - **Format version 13** adds every node's `processMode`, `blendMode`, `zIndex`, `ySort` and
   `groups` (comma-separated); a component instance keeps its root's values unless it sets them.
   CollisionShape `oneWay`; LDtkLevel `oneWayValues`, `areaValues` and `<entity>`'s `make`,
@@ -1093,7 +1111,7 @@ comment. What was needed, and why:
   `Component` nodes.
 - **Format version 8** adds input actions (`<action>` in project.xml).
 - **Format version 7** adds AnimatedSprite `<animation>` elements (named cell ranges), `margin`,
-  `spacing` and `autoplay`; without them the node plays one "default" animation as before.
+  `spacing` and `autoplay`; without them the node gets one "default" animation (parsed).
 - **Format version 6** adds ParticleEmitter nodes and their `<particles>` element.
 - **Format version 5** adds `<global>` elements to project.xml and assets of kind "Data".
 - **Format version 4** adds the physics node kinds and the project's physics settings.

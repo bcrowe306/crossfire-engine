@@ -49,17 +49,19 @@ A scene file holds a tree of nodes. Nesting is the hierarchy, and a node's `x`, 
 and scale are relative to its parent:
 
 	<?xml version="1.0" encoding="UTF-8"?>
-	<scene formatVersion="4" name="PlayScene">
+	<scene formatVersion="14" name="PlayScene">
 		<node kind="Node2D" name="World" x="0" y="0">
 			<node kind="Camera" name="Camera" x="640" y="360" zoom="1"/>
 			<node kind="Sprite" name="Ship" x="640" y="430" texture="assets/ship.png">
-				<node kind="AnimatedSprite" name="Flame" x="0" y="40" texture="assets/flame.png"
-				      columns="4" rows="1" fps="12"/>
+				<node kind="AnimatedSprite" name="Flame" x="0" y="40">
+					<animation name="burn" sheet="assets/flame.png" columns="4" fps="12" loop="true"/>
+				</node>
 			</node>
-			<node kind="AnimatedSprite" name="Hero" x="200" y="400" texture="assets/hero.png"
-			      columns="4" rows="2" margin="0" spacing="2" autoplay="walk">
-				<animation name="walk" start="0" end="3" fps="10" loop="true"/>
-				<animation name="jump" start="4" end="7" fps="12" playMode="PingPong"/>
+			<node kind="AnimatedSprite" name="Hero" x="200" y="400" autoplay="walk">
+				<animation name="walk" sheet="assets/hero_walk.png" columns="4" spacing="2" end="3"
+				           fps="10" loop="true"/>
+				<animation name="jump" sheet="assets/hero_jump.png" grid="Size" cellWidth="32"
+				           cellHeight="48" fps="12" playMode="PingPong"/>
 			</node>
 		</node>
 		<node kind="Label" name="Title" x="640" y="180" text="ASTEROIDS" fontSize="64"
@@ -89,15 +91,21 @@ and scale are relative to its parent:
 		</node>
 	</scene>
 
-An AnimatedSprite's texture is a sprite sheet of `columns` x `rows` cells (`margin` pixels around
-the grid, `spacing` between cells), numbered left to right, top to bottom from 0. Its
-`<animation>` elements are named ranges of cells (`start`, `end` inclusive; `end` -1 is the last
-cell), each with its `fps`, `loop` and `playMode`; `autoplay` names the one it plays from the start
-(else the first). Without `<animation>` elements it plays one animation, "default": every cell, at
-the node's `fps`, `loop` and `playMode` (the format before version 7). An animation's `durations`
-(milliseconds per frame) override its fps, and `repeat` plays a non-looping one that often.
-With `animations="assets/hero.aseprite"` (an animation asset: an `.anim.xml` file or an Aseprite
-file, `AnimationSetData`) it plays the asset's sheet and animations instead of its own.
+An AnimatedSprite's `<animation>` elements are its animations (`AnimationData`), each on its own
+sprite sheet: `sheet` (an image), cut into `columns` x `rows` cells, or with `grid="Size"` into
+cells of `cellWidth` x `cellHeight` pixels (as many as fit), `margin` pixels around the grid and
+`spacing` between cells (`SheetGrid`). Cells are numbered left to right, top to bottom from 0;
+an animation plays `start` to `end` (inclusive; `end` -1 is the last cell) at its `fps`, `loop`
+and `playMode`. `autoplay` names the one it plays from the start (else the first). An
+animation's `durations` (milliseconds per frame) override its fps, and `repeat` plays a
+non-looping one that often. With `animations="assets/hero.aseprite"` (an animation asset: an
+`.anim.xml` file or an Aseprite file, `AnimationSetData`) it plays the asset's animations instead
+of its own.
+
+Before format 14 the node had one sheet for all its animations: its `texture`, `columns`, `rows`,
+`margin` and `spacing`, which the parser gives every animation. Before format 7 it had no
+`<animation>` elements: it gets one, "default", every cell at the node's `fps`, `loop` and
+`playMode`.
 
 ParticleEmitter nodes (particles.odin) keep their settings in a `<particles>` child element: one
 attribute per `ParticleSettings` field that differs from `DEFAULT_PARTICLE_SETTINGS`, named like
@@ -128,6 +136,11 @@ Current limits:
   sound nodes (and from code on first use); Font assets are listed but not used.
 
 Version history:
+- 14: an AnimatedSprite's animations each have their own sheet: `<animation>`'s `sheet`, `grid`
+  (`Cells` or `Size`), `columns`, `rows`, `cellWidth`, `cellHeight`, `margin` and `spacing`, in
+  scene files and `.anim.xml` files alike; nodes and animation files no longer have a sheet of
+  their own (older files' `texture`, `columns`, `rows`, `margin` and `spacing` become every
+  animation's, and a node without animations gets its "default" one, when parsed).
 - 13: every node's `processMode`, `blendMode`, `zIndex`, `ySort` and `groups`; CollisionShape
   `oneWay`; the project's window: `fullscreen`, `vsync` (default true), `highDPI`; assets of
   kind "Translation" (CSV tables: localization.odin), the project's `locale` and `icon`, and the
@@ -207,7 +220,7 @@ by the editor. `project_loader.odin` builds engine scenes and nodes from that da
 */
 
 // Version written by the editor. This loader also reads older versions
-PROJECT_FORMAT_VERSION :: 13
+PROJECT_FORMAT_VERSION :: 14
 
 /*
 Node kinds a scene file can contain.
@@ -455,7 +468,9 @@ SceneNodeData :: struct {
 	// Groups it belongs to (Node.groups): `groups="enemies,flying"`
 	groups: [dynamic]string,
 
-	// Sprite, AnimatedSprite, ParticleEmitter (its Texture shape): image path relative to the project folder
+	// Sprite, ParticleEmitter (its Texture shape), SkinnedMesh: image path relative to the project
+	// folder (an AnimatedSprite's sheets are its animations'; an older file's `texture` is moved
+	// there when parsed)
 	texture: string,
 	// Label: its text
 	text: string,
@@ -467,24 +482,7 @@ SceneNodeData :: struct {
 	centered: bool,
 	// Camera: zoom (1: none, 2: twice as big)
 	zoom: f32,
-	// AnimatedSprite: the texture is a columns x rows grid of cells (at least 1 each)
-	columns: int,
-	// AnimatedSprite: rows of the sheet's grid (see `columns`)
-	rows: int,
-	// AnimatedSprite without `<animation>` elements: frames per second of its "default" animation
-	fps: f32,
-	// AnimatedSprite without `<animation>` elements: the "default" animation loops (default true).
-	// Sound nodes read `loop` too, into `audio` (default false there)
-	loop: bool,
-	// AnimatedSprite without `<animation>` elements: the "default" animation's play mode
-	playMode: AnimationPlayMode,
-	// AnimatedSprite: the sheet's grid margin and spacing (pixels), its animations (none: one
-	// "default" animation of every cell, from fps/loop/playMode above), and the one played first.
-	// `margin`: pixels around the grid
-	margin: f32,
-	// AnimatedSprite: pixels between cells
-	spacing: f32,
-	// AnimatedSprite: its `<animation>` child elements, in order
+	// AnimatedSprite: its `<animation>` child elements, in order, each with its own sheet
 	animations: [dynamic]AnimationData,
 	// AnimatedSprite: the animation it plays from the start ("" or unknown: the first; with an
 	// animation asset, "" is the asset's own)
@@ -692,22 +690,33 @@ SceneNodeData :: struct {
 }
 
 /*
-An AnimatedSprite's animation (or an animation asset's): a named range of its sheet's cells.
+An AnimatedSprite's animation (or an animation asset's): a named range of the cells of its own
+sprite sheet.
 
-	<animation name="walk" start="0" end="3" fps="10" loop="true" playMode="Forward"/>
-	<animation name="hit" start="4" end="6" durations="100 60 200" repeat="2"/>
+	<animation name="walk" sheet="assets/walk.png" columns="8" start="0" end="3" fps="10" loop="true"/>
+	<animation name="hit" sheet="assets/hit.png" grid="Size" cellWidth="32" cellHeight="32"
+	           margin="1" spacing="2" start="4" end="6" durations="100 60 200" repeat="2"/>
 
-`durations` (milliseconds per frame, format 13) override fps for the frames they cover; `repeat`
-plays a non-looping animation that many times.
+The sheet is cut by `grid` (`SheetGrid`: `columns` x `rows`, or with `grid="Size"` cells of
+`cellWidth` x `cellHeight` pixels; `margin`, `spacing`). `durations` (milliseconds per frame,
+format 13) override fps for the frames they cover; `repeat` plays a non-looping animation that
+many times. The sheet and grid are format 14's: before it they were the node's (or the animation
+file's), and the parser copies them into every animation.
 */
 AnimationData :: struct {
 	// The name scripts play it by (missing: "default")
 	name: string,
+	// `sheet`: its sprite sheet, an image path relative to the project folder (an Aseprite file's
+	// sheet of every frame ends in ASEPRITE_SHEET_SUFFIX; the plain file is its first frame)
+	sheet: string,
+	// How the sheet is cut into cells: `grid` (Cells, the default, or Size), `columns`, `rows`,
+	// `cellWidth`, `cellHeight`, `margin`, `spacing`
+	grid: SheetGrid,
 	// First and last cell played, inclusive; end -1 is the sheet's last cell
 	start: int,
 	// The last cell played (inclusive; -1, the default: the sheet's last cell)
 	end: int,
-	// Frames per second (default 8)
+	// Frames per second (default DEFAULT_ANIMATION_FPS, 8)
 	fps: f32,
 	// Plays again from the start when it ends (default false, unlike the node's `loop`)
 	loop: bool,
@@ -723,26 +732,21 @@ AnimationData :: struct {
 }
 
 /*
-An animation asset: a sheet and named animations over its cells, which AnimatedSprite nodes (and
+An animation asset: named animations, each on its own sheet, which AnimatedSprite nodes (and
 scripts: `AnimatedSprite_SetAnimations`) share. An `.anim.xml` file (asset kind "Animation"):
 
 	<?xml version="1.0" encoding="UTF-8"?>
-	<animations formatVersion="13" texture="assets/hero.png" columns="8" rows="2" autoplay="idle">
-		<animation name="idle" start="0" end="3" fps="6" loop="true"/>
-		<animation name="run" start="8" end="15" fps="12" loop="true"/>
+	<animations formatVersion="14" autoplay="idle">
+		<animation name="idle" sheet="assets/hero_idle.png" columns="4" fps="6" loop="true"/>
+		<animation name="run" sheet="assets/hero_run.png" grid="Size" cellWidth="48" cellHeight="48"
+		           fps="12" loop="true"/>
 	</animations>
 
-An Aseprite file is one too, read by `AnimationSet_FromAseprite`: its frames on a sheet, a
-animation per tag.
+Before format 14 the file had one sheet (`texture`, `columns`, `rows`, `margin`, `spacing` on
+`<animations>`), which `ParseAnimationSet` gives every animation. An Aseprite file is a set too,
+read by `AnimationSet_FromAseprite`: its frames on a sheet, an animation per tag.
 */
 AnimationSetData :: struct {
-	// The sheet: an image path relative to the project folder (an Aseprite sheet's ends in
-	// ASEPRITE_SHEET_SUFFIX)
-	texture: string,
-	// The sheet's grid
-	columns, rows: int,
-	// Pixels around the grid, and between cells
-	margin, spacing: f32,
 	// The animation played first ("": the first)
 	autoplay: string,
 	// Its animations, in order
@@ -765,15 +769,12 @@ ParseAnimationSet :: proc(text: string, allocator := context.allocator) -> (set:
 	if doc.elements[0].ident != "animations" do return {}, .Wrong_Root
 	checkVersion(doc, 0) or_return
 	context.allocator = allocator
-	set.texture = cloneAttr(doc, 0, "texture", "")
-	set.columns = max(attrInt(doc, 0, "columns", 1), 1)
-	set.rows = max(attrInt(doc, 0, "rows", 1), 1)
-	set.margin = attrF32(doc, 0, "margin", 0)
-	set.spacing = attrF32(doc, 0, "spacing", 0)
 	set.autoplay = cloneAttr(doc, 0, "autoplay", "")
 	set.animations = make([dynamic]AnimationData)
+	// Before format 14: the file's one sheet is every animation's
+	inherited := attrInt(doc, 0, "formatVersion", 1) < 14 ? oldSheet(doc, 0) : AnimationSheet{grid = DEFAULT_SHEET_GRID}
 	for child in childElements(doc, 0) do if doc.elements[child].ident == "animation" {
-		append(&set.animations, parseAnimation(doc, child))
+		append(&set.animations, parseAnimation(doc, child, inherited))
 	}
 	return set, .None
 }
@@ -787,26 +788,74 @@ Inputs:
 */
 AnimationSetData_Destroy :: proc(set: ^AnimationSetData, allocator := context.allocator) {
 	context.allocator = allocator
-	delete(set.texture)
 	delete(set.autoplay)
-	for &a in set.animations {
-		delete(a.name)
-		delete(a.durations)
-		for event in a.events do delete(event)
-		delete(a.events)
-	}
+	for &a in set.animations do AnimationData_Destroy(&a, allocator)
 	delete(set.animations)
 	set^ = {}
 }
 
-// An `<animation>` element (a node's, or an animation set's)
+/*
+Frees an animation's strings and lists (`ParseScene`'s and `ParseAnimationSet`'s free theirs).
+Must use the allocator it was made with.
+
+Inputs:
+- a: The animation
+- allocator: Its allocator
+*/
+AnimationData_Destroy :: proc(a: ^AnimationData, allocator := context.allocator) {
+	context.allocator = allocator
+	delete(a.name)
+	delete(a.sheet)
+	delete(a.durations)
+	for event in a.events do delete(event)
+	delete(a.events)
+	a^ = {}
+}
+
+// An animation's frames per second when its file doesn't say
+DEFAULT_ANIMATION_FPS :: 8
+
+// A sheet an `<animation>` element takes when it doesn't name its own (an older file's: the
+// node's or the set's; the path borrowed from the document)
 @(private="file")
-parseAnimation :: proc(doc: ^xml.Document, element: xml.Element_ID) -> AnimationData {
+AnimationSheet :: struct {
+	sheet: string,
+	grid: SheetGrid,
+}
+
+// The one sheet of a node or an animation file before format 14 (`texture`, `columns`, `rows`,
+// `margin`, `spacing`)
+@(private="file")
+oldSheet :: proc(doc: ^xml.Document, element: xml.Element_ID) -> AnimationSheet {
+	texture, _ := xml.find_attribute_val_by_key(doc, element, "texture")
+	return {texture, {
+		mode = .Cells,
+		columns = max(attrInt(doc, element, "columns", 1), 1),
+		rows = max(attrInt(doc, element, "rows", 1), 1),
+		margin = max(attrF32(doc, element, "margin", 0), 0),
+		spacing = max(attrF32(doc, element, "spacing", 0), 0),
+	}}
+}
+
+// An `<animation>` element (a node's, or an animation set's): its sheet and grid, else the
+// inherited ones (an older file's)
+@(private="file")
+parseAnimation :: proc(doc: ^xml.Document, element: xml.Element_ID, inherited: AnimationSheet) -> AnimationData {
+	g := inherited.grid
 	a := AnimationData{
 		name = cloneAttr(doc, element, "name", "default"),
+		sheet = cloneAttr(doc, element, "sheet", inherited.sheet),
+		grid = {
+			mode = attrEnum(doc, element, "grid", g.mode),
+			columns = max(attrInt(doc, element, "columns", g.columns), 1),
+			rows = max(attrInt(doc, element, "rows", g.rows), 1),
+			cellSize = {max(attrF32(doc, element, "cellWidth", g.cellSize.x), 0), max(attrF32(doc, element, "cellHeight", g.cellSize.y), 0)},
+			margin = max(attrF32(doc, element, "margin", g.margin), 0),
+			spacing = max(attrF32(doc, element, "spacing", g.spacing), 0),
+		},
 		start = max(attrInt(doc, element, "start", 0), 0),
 		end = attrInt(doc, element, "end", -1),
-		fps = attrF32(doc, element, "fps", DEFAULT_SCENE_NODE.fps),
+		fps = attrF32(doc, element, "fps", DEFAULT_ANIMATION_FPS),
 		loop = attrBool(doc, element, "loop", false),
 		playMode = attrEnum(doc, element, "playMode", AnimationPlayMode.Forward),
 		repeat = max(attrInt(doc, element, "repeat", 0), 0),
@@ -841,10 +890,6 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	color = {255, 255, 255, 255},
 	centered = true,
 	zoom = 1,
-	columns = 1,
-	rows = 1,
-	fps = 8,
-	loop = true,
 	collisionLayer = 1,
 	collisionMask = PHYSICS_ALL_LAYERS,
 	friction = 0.6,
@@ -1406,12 +1451,7 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		delete(node.points)
 		delete(node.bodyA)
 		delete(node.bodyB)
-		for a in node.animations {
-			delete(a.name)
-			delete(a.durations)
-			for event in a.events do delete(event)
-			delete(a.events)
-		}
+		for &a in node.animations do AnimationData_Destroy(&a)
 		delete(node.animations)
 		delete(node.autoplay)
 		delete(node.animationSet)
@@ -1680,13 +1720,6 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.color = attrColor(doc, element, "color", DEFAULT_SCENE_NODE.color)
 	node.centered = attrBool(doc, element, "centered", true)
 	node.zoom = attrF32(doc, element, "zoom", 1)
-	node.columns = max(attrInt(doc, element, "columns", 1), 1)
-	node.rows = max(attrInt(doc, element, "rows", 1), 1)
-	node.fps = attrF32(doc, element, "fps", DEFAULT_SCENE_NODE.fps)
-	node.loop = attrBool(doc, element, "loop", true)
-	node.playMode = attrEnum(doc, element, "playMode", AnimationPlayMode.Forward)
-	node.margin = attrF32(doc, element, "margin", 0)
-	node.spacing = attrF32(doc, element, "spacing", 0)
 	node.animations = make([dynamic]AnimationData)
 	node.autoplay = cloneAttr(doc, element, "autoplay", "")
 	node.animationSet = cloneAttr(doc, element, "animations", "")
@@ -1915,6 +1948,15 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	values(doc, element, "oneWayValues", &node.ldtk.oneWayValues)
 	values(doc, element, "areaValues", &node.ldtk.areaValues)
 
+	// An AnimatedSprite before format 14: its one sheet becomes every animation's (the node keeps
+	// none), and before format 7 it had no animations but one of every cell
+	oldAnimated := node.kind == .AnimatedSprite && attrInt(doc, 0, "formatVersion", 1) < 14
+	inherited := oldAnimated ? oldSheet(doc, element) : AnimationSheet{grid = DEFAULT_SHEET_GRID}
+	if oldAnimated {
+		delete(node.texture)
+		node.texture = strings.clone("")
+	}
+
 	index := len(scene.nodes)
 	append(&scene.nodes, node)
 
@@ -1923,7 +1965,7 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 		case "node":
 			parseNode(doc, child, index, scene)
 		case "animation":
-			append(&scene.nodes[index].animations, parseAnimation(doc, child))
+			append(&scene.nodes[index].animations, parseAnimation(doc, child, inherited))
 		case "shaderParam":
 			// One of its shader's parameters (shaders.odin)
 			append(&scene.nodes[index].shaderParams, ScriptPropData{cloneAttr(doc, child, "name", ""), cloneAttr(doc, child, "value", "")})
@@ -2014,6 +2056,19 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 				append(&scene.nodes[index].moreScripts, NodeScriptData{cloneAttr(doc, child, "name", ""), props})
 			}
 		}
+	}
+	// Before format 7 (no animations, and not an animation asset's): one animation of every cell
+	// at the node's fps, loop and play mode
+	if n := &scene.nodes[index]; oldAnimated && len(n.animations) == 0 && n.animationSet == "" {
+		append(&n.animations, AnimationData{
+			name = strings.clone("default"),
+			sheet = strings.clone(inherited.sheet),
+			grid = inherited.grid,
+			end = -1,
+			fps = attrF32(doc, element, "fps", DEFAULT_ANIMATION_FPS),
+			loop = attrBool(doc, element, "loop", true),
+			playMode = attrEnum(doc, element, "playMode", AnimationPlayMode.Forward),
+		})
 	}
 }
 

@@ -37,10 +37,14 @@ parse_scene_nesting_defaults_and_items :: proc(t: ^testing.T) {
 	testing.expect_value(t, ship.layer, len(RenderLayer) - 1) // Clamped
 	testing.expect_value(t, ship.scale, [2]f32{1, 1})         // Default
 
-	testing.expect_value(t, anim.columns, 4)
-	testing.expect_value(t, anim.rows, 1)
-	testing.expect_value(t, anim.playMode, AnimationPlayMode.PingPong)
-	testing.expect_value(t, anim.loop, false)
+	// Before format 7: one "default" animation of every cell, from the node's settings
+	if testing.expect_value(t, len(anim.animations), 1) {
+		a := anim.animations[0]
+		testing.expect(t, a.name == "default" && a.end == -1, "the default animation")
+		testing.expect_value(t, a.grid, SheetGrid{mode = .Cells, columns = 4, rows = 1})
+		testing.expect_value(t, a.playMode, AnimationPlayMode.PingPong)
+		testing.expect_value(t, a.loop, false)
+	}
 
 	testing.expect_value(t, menu.visible, false)
 	if testing.expect_value(t, len(menu.items), 2) {
@@ -110,22 +114,80 @@ parse_animated_sprite_animations :: proc(t: ^testing.T) {
 	defer SceneData_Destroy(&scene)
 	testing.expect_value(t, err, ProjectError.None)
 	hero := scene.nodes[0]
-	testing.expect_value(t, hero.margin, 1)
-	testing.expect_value(t, hero.spacing, 2)
 	testing.expect_value(t, hero.autoplay, "jump")
+	// Before format 14 the node's sheet is every animation's, and the node keeps none
+	testing.expect_value(t, hero.texture, "")
 	testing.expect_value(t, len(hero.animations), 2)
 	walk := hero.animations[0]
 	testing.expect(t, walk.name == "walk" && walk.start == 0 && walk.end == 3 && walk.fps == 10 && walk.loop && walk.playMode == .Forward && len(walk.durations) == 0, "walk")
+	for a in hero.animations {
+		testing.expect_value(t, a.sheet, "hero.png")
+		testing.expect_value(t, a.grid, SheetGrid{mode = .Cells, columns = 4, rows = 2, margin = 1, spacing = 2})
+	}
 	testing.expect_value(t, hero.animations[1].end, -1) // Missing: to the last cell
 	testing.expect_value(t, hero.animations[1].playMode, AnimationPlayMode.PingPong)
 	testing.expect(t, !hero.animations[1].loop, "loop defaults to off")
-	// Before version 7: no animations, the node's fps
-	testing.expect_value(t, len(scene.nodes[1].animations), 0)
-	testing.expect_value(t, scene.nodes[1].fps, 6)
+	// Before version 7: no animations, the node's fps in its "default" one
+	if testing.expect_value(t, len(scene.nodes[1].animations), 1) {
+		old := scene.nodes[1].animations[0]
+		testing.expect(t, old.name == "default" && old.sheet == "old.png" && old.fps == 6 && old.loop && old.grid.columns == 4, "the old node's animation")
+	}
 
 	// Cells of a 4x2 sheet of 44x22 px with a 1 px margin and 2 px spacing: 9 x 9 px each
 	cell := SpriteSheet_CellRect({44, 22}, 4, 2, 1, 2, 5)
 	testing.expect_value(t, cell, sdl.FRect{12, 12, 9, 9})
+}
+
+@(test)
+animations_have_their_own_sheets :: proc(t: ^testing.T) {
+	// Format 14: each animation's sheet and grid, columns x rows or cells of a size
+	scene, err := ParseScene(`<scene formatVersion="14" name="S">
+		<node kind="AnimatedSprite" name="Hero" texture="ignored.png" columns="9">
+			<animation name="walk" sheet="walk.png" columns="4" rows="2" margin="1" spacing="2" end="3" fps="10" loop="true"/>
+			<animation name="jump" sheet="jump.png" grid="Size" cellWidth="16" cellHeight="24" fps="12"/>
+			<animation name="none"/>
+		</node>
+		<node kind="AnimatedSprite" name="Empty"/>
+	</scene>`)
+	defer SceneData_Destroy(&scene)
+	testing.expect_value(t, err, ProjectError.None)
+	hero := scene.nodes[0]
+	if !testing.expect_value(t, len(hero.animations), 3) do return
+	walk, jump, none := hero.animations[0], hero.animations[1], hero.animations[2]
+	testing.expect_value(t, walk.sheet, "walk.png")
+	testing.expect_value(t, walk.grid, SheetGrid{mode = .Cells, columns = 4, rows = 2, margin = 1, spacing = 2})
+	testing.expect_value(t, jump.sheet, "jump.png")
+	testing.expect_value(t, jump.grid, SheetGrid{mode = .Size, columns = 1, rows = 1, cellSize = {16, 24}})
+	// Nothing inherited from the node in format 14
+	testing.expect_value(t, none.sheet, "")
+	testing.expect_value(t, none.grid, DEFAULT_SHEET_GRID)
+	testing.expect_value(t, len(scene.nodes[1].animations), 0)
+
+	// Grids: cells of a size fit the sheet, the rest is left over
+	columns, rows, cell := SheetGrid_Layout(jump.grid, {70, 50})
+	testing.expect(t, columns == 4 && rows == 2 && cell == {16, 24}, "4 x 2 cells of 16 x 24 in 70 x 50")
+	spaced := SheetGrid{mode = .Size, cellSize = {16, 16}, margin = 1, spacing = 2}
+	testing.expect_value(t, SheetGrid_CellCount(spaced, {1 + 16 + 2 + 16 + 1, 18}), 2)
+	testing.expect_value(t, SheetGrid_CellRect(spaced, {36, 18}, 1), sdl.FRect{19, 1, 16, 16})
+	testing.expect_value(t, SheetGrid_CellCount(spaced, {}), 1)
+	testing.expect_value(t, SheetGrid_CellRect(walk.grid, {44, 22}, 5), sdl.FRect{12, 12, 9, 9})
+
+	// Animation files: before format 14 the file's sheet is every animation's
+	old, oldErr := ParseAnimationSet(`<animations formatVersion="13" texture="hero.png" columns="8" rows="2" margin="1">
+		<animation name="idle" end="3"/><animation name="run" start="8" sheet="run.png"/></animations>`)
+	defer AnimationSetData_Destroy(&old)
+	testing.expect_value(t, oldErr, ProjectError.None)
+	if testing.expect_value(t, len(old.animations), 2) {
+		testing.expect_value(t, old.animations[0].sheet, "hero.png")
+		testing.expect_value(t, old.animations[0].grid, SheetGrid{mode = .Cells, columns = 8, rows = 2, margin = 1})
+		testing.expect_value(t, old.animations[1].sheet, "run.png")
+	}
+	set, setErr := ParseAnimationSet(`<animations formatVersion="14" texture="hero.png"><animation name="idle" sheet="idle.png" grid="Size" cellWidth="8" cellHeight="8"/></animations>`)
+	defer AnimationSetData_Destroy(&set)
+	testing.expect_value(t, setErr, ProjectError.None)
+	if testing.expect_value(t, len(set.animations), 1) {
+		testing.expect(t, set.animations[0].sheet == "idle.png" && set.animations[0].grid.mode == .Size && set.animations[0].grid.cellSize == {8, 8}, "its own sheet")
+	}
 }
 
 @(test)
