@@ -94,9 +94,12 @@ IKSettings :: struct {
 	length: int,
 	// Two bones: which way the middle joint bends (true: clockwise, like a right arm's elbow)
 	bendPositive: bool,
+	// Whether the chain aims its bones (false leaves them as animated)
 	enabled: bool,
 }
 
+// An IK chain's settings when none are given (`CreateIKChain`, scene files): two bones, bending
+// clockwise, on
 DEFAULT_IK_SETTINGS :: IKSettings{length = 2, bendPositive = true, enabled = true}
 
 // Aims a chain of bones at a target

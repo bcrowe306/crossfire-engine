@@ -702,14 +702,21 @@ TileMap_Rebuild :: proc(node: ^TileMapNode, ase: ^Aseprite) {
 // Terrains (autotiling): see the file's overview
 
 // The neighbour bits of a terrain tile's `mask` property: the neighbours of the same terrain it's
-// drawn for (a corner counts only with both its edges: the "blob" rule)
+// drawn for (a corner counts only with both its edges: the "blob" rule). This one: the tile above
 TERRAIN_N  :: 1
+// A terrain mask's bit for the tile above and to the right
 TERRAIN_NE :: 2
+// A terrain mask's bit for the tile to the right
 TERRAIN_E  :: 4
+// A terrain mask's bit for the tile below and to the right
 TERRAIN_SE :: 8
+// A terrain mask's bit for the tile below
 TERRAIN_S  :: 16
+// A terrain mask's bit for the tile below and to the left
 TERRAIN_SW :: 32
+// A terrain mask's bit for the tile to the left
 TERRAIN_W  :: 64
+// A terrain mask's bit for the tile above and to the left
 TERRAIN_NW :: 128
 
 /*

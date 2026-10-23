@@ -20,7 +20,7 @@ cached by the resource manager.
 Example:
 	package mygame
 
-	import e "../engine"
+	import e "engine:."
 
 	// What the editor writes in scripts/assets.odin
 	SOUND_LASER :: e.SoundAsset{"assets/laser.wav"}

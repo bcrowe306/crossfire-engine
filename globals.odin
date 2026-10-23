@@ -63,7 +63,7 @@ Returns:
 Example:
 	package mygame
 
-	import e "../engine"
+	import e "engine:."
 
 	GameState :: struct {
 		using script: e.Script,

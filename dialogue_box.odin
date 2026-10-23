@@ -50,6 +50,9 @@ DialogueBoxSettings :: struct {
 	hideWhenDone: bool,
 }
 
+// A dialogue box's settings when none are given (`CreateDialogueBox`, scene files): 600 x 140,
+// 40 characters a second, size 20 text on a dark panel; it starts
+// when the scene does and hides when the conversation ends
 DEFAULT_DIALOGUE_BOX_SETTINGS :: DialogueBoxSettings{
 	size = {600, 140},
 	typeSpeed = 40,

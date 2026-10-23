@@ -37,6 +37,7 @@ Returns:
   coordinates: a positive shoelace area), in pixel coordinates (0, 0 the image's top-left)
 
 Example:
+	// Given: pixels: []u8
 	outlines := e.Image_TraceOutlines(pixels, 64, 32, threshold = 128, tolerance = 1.5)
 */
 Image_TraceOutlines :: proc(pixels: []u8, width, height: int, threshold: u8 = 128, tolerance: f32 = 1.5, allocator := context.temp_allocator) -> [][][2]f32 {
@@ -189,6 +190,7 @@ Returns:
 - The pieces (each at most COLLISION_POLYGON_MAX_POINTS points)
 
 Example:
+	// Given: pixels: []u8
 	pieces := e.Image_CollisionPolygons(pixels, 64, 32, offset = {-32, -16})
 */
 Image_CollisionPolygons :: proc(pixels: []u8, width, height: int, threshold: u8 = 128, tolerance: f32 = 1.5, offset: [2]f32 = {}, allocator := context.temp_allocator) -> [][][2]f32 {

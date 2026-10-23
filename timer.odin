@@ -11,7 +11,7 @@ it stops. Being driven by delta time, it pauses with a hitstop and anything else
 Example:
 	package mygame
 
-	import e "../engine"
+	import e "engine:."
 	import "core:time"
 	import sdl "vendor:sdl3"
 

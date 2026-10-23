@@ -34,7 +34,8 @@ WEB_PROJECT_DIR :: "/data"
 
 foreign import emscripten "env.o"
 
-@(default_calling_convention = "c")
+// The browser's main loop and C allocator, used only here
+@(private = "file", default_calling_convention = "c")
 foreign emscripten {
 	emscripten_set_main_loop :: proc(callback: proc "c" (), fps: c.int, simulateInfiniteLoop: bool) ---
 	emscripten_cancel_main_loop :: proc() ---

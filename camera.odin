@@ -20,7 +20,7 @@ counter-clockwise on screen.
 Example:
 	package mygame
 
-	import e "../engine"
+	import e "engine:."
 	import sdl "vendor:sdl3"
 
 	WORLD_SIZE :: [2]f32{3840, 2160}

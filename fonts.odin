@@ -34,6 +34,7 @@ by default).
 BMFONT_EXTENSION :: ".fnt"
 // What an MSDF font's atlas files end with, after the font's own name ("Font.ttf.msdf.json")
 MSDF_ATLAS_SUFFIX :: ".msdf.json"
+// What an MSDF font's atlas picture ends with, after the font's own name ("Font.ttf.msdf.bmp")
 MSDF_IMAGE_SUFFIX :: ".msdf.bmp"
 
 // A font drawn from pictures of its glyphs: a bitmap font, or an MSDF font's atlas
@@ -69,18 +70,28 @@ BMFontData :: struct {
 	size, lineHeight, base: f32,
 	// The page images, relative to the .fnt file
 	pages: [dynamic]string,
+	// The `char` lines
 	chars: [dynamic]BMFontChar,
+	// The `kerning` lines
 	kernings: [dynamic]BMFontKerning,
 }
 
+// A BMFont file's `char` line: one glyph and where its picture is
 BMFontChar :: struct {
+	// The character
 	id: rune,
+	// The picture's place and size on its page; where it's drawn from the pen (x) and the
+	// line's top (y); how far the pen moves after it (pixels at the font's size)
 	x, y, width, height, xoffset, yoffset, xadvance: f32,
+	// The page image it's on (an index into `BMFontData.pages`)
 	page: int,
 }
 
+// A BMFont file's `kerning` line: a pair of characters drawn closer or further apart
 BMFontKerning :: struct {
+	// The character on the left, and the one after it
 	first, second: rune,
+	// What's added to the pen's move between them (pixels; negative is closer)
 	amount: f32,
 }
 

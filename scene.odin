@@ -217,7 +217,7 @@ Returns:
 Example:
 	package mygame
 
-	import e "../engine"
+	import e "engine:."
 	import sdl "vendor:sdl3"
 
 	Bullet :: struct {

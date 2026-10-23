@@ -22,6 +22,7 @@ Lines and trails: thick polylines drawn as triangles (one geometry call each).
 Both draw through a node's shader (shaders.odin) when they have a texture.
 
 Example:
+	// Given: sword: ^e.Node
 	laser := e.CreateLine2D(scene, {{0, 0}, {400, 0}})
 	laser.settings.width = 6
 	laser.settings.color = {255, 60, 60, 255}

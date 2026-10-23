@@ -278,7 +278,7 @@ Returns:
 Example:
 	package mygame
 
-	import e "../engine"
+	import e "engine:."
 
 	Enemy :: struct {
 		using node: e.Node,

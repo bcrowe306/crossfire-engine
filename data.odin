@@ -76,7 +76,7 @@ Inputs:
 Example:
 	package mygame
 
-	import e "../engine"
+	import e "engine:."
 
 	EnemyStats :: struct {
 		health: int `export:"default=10 min=1"`,
@@ -139,7 +139,7 @@ Returns:
 Example:
 	package mygame
 
-	import e "../engine"
+	import e "engine:."
 
 	EnemyStats :: struct {
 		health: int `export:"default=10 min=1"`,
