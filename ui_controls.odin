@@ -670,6 +670,9 @@ SceneUI :: struct {
 	navigated: u64,
 	// The update pass in which a press hit a control (one per frame)
 	pressed: u64,
+	// The input frame the scene was opened over another (`Game_PushScene`): its controls ignore
+	// that frame's presses, the ones that opened it
+	opened: u64,
 }
 
 @(private="file")
@@ -1006,7 +1009,9 @@ controlUpdate :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 	scene := c.scene
 	game := scene != nil ? scene.game : nil
 	if game == nil do return
-	usable := Node_IsVisibleInTree(c) && !controlClipped(c)
+	// Not in the frame it was pushed in: that frame's press opened it
+	fresh := scene.ui.opened != 0 && scene.ui.opened == game.input.frame
+	usable := Node_IsVisibleInTree(c) && !controlClipped(c) && !fresh
 	rect := Control_GetRect(c)
 	mouse := Input_GetMousePosition(game)
 	inside := usable && mouse.x >= rect.x && mouse.x < rect.x + rect.w && mouse.y >= rect.y && mouse.y < rect.y + rect.h
@@ -1042,7 +1047,7 @@ controlUpdate :: proc(node: ^Node, events: []sdl.Event, deltaTime: f64) {
 	}
 	if c.kind == .TextField && scene.ui.focus == c.id do typeInto(cast(^TextField)c, events, f32(deltaTime))
 	// The keyboard and gamepads: whichever focusable control updates first does this frame's move
-	if controlFocusable(c) && scene.ui.navigated != scene.ui.stamp {
+	if controlFocusable(c) && scene.ui.navigated != scene.ui.stamp && !fresh {
 		navigate(c, game, events)
 	}
 }

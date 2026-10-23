@@ -4,6 +4,7 @@ package crossfire
 import "core:fmt"
 import "core:os"
 import "core:testing"
+import sdl "vendor:sdl3"
 
 // Scene changes (scene_flow.odin): a fade's halves with the switch under the cover, scenes pushed
 // over others (pausing them) and popped, the loading screen (scenes built when entered)
@@ -142,4 +143,56 @@ removeTestDir :: proc(dir: string) {
 	// File by file: os.remove_all goes through the shell on Windows (unsafe on test threads)
 	for name in ([4]string{"A.scene.xml", "B.scene.xml", "Pause.scene.xml", "Loading.scene.xml"}) do _ = os.remove(JoinPath(dir, name))
 	_ = os.remove(dir)
+}
+
+@(test)
+pushed_scenes_start_fresh_and_ignore_the_press_that_opened_them :: proc(t: ^testing.T) {
+	dir := "build/test_flow_push_fresh"
+	os.make_directory("build")
+	os.make_directory(dir)
+	write :: proc(dir, name, text: string) {
+		_ = os.write_entire_file(JoinPath(dir, name), transmute([]u8)text)
+	}
+	write(dir, "Menu.scene.xml", `<scene formatVersion="14" name="Menu">
+	<node kind="Button" name="Open" anchor="Center" width="80" height="30" action="push:Popup"/>
+</scene>`)
+	write(dir, "Popup.scene.xml", `<scene formatVersion="14" name="Popup">
+	<node kind="Button" name="Close" anchor="Center" width="80" height="30" action="pop"/>
+</scene>`)
+	project, _ := ParseProject(`<project formatVersion="14" name="Flow" width="320" height="180" startScene="Menu">
+		<scene name="Menu" path="Menu.scene.xml"/>
+		<scene name="Popup" path="Popup.scene.xml"/>
+	</project>`)
+	game := testGame(dir)
+	Game_LoadProject(game, &project, dir)
+	defer { Game_Destroy(game); free(game); ProjectData_Destroy(&project); removeTestDir(dir) }
+	enter: sdl.Event
+	enter.type = .KEY_DOWN
+	enter.key.scancode = .RETURN
+	enter.key.down = true
+	up := enter
+	up.type = .KEY_UP
+	up.key.down = false
+	Game_Update(game, nil, 0.01)
+	menu, popup := game.scenes["Menu"], game.scenes["Popup"]
+	Control_Focus(menu, cast(^Control)Scene_FindNode(menu, "Open"))
+	// The popup's button has the focus when it opens (a menu's script would focus it in ready)
+	close := cast(^Control)Scene_FindNode(popup, "Close")
+	Control_Focus(popup, close)
+	// Enter presses Open: the popup opens, and the same press doesn't press its Close
+	Game_Update(game, {enter}, 0.01)
+	testing.expect_value(t, Game_TopScene(game), popup)
+	Game_Update(game, {up}, 0.01)
+	testing.expect_value(t, Game_TopScene(game), popup)
+	// The next press does
+	Control_Focus(popup, close)
+	Game_Update(game, {enter}, 0.01)
+	testing.expect_value(t, Game_TopScene(game), menu)
+	// Opened again, it's built again (its scripts would be ready again): a new Close
+	Game_Update(game, nil, 0.01)
+	closeId := close.id
+	testing.expect(t, Game_PushScene(game, "Popup"), "pushed again")
+	Game_Update(game, nil, 0.01)
+	again := Scene_FindNode(popup, "Close")
+	testing.expect(t, again != nil && again.id != closeId, "fresh nodes")
 }

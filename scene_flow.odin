@@ -18,7 +18,10 @@ scenes** (a pause menu or an inventory opened over the level, which waits under 
 - **Scenes over scenes** (`Game_PushScene`, `Game_PopScene`; actions `push:<Name>` and `pop`):
   the pushed scene is drawn over the others and updated; with `pauseBelow` (the default) the
   scenes under it don't update (they still draw), so a pause menu freezes the level. A change of
-  scene closes them all.
+  scene closes them all. Like a scene that's entered, a pushed scene starts fresh every time
+  it's opened (built again from its file once it has been open: its scripts' `ready` runs
+  again), and its controls ignore the frame's presses: the press that opened it doesn't also
+  press the button focused in it.
 - **The loading screen** (project.xml's `loadingScene`; `Game.flow.loadingScene`): with one, the
   game builds only its start scene and the loading scene when it starts; any other scene is built
   when it's entered, after the loading scene has been shown while its images and sounds load (a
@@ -147,7 +150,8 @@ Game_ChangeScene :: proc(game: ^Game, name: string, transition: Maybe(Transition
 
 /*
 Opens a scene over the playing one (a pause menu, an inventory): drawn over it and updated; with
-`pauseBelow` the scenes under it wait (they still draw).
+`pauseBelow` the scenes under it wait (they still draw). It starts fresh (built again if it was
+open before), and its controls don't take this frame's presses.
 
 Inputs:
 - game: The game
@@ -167,7 +171,13 @@ Game_PushScene :: proc(game: ^Game, name: string, pauseBelow := true) -> bool {
 		return false
 	}
 	for o in game.flow.overlays do if o.scene == scene do return false
+	// Fresh on every push, as on every visit: pushed before, it's built again (its scripts ready again)
+	if scene.played && !scene.unbuilt do Game_RebuildScene(game, scene)
 	prepareScene(game, scene)
+	scene.played = true
+	// Its controls don't take the press that opened it (the overlays update after the scene
+	// that pushed it, the same frame): a focused button would be pressed by it
+	scene.ui.opened = game.input.frame
 	append(&game.flow.overlays, SceneOverlay{scene, pauseBelow})
 	scene.onEnter->notify(scene, nil)
 	return true

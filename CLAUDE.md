@@ -198,7 +198,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `state_machine.odin` | **State machines**: `StateMachine` (`StateMachineSettings`: parameters Float / Bool / Trigger, states with an animation, transitions with a condition, `after`, `onFinished`, `*` from any state), `StateMachine_SetFloat` / `SetBool` / `SetTrigger`, `Current`, `Is`, `Travel`, `TimeInState`, `StateMachine_ConditionProblem` (for editors); `onStateEntered`, `onStateExited`; the `state` property |
 | `state_machine_test.odin` | Tests: parameters moving it (and back), a trigger spent once from any state, waiting for an attack animation's end, `after`, travel, the state read and written as a property, events, conditions checked |
 | `scene_flow.odin` | **Scene changes**: transitions (`Transition`, `Game_ChangeScene`: a fade, wipes, a circle over the switch), scenes over scenes (`Game_PushScene` / `PopScene` / `TopScene`, pausing what's under them), the loading screen (`Game.flow.loadingScene`: scenes built when entered, their assets loaded a few a frame, `Game_LoadingProgress`), `Game_RunAction` (`scene:`, `push:`, `pop`, `quit` for Menus and Buttons) |
-| `scene_flow_test.odin` | Tests: a fade's halves with the switch under the cover, actions, scenes pushed over others pausing them (or not) and popped, a scene change closing them, a loading scene shown at least its minimum while an unbuilt scene loads, then built |
+| `scene_flow_test.odin` | Tests: a fade's halves with the switch under the cover, actions, scenes pushed over others pausing them (or not) and popped, a scene change closing them, pushed scenes built afresh and deaf to the press that opened them, a loading scene shown at least its minimum while an unbuilt scene loads, then built |
 | `live.odin`, `live_native.odin`, `live_web.odin` | **The live link** with an editor (the player's `--live`): commands on stdin read by a thread (`LiveLink_Start`), run at the start of each update (`LiveLink_Process`: watch, select, set, pause, resume, step, snapshot, shapes), replies on stdout as `@@live` JSON lines (stats with `paused` and `shapes`, the scene's tree, a node's properties); `GameProfile` (`Game.profile`: update, physics, draw times; nodes, drawn); `Node_WriteProperty` / `Node_Properties` (animator.odin) |
 | `live_test.odin` | Tests: watch (stats and the tree), select (a node's properties), set (and a refused value), pause holding the game, a step of 1/60 s, resume, the debug shapes shown and hidden (`shapes on` / `off`, the stats saying so) |
 | `navigation.odin` | **Navigation**: `NavRegion` (a `NavGrid` over an area, blocked by static bodies' shapes grown by an agent radius: `NavRegion_Rebuild`, `NavGrid_BlockStaticBodies`, `NavGrid_SetBlocked`), A* paths straightened by line of sight (`NavGrid_FindPath`, `NavRegion_FindPath`, `Scene_FindNavRegion`), `NavAgent` (`NavAgent_SetTarget` / `Stop`, `velocity` with arrival and separation, moving its parent; `onArrived`, `onPathFailed`) |
@@ -808,7 +808,11 @@ an overlay pauses below it, then the overlays from the topmost pausing one; `Gam
 them after the scene and the cover (`SceneFlow_Draw`) after the globals. **A project with a
 loading scene builds only its start and loading scenes at load** (`Scene.unbuilt`, built by
 `Game_RebuildScene` when entered), so nothing else may assume every scene has its nodes at the
-start. Menu and Button actions go through `Game_RunAction`.
+start. Menu and Button actions go through `Game_RunAction`. **Pushed scenes start fresh**
+(`Game_PushScene` rebuilds one that was `played`, then marks it so) and set `scene.ui.opened` to
+the input frame: their controls ignore that frame's presses (`fresh` in controlUpdate), since
+overlays update after the scene that pushed them in the same frame (a focused Back button was
+pressed by the Enter that opened the menu).
 
 **Logging** (logging.odin; its doc comment has the details): **it builds on `core:log`**, so the
 engine's ~230 `log.info` / `log.warnf` calls didn't change. The player sets `context.logger =
