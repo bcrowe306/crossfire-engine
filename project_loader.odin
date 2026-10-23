@@ -126,12 +126,13 @@ Game_LoadProject :: proc(game: ^Game, project: ^ProjectData, projectDir: string)
 	ResourceManager_SetImportSettings(&game.resourceManager, project.assets[:], projectDir, project.textureFilter)
 	// Translations before anything that shows text
 	loadProjectTranslations(game, project, projectDir)
-	if project.icon != "" && game.window != nil do Game_SetWindowIcon(game, project.icon)
 	if project.uiTheme != "" do game.uiTheme = strings.clone(project.uiTheme, Game_GetAllocator(game))
 	// Globals exist before the scenes (their nodes' scripts may look them up in `ready`)
 	Globals_Start(game, project.globals[:])
 	delete(game.projectDir)
 	game.projectDir = strings.clone(projectDir)
+	// The window's icon (its path is the project's: after projectDir is set)
+	if project.icon != "" && game.window != nil do Game_SetWindowIcon(game, project.icon)
 	ok := true
 
 	// The project's transition and loading scene (scene_flow.odin). With a loading scene, only
