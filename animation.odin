@@ -45,7 +45,9 @@ Animation :: struct {
 	fps: f32,
 	// Restart after the last frame instead of ending
 	loop: bool,
-	// Times it plays before it ends, when it doesn't loop (0 or 1: once; Aseprite's tag repeats)
+	// Times it plays before it ends, when it doesn't loop (0 or 1: once; Aseprite's tag repeats).
+	// A ping-pong's are passes, one way each, as Aseprite counts them (0: two, there and back;
+	// an odd number stops on the far end)
 	repeat: int,
 	// How it steps through its frames
 	playMode: AnimationPlayMode,
@@ -364,6 +366,31 @@ SheetGrid_Layout :: proc(grid: SheetGrid, sheetSize: [2]f32) -> (columns, rows: 
 		rows = fit(sheetSize.y, cell.y, grid.margin, grid.spacing)
 	}
 	return
+}
+
+/*
+The pixels a grid leaves over at the right and bottom of a sheet: a .Size grid's cells that don't
+fill the sheet (what's past the last whole cell and the margin). They're never drawn: frames are
+all one size, and what's left over is usually padding. A .Cells grid shares the sheet evenly, so
+it leaves none (but its cells may not be whole pixels).
+
+Inputs:
+- grid: The grid
+- sheetSize: The sheet's size in pixels (0 when unknown: none left over)
+
+Returns:
+- The pixels left over across (x) and down (y), 0 or more
+
+Example:
+	left := e.SheetGrid_Leftover({mode = .Size, cellSize = {16, 16}}, {70, 32})
+	// {6, 0}: 4 cells across use 64 of the 70 pixels
+*/
+SheetGrid_Leftover :: proc(grid: SheetGrid, sheetSize: [2]f32) -> [2]f32 {
+	if grid.mode != .Size || sheetSize.x <= 0 || sheetSize.y <= 0 do return {}
+	columns, rows, cell := SheetGrid_Layout(grid, sheetSize)
+	counts := [2]f32{f32(columns), f32(rows)}
+	used := grid.margin * 2 + counts * cell + (counts - 1) * grid.spacing
+	return {max(sheetSize.x - used.x, 0), max(sheetSize.y - used.y, 0)}
 }
 
 /*

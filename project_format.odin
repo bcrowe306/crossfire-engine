@@ -724,7 +724,8 @@ sprite sheet.
 The sheet is cut by `grid` (`SheetGrid`: `columns` x `rows`, or with `grid="Size"` cells of
 `cellWidth` x `cellHeight` pixels; `margin`, `spacing`). `durations` (milliseconds per frame,
 format 13) override fps for the frames they cover; `repeat` plays a non-looping animation that
-many times. The sheet and grid are format 14's: before it they were the node's (or the animation
+many times (a ping-pong's: that many passes, one way each, as Aseprite counts them; 0 is two,
+there and back). The sheet and grid are format 14's: before it they were the node's (or the animation
 file's), and the parser copies them into every animation.
 */
 AnimationData :: struct {
@@ -748,7 +749,8 @@ AnimationData :: struct {
 	playMode: AnimationPlayMode,
 	// Seconds each frame shows (`durations`, milliseconds in the file; empty: 1 / fps each)
 	durations: [dynamic]f32,
-	// Times a non-looping animation plays (0 or 1: once)
+	// Times a non-looping animation plays (0 or 1: once; a ping-pong's passes, one way each:
+	// 0 is two)
 	repeat: int,
 	// Each frame's events (`events="step;;hit,shake"`: frames apart by ';', a frame's events by
 	// ','; "" for none): an Aseprite file's from its cels' text or `event` property

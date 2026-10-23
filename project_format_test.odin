@@ -171,6 +171,12 @@ animations_have_their_own_sheets :: proc(t: ^testing.T) {
 	testing.expect_value(t, SheetGrid_CellRect(spaced, {36, 18}, 1), sdl.FRect{19, 1, 16, 16})
 	testing.expect_value(t, SheetGrid_CellCount(spaced, {}), 1)
 	testing.expect_value(t, SheetGrid_CellRect(walk.grid, {44, 22}, 5), sdl.FRect{12, 12, 9, 9})
+	// What a grid of sizes leaves over: 70 - 4 * 16 across, 50 - 2 * 24 down; a margin and gaps
+	// count as used; a grid of cells leaves none
+	testing.expect_value(t, SheetGrid_Leftover(jump.grid, {70, 50}), [2]f32{6, 2})
+	testing.expect_value(t, SheetGrid_Leftover(spaced, {40, 18}), [2]f32{4, 0})
+	testing.expect_value(t, SheetGrid_Leftover(walk.grid, {45, 23}), [2]f32{0, 0})
+	testing.expect_value(t, SheetGrid_Leftover(jump.grid, {}), [2]f32{0, 0})
 
 	// Animation files: before format 14 the file's sheet is every animation's
 	old, oldErr := ParseAnimationSet(`<animations formatVersion="13" texture="hero.png" columns="8" rows="2" margin="1">

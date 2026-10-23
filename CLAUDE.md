@@ -100,7 +100,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `easing.odin` | `Ease(EaseType, t)`, 18 curves |
 | `render_target.odin` | **Render targets**: `RenderTarget_Create` / `Destroy`, `RenderTarget_Begin` / `End` (draw into its texture; the game's logical presentation is off meanwhile and restored after), `Scene_DrawToTarget` (a scene through its camera fitted to the target, or a given view) |
 | `tween.odin` | **Tweens**: `Tween_Create(owner)` / `Scene_CreateTween`, steps `Tween_To` / `Tween_FromTo` (f32, [2]f32, sdl.Color), `Tween_Delay`, `Tween_Call`, `Tween_Parallel`, `Tween_SetLoops`, pause, kill; updated by `Scene_Update` after the nodes |
-| `animation.odin` | `Animation` base (its Aseprite `source`), `SpriteSheetAnimation` (`CreateSpriteSheetAnimation`, `CreateSheetAnimation` from a `SheetGrid`), `FrameAnimation`; **sheet grids**: `SheetGrid` / `SheetGridMode` (columns x rows, or cells of a size), `SheetGrid_Layout` / `CellCount` / `CellRect` |
+| `animation.odin` | `Animation` base (its Aseprite `source`), `SpriteSheetAnimation` (`CreateSpriteSheetAnimation`, `CreateSheetAnimation` from a `SheetGrid`), `FrameAnimation`; **sheet grids**: `SheetGrid` / `SheetGridMode` (columns x rows, or cells of a size), `SheetGrid_Layout` / `CellCount` / `CellRect` / `Leftover` |
 | `animation_player.odin` | Plays animations by name or index, with events |
 | `event.odin` | `EventSubject`: subscribe / unsubscribe / notify |
 | `node_events.odin` | **Node events for tools and scene files**: `NodeType_Events` / `SceneNodeKind_Events` (a type's EventSubject fields tagged `event:"..."`, with `data:"..."` hints), `Node_FindEvent`, `Node_AddListener`, `Script_Listener` (a script's handlers by name), binding scene files' `<listener>`s before ready |
@@ -740,14 +740,17 @@ savedFields).
   without a `sheet` has none), and a pre-7 node gets its "default" animation there too.
   `animatedSpriteAdd` (shared by the loader and `AnimatedSprite_SetAnimations`) makes each one with
   `CreateSheetAnimation` on its own texture (the resource manager shares them); a sheet that won't
-  load leaves its animation drawing nothing (logged). A Size grid's leftover pixels are ignored:
+  load leaves its animation drawing nothing (logged). A Size grid's leftover pixels
+  (`SheetGrid_Leftover`, which editors show) are ignored:
   frames are `cellSize` (`SpriteSheetAnimation.cellSize`).
 - **Aseprite per animation:** `Animation.source` / `sourceFrames` (a `#sheet`: the file's frames)
   replace the sprite's old `source` fields; `AnimatedSprite_Source` reads the playing one, so slices,
   pivots and hitboxes follow whichever file the current animation shows.
 - An `Animation` has optional per-frame `durations` (seconds; `Animation_FrameDuration`,
   `Animation_SetDurations`) overriding fps, and `repeat` (plays a non-looping one that often:
-  `AnimationPlayer.cycles`). `PingPongReverse` is Aseprite's "Ping-pong Reverse".
+  `AnimationPlayer.cycles`; a ping-pong's are **passes**, one way each, as Aseprite counts its
+  tags' repeats: 0 is two, there and back, and an odd count stops on the far end: `passesOn`).
+  A listener that switches animations on `onFrameChanged` gets no events of the frame it left. `PingPongReverse` is Aseprite's "Ping-pong Reverse".
 - An Aseprite file is an animation set as it is: every animation's sheet is `<path>#sheet`
   (ASEPRITE_SHEET_SUFFIX, a Cells grid of `Aseprite_SheetGrid`), which the resource manager makes from `Aseprite_SheetPixels` (and
   reloads like any texture); a tag without a repeat count loops, as Aseprite's preview plays it.

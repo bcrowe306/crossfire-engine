@@ -3,6 +3,7 @@ package crossfire
 
 import "core:log"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:testing"
 import sdl "vendor:sdl3"
@@ -45,6 +46,56 @@ animations_have_frame_durations_repeats_and_reverse_ping_pong :: proc(t: ^testin
 	testing.expect(t, player.playing && player.frame == 0, "into its second time")
 	AnimationPlayer_Update(&player, 0.2)
 	testing.expect(t, !player.playing && player.finished, "done after two")
+
+	// A ping-pong's repeat counts passes, as Aseprite does: 3 is there, back and there again,
+	// stopping on the last frame; 0 is there and back
+	passes := cells("passes", 3, .PingPong)
+	passes.repeat = 3
+	AnimationPlayer_Add(&player, passes)
+	AnimationPlayer_Play(&player, "passes")
+	path := make([dynamic]int)
+	defer delete(path)
+	append(&path, player.frame)
+	for _ in 0 ..< 8 {
+		AnimationPlayer_Update(&player, 0.1)
+		append(&path, player.frame)
+	}
+	testing.expectf(t, slice.equal(path[:], []int{0, 1, 2, 1, 0, 1, 2, 2, 2}) && !player.playing, "0 1 2 1 0 1 2, then done: %v", path[:])
+	passes.repeat = 0
+	AnimationPlayer_Play(&player, "passes")
+	clear(&path)
+	append(&path, player.frame)
+	for _ in 0 ..< 6 {
+		AnimationPlayer_Update(&player, 0.1)
+		append(&path, player.frame)
+	}
+	testing.expectf(t, slice.equal(path[:], []int{0, 1, 2, 1, 0, 0, 0}) && !player.playing, "there and back: %v", path[:])
+
+	// A listener switching animations as a frame shows: no events of the frame left behind (and
+	// the frame-event subject is freed with the player: the test's allocator checks)
+	{
+		evented: AnimationPlayer
+		AnimationPlayer_Init(&evented)
+		defer AnimationPlayer_Destroy(&evented)
+		a := cells("a", 2, loop = true)
+		b := cells("b", 2, loop = true)
+		Animation_SetEvents(b, {"B0", "B1"})
+		AnimationPlayer_Add(&evented, a)
+		AnimationPlayer_Add(&evented, b)
+		Seen :: struct { events: [dynamic]string }
+		seen := Seen{}
+		defer delete(seen.events)
+		Event_Subscribe(&evented.onFrameEvent, proc(_: ^EventSubject, _: rawptr, data: EventData, userData: rawptr) {
+			append(&(cast(^Seen)userData).events, data.(string))
+		}, &seen)
+		Event_Subscribe(&evented.onFrameChanged, proc(_: ^EventSubject, source: rawptr, data: EventData, _: rawptr) {
+			p := cast(^AnimationPlayer)source
+			if p.current == 1 && data.(int) == 1 do AnimationPlayer_Play(p, "a")
+		}, nil)
+		AnimationPlayer_Play(&evented, "b")
+		AnimationPlayer_Update(&evented, 0.1)
+		testing.expectf(t, evented.current == 0 && !slice.contains(seen.events[:], "B1"), "switched to a, no B1: %v", seen.events[:])
+	}
 
 	// Reverse ping-pong: from the end, to the start and back
 	back := cells("back", 3, .PingPongReverse, loop = true)

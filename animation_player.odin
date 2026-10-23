@@ -153,6 +153,7 @@ AnimationPlayer_Destroy :: proc(player: ^AnimationPlayer) {
 	Event_Destroy(&player.onAnimationEnded)
 	Event_Destroy(&player.onAnimationLooped)
 	Event_Destroy(&player.onAnimationStopped)
+	Event_Destroy(&player.onFrameEvent)
 	player^ = {}
 	player.current = -1
 	player.previous = -1
@@ -518,36 +519,40 @@ advanceFrame :: proc(player: ^AnimationPlayer, animation: ^Animation) {
 			wrapped = true
 		}
 	case .PingPong:
-		// One cycle is start -> end -> start. Arriving back on the start frame completes it;
-		// a non-looping animation then shows that frame once more before ending
+		// One cycle is start -> end -> start. A non-looping one plays `repeat` passes (one way
+		// each, as Aseprite counts them; 0: two, there and back), stopping on the end it reached
 		if next > last {
+			if !passesOn(player, animation) { endAnimation(player); return }
 			player.direction = -1
 			next = last - 1
 		} else if next < 0 {
-			if !playsOn(player, animation) { endAnimation(player); return }
+			if !passesOn(player, animation) { endAnimation(player); return }
 			player.direction = 1
 			next = 1
 		}
-		wrapped = next == 0 && player.direction == -1 && (animation.loop || player.cycles + 1 < max(animation.repeat, 1))
+		wrapped = next == 0 && player.direction == -1 && (animation.loop || player.cycles + 1 < pingPongPasses(animation))
 	case .PingPongReverse:
 		// The same from the end: end -> start -> end
 		if next < 0 {
+			if !passesOn(player, animation) { endAnimation(player); return }
 			player.direction = 1
 			next = 1
 		} else if next > last {
-			if !playsOn(player, animation) { endAnimation(player); return }
+			if !passesOn(player, animation) { endAnimation(player); return }
 			player.direction = -1
 			next = last - 1
 		}
-		wrapped = next == last && player.direction == 1 && (animation.loop || player.cycles + 1 < max(animation.repeat, 1))
+		wrapped = next == last && player.direction == 1 && (animation.loop || player.cycles + 1 < pingPongPasses(animation))
 	}
 
 	changed := next != player.frame
 	player.frame = next
+	playing := player.current
 	if wrapped do player.onAnimationLooped->notify(player, player.current)
 	if changed && player.playing do player.onFrameChanged->notify(player, player.frame)
-	// A frame's events every time it shows (a one-frame loop's too)
-	if player.playing do sendFrameEvents(player, animation)
+	// A frame's events every time it shows (a one-frame loop's too), unless a listener above
+	// switched animations: this frame isn't showing any more
+	if player.playing && player.current == playing do sendFrameEvents(player, animation)
 }
 
 // The events of the frame that shows, one notification each
@@ -570,6 +575,20 @@ playsOn :: proc(player: ^AnimationPlayer, animation: ^Animation) -> bool {
 	if animation.loop do return true
 	player.cycles += 1
 	return player.cycles < max(animation.repeat, 1)
+}
+
+// How many passes (one way each) a non-looping ping-pong plays: its repeat, else 2 (there and back)
+@(private="file")
+pingPongPasses :: proc(animation: ^Animation) -> int {
+	return animation.repeat > 0 ? animation.repeat : 2
+}
+
+// A ping-pong reached an end: whether it turns and plays on (counting the pass it finished)
+@(private="file")
+passesOn :: proc(player: ^AnimationPlayer, animation: ^Animation) -> bool {
+	if animation.loop do return true
+	player.cycles += 1
+	return player.cycles < pingPongPasses(animation)
 }
 
 @(private="file")
