@@ -1523,7 +1523,7 @@ Returns:
 
 Example:
 	lines := e.RichText_Layout(&game.resourceManager, "[size=40]Credits[/size]\nArt: Anokolisa", e.DEFAULT_FONT, 24, 400, .Center)
-	for run in lines.runs do e.DrawText(&game.resourceManager, run.at, run.text, e.DEFAULT_FONT, run.size, {255, 255, 255, 255})
+	for run in lines.runs do e.DrawText(&game.resourceManager, {run.at.x, run.at.y}, run.text, e.DEFAULT_FONT, run.size, {255, 255, 255, 255})
 */
 RichText_Layout :: proc(rm: ^ResourceManager, text, font: string, size, width: f32, align := UITextAlign.Left) -> RichLines {
 	runs := make([dynamic]RichRun, context.temp_allocator)
