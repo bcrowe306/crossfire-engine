@@ -111,6 +111,11 @@ ParticleEmitter nodes (particles.odin) keep their settings in a `<particles>` ch
 attribute per `ParticleSettings` field that differs from `DEFAULT_PARTICLE_SETTINGS`, named like
 the field, in `ParticleSettings_Get`'s format. The node's `texture` is the Texture shape's image.
 
+A Camera (camera.odin) with a `target` (a path from it: `target="../Hero"`) follows that node by
+itself with its follow settings (`followMode="SmoothDamp" deadzoneX="120" lookAheadX="80"`), and
+never shows past the sides it has limits for (`limitLeft="0" limitBottom="720"`); `shakeStrength`,
+`shakeDuration` and `shakeFrequency` are how `Camera2D_Shake` shakes it by default.
+
 Physics (physics.odin, physics_nodes.odin): body nodes (StaticBody, DynamicBody, CharacterMover,
 Area) get their shape from the CollisionShape nodes under them. Collision layers are lists of
 layer numbers 1-64 (`collisionLayer="1 3"`), `all`, or empty for none.
@@ -140,7 +145,13 @@ Version history:
   (`Cells` or `Size`), `columns`, `rows`, `cellWidth`, `cellHeight`, `margin` and `spacing`, in
   scene files and `.anim.xml` files alike; nodes and animation files no longer have a sheet of
   their own (older files' `texture`, `columns`, `rows`, `margin` and `spacing` become every
-  animation's, and a node without animations gets its "default" one, when parsed).
+  animation's, and a node without animations gets its "default" one, when parsed). Also, added
+  without a version of their own (older readers ignore them; a file without them means what it
+  did): a Camera's follow target and settings (camera.odin): `target` (a path from it to the
+  node it follows by itself), `followMode`, `smoothing`, `smoothTime`, `followSpeed`,
+  `maxSpeed`, `deadzoneX`, `deadzoneY`, `targetOffsetX`, `targetOffsetY`, `lookAheadX`,
+  `lookAheadY`, `lookAheadSmoothing`, `limitLeft`, `limitTop`, `limitRight`, `limitBottom`
+  (each one there limits that side), `shakeStrength`, `shakeDuration`, `shakeFrequency`.
 - 13: every node's `processMode`, `blendMode`, `zIndex`, `ySort` and `groups`; CollisionShape
   `oneWay`; the project's window: `fullscreen`, `vsync` (default true), `highDPI`; assets of
   kind "Translation" (CSV tables: localization.odin), the project's `locale` and `icon`, and the
@@ -482,6 +493,15 @@ SceneNodeData :: struct {
 	centered: bool,
 	// Camera: zoom (1: none, 2: twice as big)
 	zoom: f32,
+	// Camera: how it follows its target, the sides it can't show past and how it shakes (format
+	// 14, camera.odin): `followMode` (a `CameraFollowMode`), `smoothing`, `smoothTime`,
+	// `followSpeed`, `maxSpeed`, `deadzoneX`, `deadzoneY`, `targetOffsetX`, `targetOffsetY`,
+	// `lookAheadX`, `lookAheadY`, `lookAheadSmoothing`; `limitLeft`, `limitTop`, `limitRight`,
+	// `limitBottom` (a side is limited when its attribute is there); `shakeStrength`,
+	// `shakeDuration`, `shakeFrequency`
+	camera: CameraSettings,
+	// Camera: `target`, the node it follows by itself, a path from it ("" for none)
+	cameraTarget: string,
 	// AnimatedSprite: its `<animation>` child elements, in order, each with its own sheet
 	animations: [dynamic]AnimationData,
 	// AnimatedSprite: the animation it plays from the start ("" or unknown: the first; with an
@@ -890,6 +910,7 @@ DEFAULT_SCENE_NODE :: SceneNodeData{
 	color = {255, 255, 255, 255},
 	centered = true,
 	zoom = 1,
+	camera = DEFAULT_CAMERA_SETTINGS,
 	collisionLayer = 1,
 	collisionMask = PHYSICS_ALL_LAYERS,
 	friction = 0.6,
@@ -1485,6 +1506,7 @@ SceneData_Destroy :: proc(scene: ^SceneData, allocator := context.allocator) {
 		UISettings_Destroy(&node.ui)
 		StateMachineSettings_Destroy(&node.stateMachine)
 		delete(node.viewCamera)
+		delete(node.cameraTarget)
 		delete(node.touchActions)
 		delete(node.shader)
 		for p in node.shaderParams { delete(p.name); delete(p.value) }
@@ -1720,6 +1742,7 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 	node.color = attrColor(doc, element, "color", DEFAULT_SCENE_NODE.color)
 	node.centered = attrBool(doc, element, "centered", true)
 	node.zoom = attrF32(doc, element, "zoom", 1)
+	parseCameraSettings(doc, element, &node)
 	node.animations = make([dynamic]AnimationData)
 	node.autoplay = cloneAttr(doc, element, "autoplay", "")
 	node.animationSet = cloneAttr(doc, element, "animations", "")
@@ -2093,6 +2116,45 @@ childElements :: proc(doc: ^xml.Document, element: xml.Element_ID) -> []xml.Elem
 		}
 	}
 	return children[:]
+}
+
+// A Camera's follow, limit and shake attributes, and its target
+@(private="file")
+parseCameraSettings :: proc(doc: ^xml.Document, element: xml.Element_ID, node: ^SceneNodeData) {
+	d := DEFAULT_CAMERA_SETTINGS
+	node.camera = {
+		follow = {
+			mode = attrEnum(doc, element, "followMode", d.follow.mode),
+			smoothing = max(attrF32(doc, element, "smoothing", d.follow.smoothing), 0),
+			smoothTime = max(attrF32(doc, element, "smoothTime", d.follow.smoothTime), 0),
+			speed = max(attrF32(doc, element, "followSpeed", d.follow.speed), 0),
+			maxSpeed = max(attrF32(doc, element, "maxSpeed", d.follow.maxSpeed), 0),
+			deadzone = {max(attrF32(doc, element, "deadzoneX", 0), 0), max(attrF32(doc, element, "deadzoneY", 0), 0)},
+			offset = {attrF32(doc, element, "targetOffsetX", 0), attrF32(doc, element, "targetOffsetY", 0)},
+			lookAhead = {max(attrF32(doc, element, "lookAheadX", 0), 0), max(attrF32(doc, element, "lookAheadY", 0), 0)},
+			lookAheadSmoothing = max(attrF32(doc, element, "lookAheadSmoothing", d.follow.lookAheadSmoothing), 0),
+		},
+		shake = {
+			strength = max(attrF32(doc, element, "shakeStrength", d.shake.strength), 0),
+			duration = max(attrF32(doc, element, "shakeDuration", d.shake.duration), 0),
+			frequency = max(attrF32(doc, element, "shakeFrequency", d.shake.frequency), 0),
+		},
+	}
+	keys := [CameraSide]string{.Left = "limitLeft", .Top = "limitTop", .Right = "limitRight", .Bottom = "limitBottom"}
+	for key, side in keys {
+		text, found := xml.find_attribute_val_by_key(doc, element, key)
+		if !found do continue
+		value, ok := strconv.parse_f32(text)
+		if !ok do continue
+		node.camera.limits += {side}
+		switch side {
+		case .Left:   node.camera.limitMin.x = value
+		case .Top:    node.camera.limitMin.y = value
+		case .Right:  node.camera.limitMax.x = value
+		case .Bottom: node.camera.limitMax.y = value
+		}
+	}
+	node.cameraTarget = cloneAttr(doc, element, "target", "")
 }
 
 @(private="file")

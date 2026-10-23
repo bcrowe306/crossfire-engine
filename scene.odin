@@ -394,8 +394,8 @@ Updates the scene for one frame. The game calls it (as `scene->update`) for its 
 
 In order: expired debug shapes go, the add and remove queues are applied, new physics nodes get
 their bodies, scripts get `ready`, physics steps (unless paused), every node that may process
-updates (its `update`, then its script's), tweens advance, then the camera's pan and bounds are
-applied.
+updates (its `update`, then its script's), tweens advance, then the camera follows its follow
+target, its pan advances and its bounds are applied.
 
 Inputs:
 - scene: The scene
@@ -437,8 +437,8 @@ Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 	// Bones aimed by IK chains, after the Animator and tweens moved them (skeleton.odin)
 	if len(scene.ikChains) > 0 do Scene_SolveIK(scene)
 
-	// After nodes have moved the camera (e.g. following a player), advance any pan and keep
-	// it inside its bounds
+	// After nodes have moved (the camera's follow target too), the camera follows its target,
+	// advances any pan and stays inside its bounds
 	// Camera zones and zooms (camera_tools.odin), then the clamp, then parallax layers follow
 	CameraTools_Update(scene, deltaTime)
 	if scene.camera != nil && scene.game != nil {

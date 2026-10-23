@@ -471,9 +471,10 @@ buildNodes :: proc(scene: ^Scene, nodes: []SceneNodeData, projectDir: string, al
 
 		case .Camera:
 			camera := CreateNode(scene, Camera2D)
-			initCameraEvents(camera)
+			initCamera(camera)
 			camera.zoom = node.zoom
-			camera.follow = DEFAULT_CAMERA_FOLLOW
+			Camera2D_ApplySettings(camera, node.camera)
+			if node.cameraTarget != "" do Camera2D_SetFollowTargetPath(camera, node.cameraTarget)
 			camera.offset = scene.game.size * 0.5
 			if scene.camera == nil do scene.camera = camera
 			n = camera

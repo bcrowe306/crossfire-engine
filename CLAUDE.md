@@ -88,7 +88,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `transform.odin` | `Transform2D` (2x3 matrix) math; node world transforms, `Node_SetParent` / `Node_AddChild`, screen positions; the draw transform and tint |
 | `primitives.odin` | Shapes and `DrawTexture`, in the drawing node's local space |
 | `text_primitives.odin` | `DrawText`, `DrawTextCentered`, `DrawTextWrapped`, `MeasureText`; positioned and scaled by the draw transform, never rotated |
-| `camera.odin` | `Camera2D` node (looks at its world position; offset, zoom, bounds), follow modes, timed pans |
+| `camera.odin` | `Camera2D` node (looks at its world position; offset, zoom, bounds or per-side limits: `Camera2D_SetLimit` / `ClearLimit` / `GetLimits`), follow modes with offset and look-ahead (`CameraFollow`), a **follow target** (`Camera2D_SetFollowTarget` / `SetFollowTargetPath` / `GetFollowTarget`), shake settings (`CameraShakeSettings`, `Camera2D_Shake` with no strength or duration), a Camera node's settings (`CameraSettings`, `Camera2D_ApplySettings`), timed pans |
+| `camera_test.odin` | Tests: following a moving target (snapping on first, trailing, pans pausing it, a removed target), offset and look-ahead (still, both ways, eased, a zero delta), per-side limits with zoom (one side, centered between two, freeing, SetBounds), a scene file's camera (settings parsed and built, a second camera following, a missing target, limits, shake settings with a frequency) |
 | `localization.odin` | **Localization**: CSV translation tables (assets of kind "Translation", Godot's layout: `key,en,fr`), `Tr(key)`, `Tr_Text` ("@key" Labels and Menu items translate as they draw), `Locale_Set` / `Get` / `List` / `System`, the project's `locale` |
 | `localization_test.odin` | Tests: tables (quotes, comments, line breaks), merging, fallbacks, region matching, "@" text, a project's tables and locale |
 | `debug.odin` | **Debug drawing**: `Debug_Line` / `Rect` / `Circle` / `Text` (world space, over the scene, for a frame or `seconds`), `Debug_Clear`; the **debug overlay** (`Game.debugOverlay`, F10 with dev keys: fps, frame times, the scene's counts), `Game_GetFrameStats` |
@@ -361,7 +362,22 @@ after they finish. Time past a group's end carries into the next group and loop.
   with `GetDrawTransform()`.
 - **Camera:** `scene.camera` is a `Camera2D` node. It looks at its world position, and its world
   rotation turns the view; parent it to a node to follow that node. `Camera2D_Follow`, `MoveTo`
-  and bounds move the camera node (`Camera2D_SetTarget`).
+  and bounds move the camera node (`Camera2D_SetTarget`: the looked-at position, not the follow
+  target).
+- **Follow targets** (camera.odin, 2026-10-23): `followTarget` (a node, checked by id before each
+  use: `Camera2D_GetFollowTarget`) or `followTargetPath` (resolved lazily from the camera with
+  `Node_FindPath`, again whenever the node is gone, so a node spawned later is found; one warning
+  while it's missing). The scene's camera follows in `Camera2D_Update` (after every node and the
+  camera tools' zones, before the pan and the clamp); other cameras (CameraViews') in their own
+  `update` (`cameraNodeUpdate`, set by `initCamera` for Scene_CreateCamera and scene files), so
+  they may lag a frame. The first frame it finds the node it snaps onto it (plus the offset); it
+  follows the node's **render** position (smoothed bodies don't jitter). Offset and look-ahead
+  are in `Camera2D_Follow` itself (`CameraLookAhead`: velocity from successive positions, full
+  `lookAhead` past `CAMERA_LOOK_AHEAD_MIN_SPEED`, eased), so code following by hand gets them
+  too. **Limits** are the old bounds plus `freeSides` (zero: all four, so `Camera2D_SetBounds`
+  and zones mean what they did); a Camera node's `CameraSettings.limits` says which sides are on.
+  A shake's `frequency` (`shakeSettings`) eases between random points instead of a new one each
+  frame.
 
 **Node types** embed `using node: e.Node` as their **first** field. Casting and node allocation both
 depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
@@ -1086,6 +1102,14 @@ comment. What was needed, and why:
   `spacing`, in scene and `.anim.xml` files; nodes and animation files lose theirs (migrated when
   parsed). `SceneNodeData` has no `columns`, `rows`, `fps`, `loop`, `playMode`, `margin`,
   `spacing` any more; `AnimationSetData` no `texture` or grid. `DEFAULT_ANIMATION_FPS` (8).
+  Added to 14 without a version of its own (older readers ignore the attributes, and files
+  without them mean what they did): a Camera's `target` and settings (`SceneNodeData.camera`, a
+  `CameraSettings`, and `cameraTarget`): `followMode`, `smoothing`, `smoothTime`, `followSpeed`,
+  `maxSpeed`, `deadzoneX` / `Y`, `targetOffsetX` / `Y`, `lookAheadX` / `Y`,
+  `lookAheadSmoothing`, `limitLeft` / `Top` / `Right` / `Bottom` (present: that side limited),
+  `shakeStrength`, `shakeDuration`, `shakeFrequency`. Attribute names are global across kinds
+  (the parser reads every one for every node), so they avoid the others' (`deadzone` is a touch
+  control's).
 - **Format version 13** adds every node's `processMode`, `blendMode`, `zIndex`, `ySort` and
   `groups` (comma-separated); a component instance keeps its root's values unless it sets them.
   CollisionShape `oneWay`; LDtkLevel `oneWayValues`, `areaValues` and `<entity>`'s `make`,

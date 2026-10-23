@@ -1,14 +1,21 @@
 package crossfire
 
+import "core:log"
 import "core:math"
 import "core:math/rand"
+import "core:strings"
+import sdl "vendor:sdl3"
 
 /*
 2D camera support for scenes.
 
 A camera is a node: it looks at its own world position, and its world rotation turns the view.
-Parent it to a player and the view follows the player with no code; or leave it top-level and
-move it with `Camera2D_Follow` (smoothed) or `Camera2D_MoveTo` (timed pans). A scene draws every
+Parent it to a player and the view follows the player rigidly with no code; give it a follow
+target (`Camera2D_SetFollowTarget`, or a Camera node's Target in the editor) and it eases after
+that node by itself, with its follow settings (`CameraFollow`: mode, dead zone, offset,
+look-ahead); or move it from code with `Camera2D_Follow` (smoothed) or `Camera2D_MoveTo` (timed
+pans). Limits (`Camera2D_SetBounds`, `Camera2D_SetLimit`: any of the four sides) keep the view
+inside the level. A scene draws every
 layer not listed in `scene.screenLayers` through its current camera (`scene.camera`); layers in
 `scene.screenLayers` (HUD, menus) are drawn in screen space.
 
@@ -42,13 +49,15 @@ Example:
 		// Option 1: a camera that's rigidly attached to the player
 		//	camera := e.Scene_CreateCamera(scene, parent = player)
 
-		// Option 2: a top-level camera that eases after the player and stays inside the level
+		// Option 2: a top-level camera that eases after the player by itself (looking ahead the
+		// way it moves) and stays inside the level
 		camera := e.Scene_CreateCamera(scene)
 		camera.follow.mode = .SmoothDamp
 		camera.follow.smoothTime = 0.3
 		camera.follow.deadzone = {200, 120}
+		camera.follow.lookAhead = {120, 0}
 		e.Camera2D_SetBounds(camera, {0, 0}, WORLD_SIZE)
-		e.Camera2D_SnapTo(camera, player.position)
+		e.Camera2D_SetFollowTarget(camera, player)
 		return scene
 	}
 
@@ -64,9 +73,10 @@ Example:
 			case .KEY_DOWN:
 				// Cinematic pan to the center of the level. Following pauses until it ends
 				if event.key.scancode == .C do e.Camera2D_MoveTo(camera, WORLD_SIZE * 0.5, 1.5, .InOutCubic)
+				// A shake with the camera's shake settings
+				if event.key.scancode == .S do e.Camera2D_Shake(camera)
 			}
 		}
-		e.Camera2D_Follow(camera, e.Node_GetWorldPosition(node), deltaTime)
 	}
 
 	Player_draw :: proc(node: ^e.Node, renderer: ^sdl.Renderer) {
@@ -92,8 +102,9 @@ CameraFollowMode :: enum {
 }
 
 /*
-Settings for `Camera2D_Follow`. Each mode only reads its own strength setting;
-`deadzone` applies to every mode, `maxSpeed` to every mode but `.Snap` (which always jumps).
+Settings for `Camera2D_Follow` (and a camera's follow target, which uses it). Each mode only
+reads its own strength setting; `deadzone`, `offset` and `lookAhead` apply to every mode,
+`maxSpeed` to every mode but `.Snap` (which always jumps).
 */
 CameraFollow :: struct {
 	// How it eases toward the position
@@ -109,19 +120,93 @@ CameraFollow :: struct {
 	// Size of a box, in world units and centered on the camera, that the followed position can
 	// move inside without moving the camera. {0, 0} disables it
 	deadzone: [2]f32,
+	// Where the camera aims relative to the followed position, in world units ({0, -40}: a little
+	// above a player)
+	offset: [2]f32,
+	// How far ahead the camera looks, in world units on each axis, in the direction the followed
+	// position moves (back to {0, 0} while it stands still). {0, 0} disables it
+	lookAhead: [2]f32,
+	// How quickly the look-ahead swings to a new direction, like `smoothing` (higher is quicker);
+	// 0 swings at once
+	lookAheadSmoothing: f32,
 }
 
-// The follow settings new cameras get: `.Exponential` with a smoothing of 6, no deadzone or speed cap
+// The follow settings new cameras get: `.Exponential` with a smoothing of 6, no deadzone, speed
+// cap, offset or look-ahead
 DEFAULT_CAMERA_FOLLOW :: CameraFollow{
 	mode = .Exponential,
 	smoothing = 6,
 	smoothTime = 0.25,
 	speed = 600,
+	lookAheadSmoothing = 3,
+}
+
+// The followed position must move faster than this (world units per second) for the look-ahead to
+// lean that way
+CAMERA_LOOK_AHEAD_MIN_SPEED :: 10
+
+// A side of a camera's limits (`Camera2D_SetLimit`)
+CameraSide :: enum {
+	// The view's left edge stays right of `Camera2D.min.x`
+	Left,
+	// The view's top edge stays below `Camera2D.min.y`
+	Top,
+	// The view's right edge stays left of `Camera2D.max.x`
+	Right,
+	// The view's bottom edge stays above `Camera2D.max.y`
+	Bottom,
+}
+
+// Some sides of a camera's limits
+CameraSides :: bit_set[CameraSide]
+
+// Every side: bounds that limit all four (`Camera2D_SetBounds`)
+CAMERA_ALL_SIDES :: CameraSides{.Left, .Top, .Right, .Bottom}
+
+/*
+How a camera shakes when `Camera2D_Shake` is given no strength or duration, and how fast every
+shake of it jitters.
+*/
+CameraShakeSettings :: struct {
+	// Largest offset, in screen pixels (game coordinates)
+	strength: f32,
+	// Seconds until it settles
+	duration: f32,
+	// New positions per second, eased between; 0 jumps to a new one every frame
+	frequency: f32,
+}
+
+// The shake new cameras get: 4 px for 0.2 s, a new position every frame
+DEFAULT_CAMERA_SHAKE_SETTINGS :: CameraShakeSettings{strength = 4, duration = 0.2}
+
+/*
+A Camera node's settings as a scene file stores them (`SceneNodeData.camera`; its zoom and
+follow target are fields of their own). `Camera2D_ApplySettings` gives them to a camera.
+*/
+CameraSettings :: struct {
+	// How it follows its target (or `Camera2D_Follow`'s position)
+	follow: CameraFollow,
+	// The sides it can't show past ({} for none)
+	limits: CameraSides,
+	// The left (x) and top (y) limits, in world pixels
+	limitMin: [2]f32,
+	// The right (x) and bottom (y) limits, in world pixels
+	limitMax: [2]f32,
+	// How `Camera2D_Shake` shakes it without a strength or duration
+	shake: CameraShakeSettings,
+}
+
+// A Camera node's settings when its scene file says nothing: the default follow and shake, no limits
+DEFAULT_CAMERA_SETTINGS :: CameraSettings{
+	follow = DEFAULT_CAMERA_FOLLOW,
+	shake = DEFAULT_CAMERA_SHAKE_SETTINGS,
 }
 
 /*
 A camera node. It looks at its world position (`Camera2D_GetTarget`), and its world rotation
-turns the view. Create one with `Scene_CreateCamera`.
+turns the view. Create one with `Scene_CreateCamera`. With a follow target
+(`Camera2D_SetFollowTarget` / `SetFollowTargetPath`) it moves there by itself every frame;
+`Camera2D_GetTarget` / `SetTarget` are about the position it looks at, not that node.
 
 A zero-initialized Camera2D also works as a plain value outside a scene: a zoom of 0 is treated
 as 1 and following snaps.
@@ -134,20 +219,41 @@ Camera2D :: struct {
 	// Scale factor. 1 is unscaled, 2 shows everything twice as big, 0.5 half as big
 	zoom: f32,
 
-	// When true, the camera's target is clamped every frame so the view stays inside `min..max`.
-	// Set with `Camera2D_SetBounds`. Rotation is not taken into account, so a rotated view can
-	// show slightly past the bounds at its corners
+	// When true, the camera's target is clamped every frame so the view stays inside `min..max`
+	// (on the sides not in `freeSides`). Set with `Camera2D_SetBounds` or `Camera2D_SetLimit`.
+	// Rotation is not taken into account, so a rotated view can show slightly past the bounds
+	// at its corners
 	bounded: bool,
 	// Top-left corner of the world boundary, used when `bounded` is true
 	min: [2]f32,
 	// Bottom-right corner of the world boundary, used when `bounded` is true
 	max: [2]f32,
+	// Sides the bounds don't limit ({}: all four limit). `Camera2D_SetLimit` and
+	// `Camera2D_ClearLimit` change one side
+	freeSides: CameraSides,
 
-	// How `Camera2D_Follow` eases toward the followed position
+	// How `Camera2D_Follow` (and the follow target) eases toward the followed position
 	follow: CameraFollow,
+	// How `Camera2D_Shake` shakes it when given no strength or duration, and how fast every
+	// shake jitters
+	shakeSettings: CameraShakeSettings,
+	// The path to the node it follows by itself, from the camera (as `Node_FindPath` reads it:
+	// "../Player"); "" for none. Set with `Camera2D_SetFollowTargetPath` (scene files' `target`)
+	followTargetPath: string,
 
 	// Internal state; read it if useful but don't modify it
 
+	// The node it follows (`Camera2D_SetFollowTarget`, or found from `followTargetPath`), checked
+	// by id before each use: read it with `Camera2D_GetFollowTarget`
+	followTarget: ^Node,
+	// The followed node's id
+	followTargetId: EntityId,
+	// It has snapped onto its follow target (the first frame it found it)
+	followStarted: bool,
+	// A missing follow target was reported
+	followWarned: bool,
+	// The look-ahead now, in world units, and the followed position last frame
+	lookAhead: CameraLookAhead,
 	// Current follow velocity in world units per second (.SmoothDamp)
 	velocity: [2]f32,
 	// Active `Camera2D_MoveTo` pan
@@ -162,19 +268,38 @@ Camera2D :: struct {
 	onShakeFinished: EventSubject `event:"A shake (Camera2D_Shake) settled"`,
 }
 
-// Prepares a camera's event subjects (cameras made by Scene_CreateCamera and scene files)
+// Prepares a camera made by Scene_CreateCamera or a scene file: its event subjects, its update
+// (following its target when it isn't the scene's camera) and its default settings
 @(private)
-initCameraEvents :: proc(camera: ^Camera2D) {
+initCamera :: proc(camera: ^Camera2D) {
 	EventSubject_Init(&camera.onPanFinished, Node_GetAllocator(camera))
 	EventSubject_Init(&camera.onShakeFinished, Node_GetAllocator(camera))
+	camera.update = cameraNodeUpdate
+	camera.zoom = 1
+	camera.follow = DEFAULT_CAMERA_FOLLOW
+	camera.shakeSettings = DEFAULT_CAMERA_SHAKE_SETTINGS
 }
 
 // State of a `Camera2D_Shake`
 CameraShake :: struct {
 	// Screen pixels at the start, seconds in all, seconds left
 	strength, duration, left: f32,
+	// New positions per second (0: every frame), and how far it is from `from` to `to` (0..1)
+	frequency, phase: f32,
+	// The positions it eases between (unit directions; with a frequency)
+	from, to: [2]f32,
 	// The view's offset this frame, in screen pixels
 	offset: [2]f32,
+}
+
+// A camera's look-ahead (`CameraFollow.lookAhead`) as it follows
+CameraLookAhead :: struct {
+	// How far it looks ahead now, in world units
+	offset: [2]f32,
+	// The followed position last frame
+	last: [2]f32,
+	// `last` holds a position
+	started: bool,
 }
 
 // State of a `Camera2D_MoveTo` pan
@@ -209,9 +334,7 @@ Example:
 */
 Scene_CreateCamera :: proc(scene: ^Scene, parent: ^Node = nil) -> ^Camera2D {
 	camera := CreateNode(scene, Camera2D)
-	initCameraEvents(camera)
-	camera.zoom = 1
-	camera.follow = DEFAULT_CAMERA_FOLLOW
+	initCamera(camera)
 	if scene.game != nil {
 		camera.offset = scene.game.size * 0.5
 		if parent == nil do camera.position = camera.offset
@@ -278,16 +401,205 @@ Camera2D_SetBounds :: proc(camera: ^Camera2D, min, max: [2]f32) {
 	camera.bounded = true
 	camera.min = min
 	camera.max = max
+	camera.freeSides = {}
 }
 
 /*
-Removes the boundaries set with `Camera2D_SetBounds`, letting the camera move freely.
+Removes the boundaries set with `Camera2D_SetBounds` or `Camera2D_SetLimit`, letting the camera
+move freely.
 
 Inputs:
 - camera: The camera
 */
 Camera2D_ClearBounds :: proc(camera: ^Camera2D) {
 	camera.bounded = false
+	camera.freeSides = {}
+}
+
+/*
+Limits one side of the view: the camera never shows past `value` on that side (left of it for
+`.Left`, above it for `.Top`, and so on), whatever its zoom. The other sides keep their limits,
+or stay free on a camera that had none. With both sides of an axis limited and closer together
+than the view is wide, the view is centered between them.
+
+Inputs:
+- camera: The camera
+- side: The side to limit
+- value: The limit, in world pixels (an x for `.Left` and `.Right`, a y for `.Top` and `.Bottom`)
+
+Example:
+	// Given: camera: ^e.Camera2D
+	// A side-scroller: never below the ground or left of the level's start
+	e.Camera2D_SetLimit(camera, .Left, 0)
+	e.Camera2D_SetLimit(camera, .Bottom, 720)
+*/
+Camera2D_SetLimit :: proc(camera: ^Camera2D, side: CameraSide, value: f32) {
+	if !camera.bounded {
+		camera.bounded = true
+		camera.freeSides = CAMERA_ALL_SIDES
+	}
+	camera.freeSides -= {side}
+	switch side {
+	case .Left:   camera.min.x = value
+	case .Top:    camera.min.y = value
+	case .Right:  camera.max.x = value
+	case .Bottom: camera.max.y = value
+	}
+}
+
+/*
+Frees one side of the view from its limit (`Camera2D_SetLimit`, `Camera2D_SetBounds`); the other
+sides keep theirs. Freeing the last one leaves the camera unbounded.
+
+Inputs:
+- camera: The camera
+- side: The side to free
+*/
+Camera2D_ClearLimit :: proc(camera: ^Camera2D, side: CameraSide) {
+	if !camera.bounded do return
+	camera.freeSides += {side}
+	if camera.freeSides == CAMERA_ALL_SIDES do Camera2D_ClearBounds(camera)
+}
+
+/*
+The sides the camera's view is limited on (none when it isn't bounded).
+
+Inputs:
+- camera: The camera
+
+Returns:
+- The limited sides
+*/
+Camera2D_GetLimits :: proc(camera: ^Camera2D) -> CameraSides {
+	return camera.bounded ? CAMERA_ALL_SIDES - camera.freeSides : {}
+}
+
+/*
+Gives a camera a Camera node's settings, as the loader does for scene files: its follow settings,
+its limits (replacing any bounds; no sides: unbounded) and its shake settings. Its zoom and follow
+target are set apart (`camera.zoom`, `Camera2D_SetFollowTargetPath`).
+
+Inputs:
+- camera: The camera
+- settings: The settings
+
+Example:
+	// Given: camera: ^e.Camera2D
+	settings := e.DEFAULT_CAMERA_SETTINGS
+	settings.limits = {.Left, .Right}
+	settings.limitMax = {3840, 0}
+	e.Camera2D_ApplySettings(camera, settings)
+*/
+Camera2D_ApplySettings :: proc(camera: ^Camera2D, settings: CameraSettings) {
+	camera.follow = settings.follow
+	camera.shakeSettings = settings.shake
+	camera.min, camera.max = settings.limitMin, settings.limitMax
+	camera.bounded = settings.limits != {}
+	camera.freeSides = camera.bounded ? CAMERA_ALL_SIDES - settings.limits : {}
+}
+
+/*
+Makes the camera follow a node by itself: every frame it eases toward the node's (drawn)
+position using `camera.follow` (offset, look-ahead and dead zone included), then its limits
+apply. On the first frame it snaps onto it, so a scene starts with the node in view. Pass nil to
+stop following. A pan (`Camera2D_MoveTo`) pauses the following until it ends.
+
+The scene's camera follows after every node has updated (`Scene_Update`); another camera (one a
+`CameraView` shows) in its own update, so it may lag a frame behind a node updated after it.
+Removing the node stops the following; the camera stays where it is.
+
+Inputs:
+- camera: The camera
+- target: The node to follow, or nil
+
+Example:
+	// Given: camera: ^e.Camera2D, hero: ^e.Node
+	camera.follow.mode = .SmoothDamp
+	camera.follow.offset = {0, -40}
+	e.Camera2D_SetFollowTarget(camera, hero)
+*/
+Camera2D_SetFollowTarget :: proc(camera: ^Camera2D, target: ^Node) {
+	camera.followTargetPath = ""
+	camera.followTarget = target
+	camera.followTargetId = target != nil ? target.id : {}
+	camera.followStarted = false
+	camera.followWarned = false
+	camera.lookAhead = {}
+}
+
+/*
+Makes the camera follow the node at a path from it (as `Node_FindPath` reads it: "../Player",
+"/World/Hero"), like a scene file's `target`. The node is looked for when the camera next
+updates, and again whenever it's gone (a node spawned later is found then). "" stops following.
+See `Camera2D_SetFollowTarget`.
+
+Inputs:
+- camera: The camera
+- path: The path from the camera (copied into the camera's memory)
+
+Example:
+	// Given: camera: ^e.Camera2D
+	e.Camera2D_SetFollowTargetPath(camera, "../Hero")
+*/
+Camera2D_SetFollowTargetPath :: proc(camera: ^Camera2D, path: string) {
+	Camera2D_SetFollowTarget(camera, nil)
+	camera.followTargetPath = strings.clone(path, Node_GetAllocator(camera))
+}
+
+/*
+The node the camera follows by itself (`Camera2D_SetFollowTarget`, or found from its
+`followTargetPath`), or nil when there's none or it's gone.
+
+Inputs:
+- camera: The camera
+
+Returns:
+- The node, or nil
+*/
+Camera2D_GetFollowTarget :: proc(camera: ^Camera2D) -> ^Node {
+	if camera.followTarget != nil {
+		// Checked by id: a removed node's memory is gone
+		if camera.scene == nil || Scene_GetNode(camera.scene, camera.followTargetId) == camera.followTarget do return camera.followTarget
+		camera.followTarget = nil
+		camera.followStarted = false
+	}
+	if camera.followTargetPath == "" do return nil
+	found := Node_FindPath(camera, camera.followTargetPath)
+	if found == nil || found == cast(^Node)camera do return nil
+	camera.followTarget, camera.followTargetId = found, found.id
+	return found
+}
+
+// Follows the camera's target this frame, if it has one (after the nodes moved)
+@(private="file")
+cameraFollowTarget :: proc(camera: ^Camera2D, deltaTime: f64) {
+	if camera.followTarget == nil && camera.followTargetPath == "" do return
+	target := Camera2D_GetFollowTarget(camera)
+	if target == nil {
+		if !camera.followWarned && camera.followTargetPath != "" {
+			camera.followWarned = true
+			log.warnf("Camera %s: no node at its target path %q (yet)", camera.name, camera.followTargetPath)
+		}
+		return
+	}
+	// Where it's drawn: a body smoothed between physics steps doesn't jitter in the view
+	position := Node_GetRenderWorldTransform(target).origin
+	if !camera.followStarted {
+		camera.followStarted = true
+		Camera2D_SnapTo(camera, position + camera.follow.offset)
+		camera.lookAhead = {last = position, started = true}
+		return
+	}
+	Camera2D_Follow(camera, position, deltaTime)
+}
+
+// A camera's own update: one that isn't its scene's camera follows its target here (the scene's
+// camera does in Camera2D_Update, after every node moved)
+@(private="file")
+cameraNodeUpdate :: proc(node: ^Node, _: []sdl.Event, deltaTime: f64) {
+	camera := cast(^Camera2D)node
+	if node.scene != nil && node.scene.camera == camera do return
+	if !camera.move.active do cameraFollowTarget(camera, deltaTime)
 }
 
 /*
@@ -351,8 +663,11 @@ Camera2D_ScreenToWorld :: proc(camera: ^Camera2D, screen: [2]f32) -> [2]f32 {
 Eases the camera toward a world position using the settings in `camera.follow`.
 Call once per frame, e.g. from the update of the node being followed.
 
-Does nothing while a `Camera2D_MoveTo` pan is running, so pans aren't interrupted.
-Frame rate independent in every mode. A camera parented to the followed node doesn't need this.
+The camera aims at `position + follow.offset`, plus the look-ahead: up to `follow.lookAhead` in
+the direction the position moves between calls (eased by `follow.lookAheadSmoothing`, back to
+none while it stands still). Does nothing while a `Camera2D_MoveTo` pan is running, so pans
+aren't interrupted. Frame rate independent in every mode. A camera parented to the followed node
+doesn't need this, nor one following a node by itself (`Camera2D_SetFollowTarget`).
 
 Inputs:
 - camera: The camera to move
@@ -369,17 +684,36 @@ Camera2D_Follow :: proc(camera: ^Camera2D, position: [2]f32, deltaTime: f64) {
 	settings := &camera.follow
 	current := Camera2D_GetTarget(camera)
 
+	// The look-ahead leans the way the position moves (by its velocity since the last call)
+	ahead := &camera.lookAhead
+	if settings.lookAhead != {} && ahead.started && dt > 0 {
+		velocity := (position - ahead.last) / dt
+		for axis in 0..<2 {
+			aim: f32 = 0
+			if abs(velocity[axis]) > CAMERA_LOOK_AHEAD_MIN_SPEED do aim = math.sign(velocity[axis]) * settings.lookAhead[axis]
+			if settings.lookAheadSmoothing <= 0 {
+				ahead.offset[axis] = aim
+			} else {
+				ahead.offset[axis] += (aim - ahead.offset[axis]) * (1 - math.exp(-settings.lookAheadSmoothing * dt))
+			}
+		}
+	} else if settings.lookAhead == {} {
+		ahead.offset = {}
+	}
+	if dt > 0 || !ahead.started do ahead.last, ahead.started = position, true
+	followed := position + settings.offset + ahead.offset
+
 	// Inside the dead zone the camera holds still; outside it, aim for the point that puts
 	// the followed position back on the dead zone's edge
-	goal := position
+	goal := followed
 	for axis in 0..<2 {
 		half := settings.deadzone[axis] * 0.5
 		if half <= 0 do continue
-		diff := position[axis] - current[axis]
+		diff := followed[axis] - current[axis]
 		if abs(diff) <= half {
 			goal[axis] = current[axis]
 		} else {
-			goal[axis] = position[axis] - math.sign(diff) * half
+			goal[axis] = followed[axis] - math.sign(diff) * half
 		}
 	}
 
@@ -457,6 +791,7 @@ Camera2D_SnapTo :: proc(camera: ^Camera2D, position: [2]f32) {
 	Camera2D_SetTarget(camera, position)
 	camera.velocity = {}
 	camera.move.active = false
+	camera.lookAhead = {}
 }
 
 /*
@@ -473,7 +808,8 @@ Camera2D_IsMoving :: proc(camera: ^Camera2D) -> bool {
 }
 
 /*
-Advances an active `Camera2D_MoveTo` pan, then applies the camera's bounds.
+Follows the camera's follow target (if it has one), advances an active `Camera2D_MoveTo` pan,
+then applies the camera's bounds.
 
 The scene calls this automatically for its camera after its nodes update (engine-internal).
 
@@ -484,6 +820,7 @@ Inputs:
 */
 @(private)
 Camera2D_Update :: proc(camera: ^Camera2D, viewSize: [2]f32, deltaTime: f64) {
+	if !camera.move.active do cameraFollowTarget(camera, deltaTime)
 	if camera.move.active {
 		move := &camera.move
 		move.elapsed += f32(deltaTime)
@@ -508,24 +845,32 @@ never the camera node, so following, bounds and scripts reading its position are
 The game advances it in real time (`Camera2D_UpdateShake`, from Game_Update), so it keeps going
 through a hitstop (`Game_HitStop`).
 
+A strength or duration of 0 (or left out) takes the camera's `shakeSettings` (a Camera node's
+Shake settings in the editor), whose `frequency` sets how fast every shake of it jitters: that
+many new positions a second, eased between (0: a new one every frame).
+
 Inputs:
 - camera: The camera
-- strength: Largest offset, in screen pixels (game coordinates)
-- duration: Seconds until it settles
+- strength: Largest offset, in screen pixels (game coordinates); 0 for the camera's setting
+- duration: Seconds until it settles; 0 for the camera's setting
 
 Example:
 	e.Camera2D_Shake(node.scene.camera, 4, 0.2)
 */
-Camera2D_Shake :: proc(camera: ^Camera2D, strength, duration: f32) {
-	if camera == nil || duration <= 0 do return
+Camera2D_Shake :: proc(camera: ^Camera2D, strength: f32 = 0, duration: f32 = 0) {
+	if camera == nil do return
+	strength := strength > 0 ? strength : camera.shakeSettings.strength
+	duration := duration > 0 ? duration : camera.shakeSettings.duration
+	if duration <= 0 || strength <= 0 do return
 	current := camera.shake.duration > 0 ? camera.shake.strength * camera.shake.left / camera.shake.duration : 0
 	if strength < current do return
-	camera.shake = {strength = strength, duration = duration, left = duration}
+	camera.shake = {strength = strength, duration = duration, left = duration, frequency = max(camera.shakeSettings.frequency, 0), from = camera.shake.offset / strength, to = randomDirection()}
 }
 
 /*
-Moves a shake on by `deltaTime` real seconds: a new random offset, scaled by the square of the
-time left (strong at first, settling softly). Game_Update calls it for the current scene's camera.
+Moves a shake on by `deltaTime` real seconds: a new random offset (or, with a frequency, a step
+toward the next one), scaled by the square of the time left (strong at first, settling softly).
+Game_Update calls it for the current scene's camera.
 */
 @(private)
 Camera2D_UpdateShake :: proc(camera: ^Camera2D, deltaTime: f64) {
@@ -538,12 +883,28 @@ Camera2D_UpdateShake :: proc(camera: ^Camera2D, deltaTime: f64) {
 	if shake.left == 0 do Event_Notify(&camera.onShakeFinished, camera, nil)
 	fade := shake.left / shake.duration
 	amount := shake.strength * fade * fade
+	if shake.frequency <= 0 {
+		shake.offset = randomDirection() * amount
+		return
+	}
+	shake.phase += f32(deltaTime) * shake.frequency
+	for shake.phase >= 1 {
+		shake.phase -= 1
+		shake.from, shake.to = shake.to, randomDirection()
+	}
+	shake.offset = (shake.from + (shake.to - shake.from) * shake.phase) * amount
+}
+
+// A random unit direction
+@(private="file")
+randomDirection :: proc() -> [2]f32 {
 	angle := rand.float32() * math.TAU
-	shake.offset = {math.cos(angle), math.sin(angle)} * amount
+	return {math.cos(angle), math.sin(angle)}
 }
 
 /*
-Adjusts the camera so the visible area stays inside its bounds. Does nothing if the camera is
+Adjusts the camera so the visible area stays inside its bounds, on the sides they limit (see
+`freeSides`), taking its zoom and the view's size into account. Does nothing if the camera is
 not bounded. Called by `Camera2D_Update`.
 
 Inputs:
@@ -558,12 +919,18 @@ Camera2D_ClampToBounds :: proc(camera: ^Camera2D, viewSize: [2]f32) {
 	// The view spans target - offset/zoom .. target + (viewSize - offset)/zoom
 	lo := camera.min + camera.offset / zoom
 	hi := camera.max - (viewSize - camera.offset) / zoom
+	lowSides := [2]CameraSide{.Left, .Top}
+	highSides := [2]CameraSide{.Right, .Bottom}
 	for axis in 0..<2 {
-		if lo[axis] > hi[axis] {
+		hasLo, hasHi := lowSides[axis] not_in camera.freeSides, highSides[axis] not_in camera.freeSides
+		if !hasLo && !hasHi do continue
+		if hasLo && hasHi && lo[axis] > hi[axis] {
 			// The world is smaller than the view on this axis: center it
 			target[axis] = (camera.min[axis] + camera.max[axis]) * 0.5 + (camera.offset[axis] - viewSize[axis] * 0.5) / zoom
 		} else {
-			clamped := clamp(target[axis], lo[axis], hi[axis])
+			clamped := target[axis]
+			if hasLo do clamped = max(clamped, lo[axis])
+			if hasHi do clamped = min(clamped, hi[axis])
 			if clamped != target[axis] {
 				// Pressed against a bound: drop the velocity so the camera doesn't stick to it
 				camera.velocity[axis] = 0
