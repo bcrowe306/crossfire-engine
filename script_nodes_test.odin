@@ -59,6 +59,10 @@ node_paths_find_children_parents_and_the_top_level :: proc(t: ^testing.T) {
 	testing.expect(t, Node_FindPath(hero, ".") == hero, "itself")
 	testing.expect(t, Node_FindPath(hero, "") == nil && Node_FindPath(hero, "Nope") == nil, "nothing")
 	testing.expect(t, Node_FindPath(hero, "..") == nil && Node_FindPath(hero, "../..") == nil, "not above the top level")
+	// Scene_FindNode takes the same paths from the top level ("/", the editor's PATH_ constants)
+	testing.expect(t, Scene_FindNode(scene, "/Hero/Arm/Hand") == hand && Scene_FindNode(scene, "/World") == world, "/ paths")
+	testing.expect(t, Scene_FindNode(scene, "/Arm") == nil && Scene_FindNode(scene, "Arm") == arm, "/Arm is a top-level Arm only")
+	testing.expect(t, Scene_FindNode(scene, "Hero/Arm/Hand") == hand, "a path without / as before")
 }
 
 @(test)

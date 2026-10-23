@@ -687,7 +687,9 @@ removeFromList :: proc(list: ^[dynamic]^Node, node: ^Node) {
 }
 
 /*
-Finds a node by its name, or by a path of names from a top-level node: "World/Ship/Flame".
+Finds a node by its name, or by a path of names from a top-level node: "World/Ship/Flame". A
+leading "/" says so ("/World/Ship", as `Node_FindPath` and the editor's `PATH_` constants write
+it): "/Ship" is the top-level Ship only, where "Ship" alone matches any node of that name.
 
 Inputs:
 - scene: The scene
@@ -702,6 +704,13 @@ Example:
 */
 Scene_FindNode :: proc(scene: ^Scene, path: string) -> ^Node {
 	lists := [2][]^Node{scene.nodes[:], scene.addQueue[:]}
+	// From the top level, said outright: a top-level node of that name
+	if len(path) > 1 && path[0] == '/' {
+		rest := path[1:]
+		first, _, below := strings.partition(rest, "/")
+		for list in lists do for node in list do if node.parent == nil && node.name == first do return below == "" ? node : Node_FindChild(node, below)
+		return nil
+	}
 	// A bare name matches anywhere in the tree
 	if strings.index_byte(path, '/') < 0 {
 		for list in lists do for node in list do if node.name == path do return node

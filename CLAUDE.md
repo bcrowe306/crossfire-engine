@@ -974,6 +974,10 @@ too. Editors call it for their previews. changed_textures_reload_in_place tests 
   type (a `^PhysicsBody` field takes a DynamicBody); missing or wrong: nil and a warning. The
   catalog's `hint` is the type's name. `SCENE_NODE_TYPES` (each kind's built type) and
   `SceneNodeKind_IsType` let editors offer the nodes that fit. script_nodes_test.odin.
+- **Paths from the top level** start with `/` in both `Node_FindPath` and `Scene_FindNode`
+  (2026-10-23: `Scene_FindNode` takes it too, as "the top-level node of that name", where a bare
+  name matches any node): the editor's generated `PATH_<SCENE>_...` constants are written that
+  way, so one constant works with either. script_nodes_test.odin.
 - Hooks are stored type-erased (`transmute` of `proc(^T)` to `proc(rawptr)`).
 - `Scene_Build(..., attachScripts = false)` is for the editor viewport, where scripts don't run.
 - **Several scripts per node** (2026-10-22): the first is `node.script`, the others
