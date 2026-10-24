@@ -711,10 +711,14 @@ take `audioTestLock` (SDL audio init/quit is process-wide).
   for good (the ground vanished; keeping them away from the edges crashed the editor once).
   Triangles are correct but slower (a whole 200 x 30 level at 1000 x 600: ~38 ms against 23).
   GPU renderers keep shared vertices.
-- **The editor writes LDtk files too** (its Level mode's LDtk tab, written back into the .ldtk and
-  .ldtkl files, kept valid against LDtk's schema): `LDtk_WatchFiles` and `Game_LoadLDtk`'s users
-  see its writes as they see LDtk's saves (the editor moves a file's modification time forward
-  when the clock didn't, so a write right after another is still seen).
+- **The editor writes LDtk files too** (its Level mode, an LDtk editor: edits kept in memory and
+  written into the .ldtk and .ldtkl files on Save, Play and exports, kept valid against LDtk's
+  schema): `LDtk_WatchFiles` and `Game_LoadLDtk`'s users see its writes as they see LDtk's saves
+  (the editor moves a file's modification time forward when the clock didn't, so a write right
+  after another is still seen). Its viewport and pictures show unsaved edits by putting a project
+  in the preview game's `Game.ldtk` before building (`LDtk_Parse` of the project file with the
+  `.ldtkl` levels' layers patched into their entries, which `parseLevels` reads in place of the
+  file): `Game_LoadLDtk` returns a project already there, so keep that lookup first.
 - **Hot reload** (`LDtk_WatchFiles`, dev runs only, from Game_Update): reloaded projects replace
   the game's; the old ones are kept to the end (`Game.ldtkRetired`: entity nodes point into
   them). Built nodes are updated in place, not rebuilt: tile layers, colors, backgrounds and the
