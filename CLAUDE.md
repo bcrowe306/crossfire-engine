@@ -952,8 +952,15 @@ light map after the last layer the camera draws (`Lighting_Apply`; screen layers
 unlit, the background before it is lit). The map is a render target the screen's size (the
 logical presentation's, else the viewport's: the editor's preview), cleared to the ambient
 color; each light's visibility polygon is a triangle fan whose vertex colors carry a linear
-falloff, drawn **alone into a scratch target with no blending, then added** to the map: added
-straight, SDL's software renderer drew shared triangle edges twice and left bright seams. The
+falloff. **On GPU renderers each fan is added straight into the map** (`BLENDMODE_ADD`): one
+target switch into the map and one out for the whole map, where drawing each light in a scratch
+target first cost two more switches a light, and on SDL's Vulkan renderer a switch can wait on
+the GPU (measured 2026-10-24, the demo's title scene with two lights, `profile_game.sh
+--renderer vulkan`: 1.15 ms a light, the frame 9.3 -> 5.7 ms mean). **SDL's software renderer
+still draws each fan alone into the scratch target with no blending, then adds it**: added
+straight, it drew shared triangle edges twice and left bright seams (`isSoftwareRenderer`).
+`lit_scenes_draw_alike_on_the_gpu` compares the two paths' pictures (shadow edges may differ
+by a pixel: the renderers round triangle edges differently). The
 map is drawn with `BLENDMODE_MOD`. Rays hit occluder edges with a little tolerance past their
 ends, or a ray through a corner slipped between two edges (a bright sliver). Both targets live
 on `Scene.lighting` and are freed by `Scene_Destroy`.

@@ -1,7 +1,9 @@
 #+build !js
 package crossfire
 
+import "core:log"
 import "core:math"
+import "core:sync"
 import "core:testing"
 import sdl "vendor:sdl3"
 
@@ -104,4 +106,81 @@ lit_scenes_draw_dark_outside_lights :: proc(t: ^testing.T) {
 	testing.expectf(t, pixel(surface, 100, 50) == 0, "behind the wall: %d", pixel(surface, 100, 50))
 	testing.expect_value(t, pixel(surface, 115, 5), u8(255))
 	free_all(context.temp_allocator)
+}
+
+// Two lamps overlapping, a wall: on the GPU every fan is added straight into the light map
+// (Lighting_Apply), on the software renderer through the scratch target; the pictures agree
+@(private="file")
+TWO_LAMPS :: `<scene formatVersion="13" name="S" lighting="true" ambient="#000000" bodyShadows="true">
+	<node kind="Light2D" name="Lamp" x="40" y="50" lightColor="#ffffff" energy="0.5" lightRadius="50" shadows="true"/>
+	<node kind="Light2D" name="Lamp2" x="70" y="50" lightColor="#ffffff" energy="0.5" lightRadius="50" shadows="true"/>
+	<node kind="LightOccluder" name="Wall" x="100" y="50" width="6" height="40"/>
+</scene>`
+
+// The lamps' picture on a white floor, as rows of the red channel
+@(private="file")
+drawTwoLamps :: proc(renderer: ^sdl.Renderer) -> [100][120]u8 {
+	game := testGame("testdata")
+	defer { Game_Destroy(game); free(game) }
+	game.resourceManager.renderer = renderer
+	game.renderer = renderer
+	scene := game->createScene("S")
+	data, _ := ParseScene(TWO_LAMPS)
+	defer SceneData_Destroy(&data)
+	Scene_Build(scene, &data, "testdata", attachScripts = false)
+	Floor :: struct { using node: Node }
+	floor := CreateNode(scene, Floor)
+	floor.draw = proc(node: ^Node, renderer: ^sdl.Renderer) {
+		r := sdl.FRect{0, 0, 120, 100}
+		DrawRectangle(renderer, &r, {255, 255, 255, 255})
+	}
+	Scene_ProcessQueues(scene)
+	sdl.SetRenderDrawColor(renderer, 0, 0, 0, 255)
+	sdl.RenderClear(renderer)
+	Scene_DrawWithView(scene, renderer, TRANSFORM2D_IDENTITY)
+	sdl.FlushRenderer(renderer)
+	out: [100][120]u8
+	surface := sdl.RenderReadPixels(renderer, nil)
+	if surface == nil do return out
+	defer sdl.DestroySurface(surface)
+	converted := sdl.ConvertSurface(surface, .ARGB8888)
+	defer sdl.DestroySurface(converted)
+	for y in 0 ..< 100 do for x in 0 ..< 120 {
+		out[y][x] = u8(((cast([^]u32)converted.pixels)[y * int(converted.pitch / 4) + x] >> 16) & 0xff)
+	}
+	return out
+}
+
+@(test)
+lit_scenes_draw_alike_on_the_gpu :: proc(t: ^testing.T) {
+	surface := sdl.CreateSurface(120, 100, .RGBA32)
+	defer sdl.DestroySurface(surface)
+	software := sdl.CreateSoftwareRenderer(surface)
+	defer sdl.DestroyRenderer(software)
+	soft := drawTwoLamps(software)
+	// Where the lamps overlap their light adds up: brighter than near one alone
+	testing.expectf(t, soft[50][55] > soft[50][15], "overlap %d against one lamp %d", soft[50][55], soft[50][15])
+	testing.expectf(t, soft[50][115] < 30, "behind the wall: %d", soft[50][115])
+
+	sync.guard(&gpuTestLock)
+	renderer, game := gpuGame()
+	if renderer == nil {
+		log.info("No GPU renderer here: skipping the GPU lighting test")
+		return
+	}
+	defer sdl.DestroyRenderer(renderer)
+	Game_Destroy(game)
+	free(game)
+	target := sdl.CreateTexture(renderer, RENDER_TARGET_FORMAT, .TARGET, 120, 100)
+	defer sdl.DestroyTexture(target)
+	_ = sdl.SetRenderTarget(renderer, target)
+	gpu := drawTwoLamps(renderer)
+	// The same picture: the renderers round triangle edges differently, so pixels on a shadow's
+	// edge may differ; everywhere else within a few levels
+	off := 0
+	for y in 0 ..< 100 do for x in 0 ..< 120 do if abs(int(gpu[y][x]) - int(soft[y][x])) > 6 do off += 1
+	testing.expectf(t, off < 120, "%d of 12000 pixels differ by more than 6 levels", off)
+	testing.expectf(t, gpu[50][55] > gpu[50][15], "the GPU's overlap %d against one lamp %d", gpu[50][55], gpu[50][15])
+	testing.expectf(t, abs(int(gpu[50][55]) - int(soft[50][55])) <= 6, "the overlap: GPU %d, software %d", gpu[50][55], soft[50][55])
+	testing.expectf(t, gpu[50][115] < 30, "behind the wall on the GPU: %d", gpu[50][115])
 }

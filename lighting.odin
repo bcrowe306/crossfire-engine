@@ -343,6 +343,12 @@ Lighting_Apply :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D
 	SetDrawState(TRANSFORM2D_IDENTITY)
 	RenderTarget_Begin(renderer, l.target, clear = true, clearColor = {l.ambient.r, l.ambient.g, l.ambient.b, 255})
 	sdl.SetTextureBlendMode(l.scratch.texture, sdl.BLENDMODE_ADD)
+	// GPU renderers add each light's fan straight into the map: two target switches for the whole
+	// map instead of two more per light (each switch can wait on the GPU: 1.1 ms a light on SDL's
+	// Vulkan renderer). Only SDL's software renderer draws a fan's shared edges twice when
+	// blending (bright seams), so it draws each fan alone into the scratch target first
+	software := isSoftwareRenderer(renderer)
+	if !software do sdl.SetRenderDrawBlendMode(renderer, sdl.BLENDMODE_ADD)
 	full := sdl.FRect{0, 0, size.x, size.y}
 	for node in scene.nodes {
 		if !Node_Is(node, Light2D) || !Node_IsVisibleInTree(node) do continue
@@ -369,8 +375,12 @@ Lighting_Apply :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D
 		n := i32(len(ring))
 		last := s.kind == .Spot ? n - 1 : n
 		for i in 0..<last do append(&indices, 0, i + 1, (i + 1) % n + 1)
-		// Drawn alone (overwriting), then added to the map
 		Trace_Scope("light_draw")
+		if !software {
+			sdl.RenderGeometry(renderer, nil, raw_data(vertices), i32(len(vertices)), raw_data(indices), i32(len(indices)))
+			continue
+		}
+		// Drawn alone (overwriting), then added to the map
 		sdl.SetRenderTarget(renderer, l.scratch.texture)
 		sdl.SetRenderDrawColor(renderer, 0, 0, 0, 255)
 		sdl.RenderClear(renderer)
