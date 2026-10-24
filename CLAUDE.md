@@ -179,7 +179,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `input_rebind_test.odin` | Tests: capturing keys, gamepad buttons and sticks (resting sticks ignored; no press while capturing), changing, resetting, text and saved bindings |
 | `input_test.odin` | Tests: key, mouse and wheel edges, focus loss, actions from keys, buttons and sticks (deadzones, strength, vectors), project file actions |
 | `particles.odin` | **Particle emitters**: `ParticleEmitter` node (`CreateParticleEmitter`), `ParticleSettings` (every setting; tags describe them for editors: `ParticleSettings_Fields`), `ColorRamp` (stops, `ColorRamp_Evaluate` / `Sort` / `AddStop` / `RemoveStop`), Start / Stop / Clear, text format (`ParticleSettings_Get` / `Set`, `FormatParticleSettings`) |
-| `particles_test.odin` | Tests: ramps, settings text round trip, cycles and bursts, world and local space, forces, collisions with the view, scene files, batched drawing (pixels) |
+| `particles_test.odin` | Tests: ramps, settings text round trip, the settings' groups (editors' categories), cycles and bursts, world and local space, forces, collisions with the view, scene files, batched drawing (pixels) |
 | `audio_nodes.odin` | **Sound nodes and mix buses**: `AudioPlayer` (a sound: volume, pitch, pan, loop, autostart), `AudioPlayer2D` (panned and faded by its position from the listener: the camera, else the game area's middle; `Audio_Positional`), `MusicPlayer` (streams a Music asset; fades, seek, position); `AudioSettings`; buses (`Game.buses`, Master first: `Audio_SetBuses` from project.xml, `Audio_AddBus`, `Audio_SetBusVolume` / `Pan` / `Mute`), `Audio_Output` (node × bus × Master, applied per track every frame) |
 | `audio_effects.odin` | **Bus effects**: `AudioEffect` (LowPass, HighPass, Echo, Reverb; bypass), `AudioEffectChain` per bus (`AudioEffects_Set` / `SetOne` / `Get` / `Process`), run in the bus's post-mix callback before its meter (Master's before its gains); `Audio_SetBusEffects` / `SetBusEffect` / `GetBusEffects` (audio_nodes.odin); `<effect>` children of `<bus>` |
 | `music_layers.odin` | **Adaptive music**: MusicPlayer layers (`MusicPlayer_AddLayer` / `RemoveLayer` / `SetLayerVolume` / `GetLayer`; `<layer>` children) started on the same sample (SDL3_mixer tags: `PlayTag`), `MusicPlayer_CrossfadeTo` (the old song fades out on its own track, freed when silent) |
@@ -1005,7 +1005,8 @@ too. Editors call it for their previews. changed_textures_reload_in_place tests 
   `<particles>` element of the fields that differ from `DEFAULT_PARTICLE_SETTINGS`, by reflection
   (`FormatParticleSettings`, `ParticleSettings_Set`), so **a new setting needs only the field**
   (with its tags and a default), plus a case in `ParticleSettings_Get` / `Set` for a new field type.
-  Field order is the editor's order; `group` starts a group.
+  Field order is the editor's order; `group` starts a group (Emission, GPU, Shape, Rotation, Color,
+  Motion, Forces, Collision: the editor's Particles tab has a category per group).
 - Each update moves the live particles first, then emits (new ones start at age 0), so those
   emitted at the start of a cycle die exactly as the next cycle starts.
 - Particles live in the world (positions there, emission turned by the node's world rotation) or,

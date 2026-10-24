@@ -260,7 +260,7 @@ ParticleSettings :: struct {
 	localSpace: bool `label:"Local space"`,
 	// Simulated and drawn on the graphics card (gpu_particles.odin: the GPU renderer; no
 	// collisions), with `gpuAmount` particles; elsewhere on the CPU with `amount`
-	gpu: bool `label:"On the GPU"`,
+	gpu: bool `label:"On the GPU" group:"GPU"`,
 	// Particles per cycle on the GPU
 	gpuAmount: int `min:"1" max:"200000" label:"GPU amount"`,
 

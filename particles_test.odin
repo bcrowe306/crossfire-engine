@@ -92,6 +92,14 @@ particle_settings_text_round_trip :: proc(t: ^testing.T) {
 		if f.ranged do testing.expectf(t, f.max > f.min, "%s range", f.name)
 	}
 	testing.expect_value(t, fields[0].group, "Emission")
+	// The groups, in order (editors' categories: the Crossfire Editor's Particles tab)
+	groups := make([dynamic]string, context.temp_allocator)
+	for f in fields do if f.group != "" do append(&groups, f.group)
+	testing.expect_value(t, len(groups), 8)
+	if len(groups) == 8 {
+		for want, i in ([]string{"Emission", "GPU", "Shape", "Rotation", "Color", "Motion", "Forces", "Collision"}) do testing.expect_value(t, groups[i], want)
+	}
+	for f in fields do if f.name == "gpu" do testing.expect_value(t, f.group, "GPU")
 }
 
 @(test)
