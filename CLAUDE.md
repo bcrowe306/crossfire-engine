@@ -1132,13 +1132,20 @@ The docs users read are on the website, **crossfireengine.io** (the workspace's
   (`scripts/build-api.mjs` with the site's `tools/docgen`, an Odin program reading `odin doc`'s
   output). **Every engine file belongs to an API area** (the site's `scripts/api-groups.json`): a
   new file needs an entry there, or the build complains, **and in the editor's
-  `ENGINE_API_AREAS`** (its engine_docs.odin: F1 in a code tab opens the declaration's page;
-  the editor's `engine_api_areas_match_the_website` test compares the two).
+  `ENGINE_API_AREAS`** (its engine_docs.odin, with the area's title and description: F1 in a
+  code tab opens the declaration's entry; the editor's `engine_api_areas_match_the_website` test
+  compares the two).
 - **The editor shows these doc comments too:** a hover over an engine procedure, type or
   constant in its code tabs renders the comment (the declaration, the summary, `Inputs:`,
-  `Returns:`, `Example:` as code), read from this source at run time (the editor's
-  engine_docs.odin, docgen's rules). Write them for both: the first line a summary that stands
-  alone, the sections in the format above.
+  `Returns:`, `Example:` as code), and its docs window carries the whole API reference offline,
+  laid out like the website's (the files' overviews, `doc.odin`'s package overview, every public
+  declaration), read from this source at run time (the editor's engine_docs.odin and docs.odin,
+  docgen's rules). Write them for both: the first line a summary that stands alone, the
+  sections in the format above.
+- **A new node kind needs a guide in the editor's manual:** a `## <Kind>` section on one of its
+  `docs/manual/nodes_*.md` pages (what it does, its inspector properties, the editor, code, an
+  example, API links) and an entry in its docs.odin's `DOCS_NODE_GUIDES`; the editor's
+  `docs_every_kind_has_a_page` test fails until both exist.
 - **Every `Example:` block is type-checked** on the site (`npm run docs && node
   scripts/check-examples.mjs`, run by its CI before deploying), with the `// Given:` convention
   above: an example that doesn't compile fails the deploy.
