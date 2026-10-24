@@ -3,6 +3,7 @@ package crossfire
 import "core:encoding/uuid"
 import "core:fmt"
 import "core:log"
+import "core:reflect"
 import "core:strings"
 import "core:sync"
 import sdl "vendor:sdl3"
@@ -22,12 +23,21 @@ The channel is the game's standard input and output, one line per message:
   - `pause`, `resume`, `step` (one frame of 1/60 s while paused)
   - `shapes on`, `shapes off`: shows or hides the physics debug shapes (`Physics_SetDebugDraw`,
     what F9 toggles in development runs); the next stats come at once and say so
+  - `fields <Script> <id> <field> <field>...`: send those fields of that script on that node with
+    each stats (any field of the struct, exported or not: what a code editor shows beside the
+    declarations). One watch per script name: `fields <Script>` alone stops it, `fields` alone
+    stops them all
 - **Replies** (lines on stdout starting `@@live `, then JSON):
   - `{"type":"stats","fps":..,"frame":..,"update":..,"physics":..,"draw":..,"nodes":..,"drawn":..,"paused":..,"shapes":..}`
     (milliseconds, averaged over the last frames; `shapes`: the debug shapes are shown)
-  - `{"type":"tree","scene":"..","nodes":[{"id":"..","name":"..","type":"..","parent":"..","visible":true}, ...]}`
+  - `{"type":"tree","scene":"..","nodes":[{"id":"..","name":"..","type":"..","parent":"..","visible":true,"scripts":["Hero"]}, ...]}`
+    (`scripts`: the scripts the node runs, its node type's first; left out when none)
   - `{"type":"node","id":"..","properties":[{"name":"..","value":".."}, ...]}`
   - `{"type":"set","ok":true,"id":"..","property":".."}`
+  - `{"type":"fields","script":"..","id":"..","values":[{"name":"..","value":".."}, ...]}` (a
+    watched script's fields, `fmt`'s `%v` of each, strings quoted, a node pointer as its node's
+    name, at most LIVE_FIELD_TEXT bytes; a field the struct doesn't have is left out; nothing
+    when the node is gone or doesn't run the script)
 
 Ids are the nodes' `EntityId`s as text. Exports never run with `--live`; on the web there's no
 stdin, so `LiveLink_Start` does nothing there.
@@ -48,7 +58,18 @@ LiveLink :: struct {
 	selected: string,
 	// Seconds to the next stats and tree
 	statsTimer, treeTimer: f32,
+	// The script fields being sent with the stats (`fields`; strings owned)
+	fieldWatches: [dynamic]LiveFieldWatch,
 }
+
+// A script's fields an editor watches on a node (`fields <Script> <id> <field>...`)
+LiveFieldWatch :: struct {
+	script, id: string,
+	fields: []string,
+}
+
+// The longest a watched field's value is sent (longer ones are cut, ending with "...")
+LIVE_FIELD_TEXT :: 80
 
 /*
 How long the parts of the last frames took (`Game.profile`): measured every frame, averaged over
@@ -96,6 +117,7 @@ LiveLink_Process :: proc(game: ^Game, deltaTime: f64) -> bool {
 		if link.statsTimer <= 0 {
 			link.statsTimer = 0.25
 			liveSendStats(game)
+			for w in link.fieldWatches do liveSendFields(game, w)
 		}
 		if link.treeTimer <= 0 {
 			link.treeTimer = 0.5
@@ -137,6 +159,8 @@ LiveLink_Destroy :: proc(game: ^Game) {
 	delete(link.incoming)
 	sync.mutex_unlock(&link.lock)
 	delete(link.selected)
+	for &w in link.fieldWatches do liveFieldWatchFree(&w)
+	delete(link.fieldWatches)
 	// The reader thread may still hold it (it's blocked on stdin): it isn't freed
 	game.live = nil
 }
@@ -195,6 +219,24 @@ liveCommand :: proc(game: ^Game, line: string) {
 		path := strings.trim_space(rest)
 		ok := path != "" && Platform_WriteFile(path, transmute([]byte)Game_Snapshot(game))
 		liveOutput(fmt.tprintf(`%s{{"type":"snapshot","ok":%v,"path":%q}}`, LIVE_PREFIX, ok, path))
+	case "fields":
+		// A code editor's live values (the script's fields beside their declarations)
+		words := strings.fields(rest, context.temp_allocator)
+		if len(words) == 0 {
+			for &w in link.fieldWatches do liveFieldWatchFree(&w)
+			clear(&link.fieldWatches)
+			break
+		}
+		for i := len(link.fieldWatches) - 1; i >= 0; i -= 1 {
+			if link.fieldWatches[i].script != words[0] do continue
+			liveFieldWatchFree(&link.fieldWatches[i])
+			ordered_remove(&link.fieldWatches, i)
+		}
+		if len(words) < 3 do break
+		w := LiveFieldWatch{script = strings.clone(words[0]), id = strings.clone(words[1]), fields = make([]string, len(words) - 2)}
+		for name, i in words[2:] do w.fields[i] = strings.clone(name)
+		append(&link.fieldWatches, w)
+		liveSendFields(game, w)
 	case "set":
 		id, _, more := strings.partition(rest, " ")
 		property, _, value := strings.partition(more, " ")
@@ -225,8 +267,17 @@ liveSendTree :: proc(game: ^Game) {
 			if !first^ do strings.write_string(b, ",")
 			first^ = false
 			parent := node.parent != nil ? uuid.to_string(node.parent.id, context.temp_allocator) : ""
-			fmt.sbprintf(b, `{{"id":%q,"name":%q,"type":%q,"parent":%q,"visible":%v}}`,
+			fmt.sbprintf(b, `{{"id":%q,"name":%q,"type":%q,"parent":%q,"visible":%v`,
 				uuid.to_string(node.id, context.temp_allocator), node.name, fmt.tprint(node.type), parent, node.visible)
+			if scripts := Node_Scripts(node); len(scripts) > 0 {
+				strings.write_string(b, `,"scripts":[`)
+				for s, i in scripts {
+					if i > 0 do strings.write_string(b, ",")
+					fmt.sbprintf(b, "%q", s.info.name)
+				}
+				strings.write_string(b, "]")
+			}
+			strings.write_string(b, "}")
 			for child in node.children do visit(b, child, first)
 		}
 		for node in scene.nodes do if node.parent == nil do visit(&b, node, &first)
@@ -248,6 +299,85 @@ liveSendNode :: proc(game: ^Game, id: string) {
 	}
 	strings.write_string(&b, "]}")
 	liveOutput(strings.to_string(b))
+}
+
+// A watched script's fields on its node (nothing when the node is gone or doesn't run it)
+@(private="file")
+liveSendFields :: proc(game: ^Game, w: LiveFieldWatch) {
+	node := Scene_GetNodeByText(game.currentScene, w.id)
+	if node == nil do return
+	script: ^NodeScript
+	for s in Node_Scripts(node) do if s.info.name == w.script {
+		script = s
+		break
+	}
+	if script == nil || script.data == nil do return
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, `%s{{"type":"fields","script":%q,"id":%q,"values":[`, LIVE_PREFIX, w.script, w.id)
+	first := true
+	for name in w.fields {
+		value, found := LiveLink_FieldText(script.info.type, script.data, name, context.temp_allocator)
+		if !found do continue
+		if !first do strings.write_string(&b, ",")
+		first = false
+		fmt.sbprintf(&b, `{{"name":%q,"value":%q}}`, name, value)
+	}
+	strings.write_string(&b, "]}")
+	liveOutput(strings.to_string(b))
+}
+
+@(private="file")
+liveFieldWatchFree :: proc(w: ^LiveFieldWatch) {
+	delete(w.script)
+	delete(w.id)
+	for f in w.fields do delete(f)
+	delete(w.fields)
+	w^ = {}
+}
+
+/*
+A struct field's value as the live link sends it: `fmt`'s `%v`, a string quoted, a pointer to a
+node its node's name (`nil` when none), cut to LIVE_FIELD_TEXT bytes.
+
+Inputs:
+- type: The struct's type (a script's: `ScriptInfo.type`)
+- data: The struct
+- name: The field's name (any field, exported or not)
+- allocator: For the text
+
+Returns:
+- The text, and false when the struct has no such field
+
+Example:
+	Hero :: struct {
+		using script: e.Script,
+		hp: int,
+	}
+	hero := Hero{hp = 3}
+	text, _ := e.LiveLink_FieldText(Hero, &hero, "hp", context.temp_allocator) // "3"
+*/
+LiveLink_FieldText :: proc(type: typeid, data: rawptr, name: string, allocator := context.allocator) -> (string, bool) {
+	if data == nil || name == "" do return "", false
+	field := reflect.struct_field_by_name(type, name)
+	if field.type == nil do return "", false
+	ptr := rawptr(uintptr(data) + field.offset)
+	text: string
+	switch {
+	case field.type.id == string:
+		text = fmt.tprintf("%q", (^string)(ptr)^)
+	case pointedNodeType(field.type.id) != nil:
+		node := (^^Node)(ptr)^
+		text = node == nil ? "nil" : node.name
+	case:
+		text = fmt.tprintf("%v", any{ptr, field.type.id})
+	}
+	if len(text) > LIVE_FIELD_TEXT {
+		cut := LIVE_FIELD_TEXT - 3
+		// Not inside a UTF-8 sequence
+		for cut > 0 && text[cut] & 0xC0 == 0x80 do cut -= 1
+		text = fmt.tprintf("%s...", text[:cut])
+	}
+	return strings.clone(text, allocator), true
 }
 
 // Times a part of the frame into the profile (a running average over PROFILE_FRAMES)

@@ -602,8 +602,9 @@ typeEmbeds :: proc(have, want: typeid) -> bool {
 	return first.is_using && typeEmbeds(first.type.id, want)
 }
 
-// The node type a pointer field points to, or nil when it isn't a pointer to a node type
-@(private="file")
+// The node type a pointer field points to, or nil when it isn't a pointer to a node type (the
+// live link's field values too)
+@(private)
 pointedNodeType :: proc(id: typeid) -> typeid {
 	pointer, ok := runtime.type_info_base(type_info_of(id)).variant.(runtime.Type_Info_Pointer)
 	if !ok || pointer.elem == nil do return nil
