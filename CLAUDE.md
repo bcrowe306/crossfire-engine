@@ -960,7 +960,13 @@ the GPU (measured 2026-10-24, the demo's title scene with two lights, `profile_g
 still draws each fan alone into the scratch target with no blending, then adds it**: added
 straight, it drew shared triangle edges twice and left bright seams (`isSoftwareRenderer`).
 `lit_scenes_draw_alike_on_the_gpu` compares the two paths' pictures (shadow edges may differ
-by a pixel: the renderers round triangle edges differently). The
+by a pixel: the renderers round triangle edges differently).
+**On SDL's Vulkan renderer the frame's first render target switch waits for the GPU**
+(`target_switch` in `RenderTarget_Begin`, measured 2026-10-24 on the title scene: 4.2 ms): SDL
+submits and waits (VULKAN_IssueBatch) for the previous frame's work, so the wait is the GPU's
+time for a frame (an Intel UHD 620 here), not the switch. Drawing the light map before the world
+didn't change it (tried and dropped); without any switch the wait moves to `present`, as on SDL's
+GPU renderer (present 1.6 ms, the whole frame 3.1 ms there). The
 map is drawn with `BLENDMODE_MOD`. Rays hit occluder edges with a little tolerance past their
 ends, or a ray through a corner slipped between two edges (a bright sliver). Both targets live
 on `Scene.lighting` and are freed by `Scene_Destroy`.

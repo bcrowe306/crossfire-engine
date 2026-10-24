@@ -107,14 +107,19 @@ Example:
 	e.RenderTarget_End(renderer, target)
 */
 RenderTarget_Begin :: proc(renderer: ^sdl.Renderer, target: ^RenderTarget, clear := false, clearColor := sdl.Color{0, 0, 0, 0}) {
+	Trace_Scope("target_begin")
 	target.previous = sdl.GetRenderTarget(renderer).? or_else nil
 	sdl.GetRenderViewport(renderer, &target.previousViewport)
 	w, h: i32
 	sdl.GetRenderLogicalPresentation(renderer, &w, &h, &target.previousMode)
 	target.previousLogical = {w, h}
+	Trace_Begin("target_switch")
 	sdl.SetRenderTarget(renderer, target.texture)
+	Trace_End()
+	Trace_Begin("target_logical")
 	sdl.SetRenderLogicalPresentation(renderer, 0, 0, .DISABLED)
 	sdl.SetRenderViewport(renderer, nil)
+	Trace_End()
 	if clear {
 		sdl.SetRenderDrawColor(renderer, clearColor.r, clearColor.g, clearColor.b, clearColor.a)
 		sdl.RenderClear(renderer)
@@ -130,6 +135,7 @@ Inputs:
 - target: The target given to `RenderTarget_Begin`
 */
 RenderTarget_End :: proc(renderer: ^sdl.Renderer, target: ^RenderTarget) {
+	Trace_Scope("target_end")
 	sdl.SetRenderTarget(renderer, target.previous)
 	sdl.SetRenderLogicalPresentation(renderer, target.previousLogical.x, target.previousLogical.y, target.previousMode)
 	viewport := target.previousViewport
