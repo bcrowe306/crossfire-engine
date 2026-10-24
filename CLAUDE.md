@@ -113,6 +113,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `project_loader.odin` | Builds scenes from parsed data: `LoadProjectFile`, `Game_LoadProject`, `Scene_Build`; data-driven `Sprite` and `AnimatedSprite` nodes; menu actions `scene:<Name>` / `quit` |
 | `script.odin` | **Scripts**: Odin game code attached to nodes. `Script_Register`, the registry, exported fields (`export:""` tags) set from scene files by reflection, `Node_AttachScript` (several per node: `node.moreScripts`), `Node_Scripts`, `Node_GetScript`, `Script_DescribeJSON` |
 | `names.odin` | **Name types**: what kind of name a string parameter takes (`NodePath`, `ChildPath`, `ScenePath`, `AnimationName`, `ActionName`, `GroupName`, `BusName`, `SceneName`, `StateName`, `StateParamName`, `ClipName`, `DialogueNodeName`, `AchievementName`, `SoundPath`): aliases of `string`, read by the editor's code editor from this source |
+| `code_uses.odin` | **Code uses**: what game code does with each kind of thing, for editors (`CODE_USES`: per name type, asset handle type, node type or `Type.field`, a title, a kind, code with placeholders; `CodeUses_For`); the Crossfire Editor's drops into code write them |
+| `code_uses_test.odin` | Tests (on the package's own source): every procedure a use calls exists, and a use's name goes where the procedure takes that name type; every name type has uses |
 | `names_test.odin` | Tests (on the package's own source, `core:odin/parser`): every name type is an alias of string, the procedures that take names use them (a few per type), no public procedure takes an `action`, `bus`, `group`, `state`, `startNode` or `autoplay` as a plain string |
 | `custom_nodes.odin` | **Node types from game code**: `NodeType_Register(T, base, hooks)` (a struct embedding a built-in node type), `NodeType_Find` / `All`, the loader's override (`nodeTypeBegin` / `nodeTypeAttach`) |
 | `hot_reload.odin` | **Hot reload's snapshots**: `Game_Snapshot`, `Game_RestoreSnapshot`, `Snapshot_Parse`, `Node_NamePath`; `GAME_SNAPSHOT_VERSION` |
@@ -397,6 +399,14 @@ doesn't report those and counts them as known. A new procedure taking such a nam
 names_test.odin fails on a public `action` / `bus` / `group` / `state` / `startNode` /
 `autoplay` parameter typed `string` (exceptions listed there: `Game_RunAction`'s and
 `CreateButton`'s `action` are menu actions).
+
+**Code uses** (code_uses.odin, 2026-10-23): **what an editor writes when a thing is dropped into
+code comes from `CODE_USES`**, not from the editor: for each name type, handle type, node type
+(embedding types share its uses) or `Type.field`, a few uses, the common one first, as code with
+placeholders (`{name}` the thing's constant, `{node}` a pointer of the use's `node` type,
+`{self}`, `{game}`, `{scene}`, `{value}`, `{type}`, `{caret}`). A new node kind or procedure gets
+drops by adding its uses here. code_uses_test.odin checks them against this source; the editor's
+`code_drops_engine_uses_compile` fills every one in and compiles it.
 
 **Node types** embed `using node: e.Node` as their **first** field. Casting and node allocation both
 depend on it. `CreateNode` records the type (`node.type`, `Node_Is(node, T)`).
