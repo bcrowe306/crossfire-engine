@@ -14,7 +14,8 @@ another camera sees, in a rectangle on the screen: split screen, a minimap, pict
   is when the camera is where the scene starts it (`ParallaxLayer.base`); scripts move `base`.
 - **CameraZone** (`size` from its position, `transition` seconds): while the scene camera's
   position is inside a zone, the camera's bounds are the zone, so it can't show past the room;
-  entering another zone slides the bounds over to it. No zone: the bounds the camera had.
+  entering another zone slides the bounds over to it. Before the first zone, the camera's own
+  bounds; outside every zone after that, the last zone's bounds stay (not the camera's own).
 - **Smooth zoom:** `Camera2D_ZoomTo(camera, zoom, seconds)`.
 - **CameraView** (`size`, `camera`: a path to a Camera node, `zoom`, `border`): draws what that
   camera sees into its rectangle (put it on a screen layer). Each player's camera in a split

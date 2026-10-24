@@ -120,7 +120,8 @@ AudioPlayer :: struct {
 	using node: Node,
 	// Sound, Positional or Music (set by `CreateAudioPlayer`)
 	kind: AudioPlayerKind,
-	// Volume, pitch, pan, looping... (read every frame)
+	// Volume, pitch, pan... (read every frame); looping (read when it starts playing:
+	// `AudioPlayer_Play`)
 	settings: AudioSettings,
 	// The bus it goes to ("" or "Master": straight to Master); in the node's memory
 	bus: string,
