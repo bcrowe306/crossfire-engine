@@ -1112,7 +1112,14 @@ The docs users read are on the website, **crossfireengine.io** (the workspace's
 - **The API reference** is generated from these doc comments at the engine's **newest tag**
   (`scripts/build-api.mjs` with the site's `tools/docgen`, an Odin program reading `odin doc`'s
   output). **Every engine file belongs to an API area** (the site's `scripts/api-groups.json`): a
-  new file needs an entry there, or the build complains.
+  new file needs an entry there, or the build complains, **and in the editor's
+  `ENGINE_API_AREAS`** (its engine_docs.odin: F1 in a code tab opens the declaration's page;
+  the editor's `engine_api_areas_match_the_website` test compares the two).
+- **The editor shows these doc comments too:** a hover over an engine procedure, type or
+  constant in its code tabs renders the comment (the declaration, the summary, `Inputs:`,
+  `Returns:`, `Example:` as code), read from this source at run time (the editor's
+  engine_docs.odin, docgen's rules). Write them for both: the first line a summary that stands
+  alone, the sections in the format above.
 - **Every `Example:` block is type-checked** on the site (`npm run docs && node
   scripts/check-examples.mjs`, run by its CI before deploying), with the `// Given:` convention
   above: an example that doesn't compile fails the deploy.
