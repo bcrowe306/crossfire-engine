@@ -27,6 +27,8 @@ odin test . -vet-unused -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true   # unit tests
 odin check player -vet-unused               # type-check the player program
 odin check . -no-entry-point -vet-unused -target:js_wasm32   # the browser build (web export)
 odin build player -out:player_bin           # build the player: player_bin <project folder>
+tools/profile_game.sh <project> [scene...]  # profile a game's scenes (Spall, headless): build/profile_game/results/
+odin run tools/spall_report -o:speed -- <trace.spall>   # where a Spall trace's time went (and `compare a.json b.json`)
 ```
 
 To run something, build a game that uses it. In the workspace root, `odin run .` runs asteroids.
@@ -92,6 +94,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `camera_test.odin` | Tests: following a moving target (snapping on first, trailing, pans pausing it, a removed target), offset and look-ahead (still, both ways, eased, a zero delta), per-side limits with zoom (one side, centered between two, freeing, SetBounds), a scene file's camera (settings parsed and built, a second camera following, a missing target, limits, shake settings with a frequency) |
 | `localization.odin` | **Localization**: CSV translation tables (assets of kind "Translation", Godot's layout: `key,en,fr`), `Tr(key)`, `Tr_Text` ("@key" Labels and Menu items translate as they draw), `Locale_Set` / `Get` / `List` / `System`, the project's `locale` |
 | `localization_test.odin` | Tests: tables (quotes, comments, line breaks), merging, fallbacks, region matching, "@" text, a project's tables and locale |
+| `trace.odin`, `trace_native.odin`, `trace_web.odin` | **Profiling with Spall** (`-define:SPALL=true`; nothing without it, nothing in the browser): `Trace_Scope` / `Begin` / `End`, `Trace_Start` / `Stop` (the player's: `SPALL_TRACE` names the file), `Trace_Share` (record into a program's own trace: the editor shares Skald's), `Trace_ThreadEnd`, `Trace_NameThread`, `Trace_AutoEnter` / `Exit` (a main package's instrumentation hooks with `SPALL_AUTO`) |
+| `tools/spall_report/`, `tools/profile_game.sh` | **Reading traces and profiling games**: `spall_report` (a `.spall` file's frames and spans: per frame, self and total time, other threads; `-from` / `-to` marks, `-json`, `compare` with a threshold), `profile_game.sh` (a project's scenes played headless in a Spall build of the player, runs, the median kept, a baseline to compare with) |
 | `debug.odin` | **Debug drawing**: `Debug_Line` / `Rect` / `Circle` / `Text` (world space, over the scene, for a frame or `seconds`), `Debug_Clear`; the **debug overlay** (`Game.debugOverlay`, F10 with dev keys: fps, frame times, the scene's counts), `Game_GetFrameStats` |
 | `debug_test.odin` | Tests: debug shapes' lifetimes and freeing, drawing through the view, frame stats and the overlay |
 | `logging.odin` | **Logging for games**: `LogLevel` (Debug, Info, Warning, Error), `Log_Debug` / `Log_Info` / `Log_Warning` / `Log_Error` (fmt text, `category =`, "game" by default), `Log(level, category, ...)`, `LogSink` and `Log_CreateLogger` (the `core:log` logger the player installs), `Log_SetLevel` / `Log_GetLevel`, the line format (`Log_FormatLine` / `Log_ParseLine`: `[WARN ] [player] text`), `Log_HookSDL` (SDL's messages, category "SDL") |
@@ -1332,6 +1336,41 @@ proc fields (notify is cheap), Node struct reordering (update over 20000 nodes i
 text-layout cache (30 labels a frame: 0.36 ms).
 Worth doing later if games need it: particle collisions on a grid (O(n²) now: 2 ms for 4 x 500),
 LDtk culling by grid for very large levels (it tests every tile; fine for the forest).
+
+### Profiling with Spall (trace.odin, tools/profile_game.sh, tools/spall_report)
+
+The benchmarks time single costs; a Spall trace (https://gravitymoth.com/spall/) shows a whole
+frame. **Build with `-define:SPALL=true`** and the engine's spans are recorded: `frame` (one
+`Application_Frame`) holding `events`, `update` (`Game_Update`: `input`, `audio`, `globals`,
+`scene_update`: `physics`, `nodes_update`, `tweens` (with IK), `camera`), `draw` (`scene_draw`:
+`draw_order`, `nodes_draw`, `lighting`) and `present`. Without the define every `Trace_*`
+procedure is empty (the optimizer drops them); the browser build has none (`trace_web.odin`).
+- **Where the file goes:** the player starts the trace (`Player_Run`), named by `SPALL_TRACE`
+  (default `trace.spall`), and stops it when the game ends. Ticks are nanoseconds
+  (`context_create_with_scale(.., false, 1)`: no two-second clock calibration).
+- **Threads:** each thread records into its own buffer, made on first use (a thread-local), freed
+  by `Trace_ThreadEnd` or `Trace_Stop`. While a buffer is made or freed the thread records
+  nothing (`traceBusy`): allocating runs instrumented procedures under SPALL_AUTO, which would
+  ask for the buffer again or write into one being freed.
+- **One trace for a program and the engine:** the editor's trace is Skald's; `Trace_Share(ctx,
+  bufferProc)` makes the engine record into it, into the same per-thread buffers, so the
+  viewport's `scene_draw` nests inside the editor's `Preview_Render`.
+- **Every procedure** (`-define:SPALL_AUTO=true` with SPALL): Odin calls the program's
+  `@(instrumentation_enter)` / `_exit` hooks around every procedure not marked
+  `@(no_instrumentation)`. The hooks must be in one package of the program: the player's main
+  defines them (`player/main.odin`, and profile_game.sh's generated main) and calls
+  `Trace_AutoEnter` / `Exit`. trace_native.odin is `#+no-instrumentation`.
+- **The game harness** (`tools/profile_game.sh <project> [scene...]`): plays each scene of a copy
+  of the project for `--seconds` in a Spall build of the player (with the project's scripts when
+  it has them), headless (offscreen video, dummy audio, its own XDG_DATA_HOME: saves stay in the
+  run's folder), on pinned CPUs, `--runs` times; keeps the median run's report and trace in
+  `build/profile_game/results/`, and `--save-baseline` / `--compare` (exit 1 past `--threshold`).
+  Nobody presses keys: the scene plays as it starts.
+- **Reading a trace** (`tools/spall_report`): per span name on a thread (default `main`): count,
+  total (a name nested in itself counted once), self (without children), mean, max, per frame
+  (frames: `frame` spans, the first `-skip` warm-up); other threads' busy time; `-from` / `-to`
+  restrict it to the frames between two `mark:<name>` spans (the editor's driver writes them);
+  `-json` for `compare`. The editor's `task profile` uses the same tool.
 
 **SDL's software renderer** (the editor's fallback, headless runs): each tile layer is drawn once,
 tile by tile and unscaled, into a texture of its size (`LDtkTileLayer.cache`, at most

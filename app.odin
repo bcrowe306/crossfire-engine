@@ -140,6 +140,7 @@ Application_Frame :: proc(app: ^Application) {
 	if frameState.lastTime == 0 do frameState.lastTime = sdl.GetPerformanceCounter()
 	events := &frameState.events
 	eventCount := 0
+	Trace_Scope("frame")
 	{
 
 		if app.queuedGame != nil {
@@ -163,6 +164,7 @@ Application_Frame :: proc(app: ^Application) {
 		deltaTime :=  (f64(now) - f64(frameState.lastTime) ) / f64(freq)
 		frameState.lastTime = now
 
+		Trace_Begin("events")
 		for sdl.PollEvent(&events[eventCount]) {
 			// Map mouse/touch/pen positions from window space into the game's resolution
 			sdl.ConvertEventToRenderCoordinates(app.renderer, &events[eventCount])
@@ -172,6 +174,7 @@ Application_Frame :: proc(app: ^Application) {
 				break
 			}
 		}
+		Trace_End()
 
 		if game := app.game; game != nil {
 			// The playing scene's own background, else the game's
@@ -180,6 +183,7 @@ Application_Frame :: proc(app: ^Application) {
 			sdl.SetRenderDrawColor(app.renderer, clear.r, clear.g, clear.b, clear.a)
 			sdl.RenderClear(app.renderer)
 			if game.update != nil {
+				Trace_Scope("update")
 				game->update(events[:eventCount], deltaTime)
 			}
 			else {
@@ -188,6 +192,7 @@ Application_Frame :: proc(app: ^Application) {
 
 
 			if game.draw != nil {
+				Trace_Scope("draw")
 				game->draw()
 			}
 			else {
@@ -201,7 +206,9 @@ Application_Frame :: proc(app: ^Application) {
 		}
 
 		// Present the rendered frame
+		Trace_Begin("present")
 		sdl.RenderPresent(app.renderer)
+		Trace_End()
 		eventCount = 0
 		if app.game != nil && app.game.shouldQuit {
 			app.running = false
