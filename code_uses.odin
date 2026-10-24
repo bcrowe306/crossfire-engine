@@ -63,6 +63,9 @@ CODE_USES := [?]CodeUse{
 	{on = "AnimationName", title = "If it's playing", kind = .Condition, node = "AnimatedSprite", code = "e.AnimationPlayer_IsPlaying(&{node}.animation, {name})"},
 	{on = "StateName", title = "Travel to it", kind = .Statement, node = "StateMachine", code = "e.StateMachine_Travel({node}, {name})"},
 	{on = "StateName", title = "If it's the current state", kind = .Condition, node = "StateMachine", code = "e.StateMachine_Is({node}, {name})"},
+	{on = "StateName", title = "Travel to it if the state can be left", kind = .Statement, node = "StateMachine", code = "e.StateMachine_TryTravel({node}, {name})"},
+	{on = "StateName", title = "When it's entered", kind = .Statement, node = "StateMachine", code = "e.StateMachine_OnEnter({node}, {name}, proc(sm: ^e.StateMachine, state: string, user: rawptr) {\n\t{caret}\n}, {self})"},
+	{on = "StateName", title = "When it's left", kind = .Statement, node = "StateMachine", code = "e.StateMachine_OnExit({node}, {name}, proc(sm: ^e.StateMachine, state: string, user: rawptr) {\n\t{caret}\n}, {self})"},
 	{on = "StateParamName:Float", title = "Set it", kind = .Statement, node = "StateMachine", code = "e.StateMachine_SetFloat({node}, {name}, {caret}0)"},
 	{on = "StateParamName:Bool", title = "Set it", kind = .Statement, node = "StateMachine", code = "e.StateMachine_SetBool({node}, {name}, {caret}true)"},
 	{on = "StateParamName:Trigger", title = "Fire it", kind = .Statement, node = "StateMachine", code = "e.StateMachine_SetTrigger({node}, {name})"},
@@ -96,6 +99,8 @@ CODE_USES := [?]CodeUse{
 	{on = "DataAsset", title = "Read its values", kind = .Value, code = "e.Data({type}, {name})", var = "values"},
 
 	// Node types (embedding types share them: an AudioPlayer2D's are AudioPlayer's too)
+	{on = "StateMachine", title = "Its state", kind = .Value, node = "StateMachine", code = "e.StateMachine_Current({node})", var = "state"},
+	{on = "StateMachine", title = "If its state can be left", kind = .Condition, node = "StateMachine", code = "e.StateMachine_CanExit({node})"},
 	{on = "AudioPlayer", title = "Play it", kind = .Statement, node = "AudioPlayer", code = "e.AudioPlayer_Play({node})"},
 	{on = "AudioPlayer", title = "Stop it", kind = .Statement, node = "AudioPlayer", code = "e.AudioPlayer_Stop({node})"},
 	{on = "AudioPlayer", title = "If it's playing", kind = .Condition, node = "AudioPlayer", code = "e.AudioPlayer_IsPlaying({node})"},

@@ -101,7 +101,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `render_target.odin` | **Render targets**: `RenderTarget_Create` / `Destroy`, `RenderTarget_Begin` / `End` (draw into its texture; the game's logical presentation is off meanwhile and restored after), `Scene_DrawToTarget` (a scene through its camera fitted to the target, or a given view) |
 | `tween.odin` | **Tweens**: `Tween_Create(owner)` / `Scene_CreateTween`, steps `Tween_To` / `Tween_FromTo` (f32, [2]f32, sdl.Color), `Tween_Delay`, `Tween_Call`, `Tween_Parallel`, `Tween_SetLoops`, pause, kill; updated by `Scene_Update` after the nodes |
 | `animation.odin` | `Animation` base (its Aseprite `source`), `SpriteSheetAnimation` (`CreateSpriteSheetAnimation`, `CreateSheetAnimation` from a `SheetGrid`), `FrameAnimation`; **sheet grids**: `SheetGrid` / `SheetGridMode` (columns x rows, or cells of a size), `SheetGrid_Layout` / `CellCount` / `CellRect` / `Leftover` |
-| `animation_player.odin` | Plays animations by name or index, with events |
+| `animation_player.odin` | Plays animations by name or index, with events; `loopRule` (`AnimationLoopRule`: an animation looping as made, always, or once; reset by Play) |
 | `event.odin` | `EventSubject`: subscribe / unsubscribe / notify |
 | `node_events.odin` | **Node events for tools and scene files**: `NodeType_Events` / `SceneNodeKind_Events` (a type's EventSubject fields tagged `event:"..."`, with `data:"..."` hints), `Node_FindEvent`, `Node_AddListener`, `Script_Listener` (a script's handlers by name), binding scene files' `<listener>`s before ready |
 | `node_events_test.odin` | Tests: each type's events, listeners from a scene file (bound before ready, bad ones skipped, a removed listener), camera and menu events |
@@ -201,11 +201,11 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `tilemap.odin` | **TileMap nodes**: an Aseprite file's tilemap layers (`TileMapSettings`: `tilemap`, `frame`, `layers`, `tileCollision`), a `TileMapLayer` per layer drawn in one batch, collision from tile properties (`TileMap_TileCollision`: StaticBody "Collision" for solid and one-way tiles, an Area per area name), `TileMap_TileAt`, `TileMap_TileProperty`, `TileMap_Rebuild`, painted layers (`TileLayerData`), terrains (`Terrain_TileFor`, `TileGrid_PaintTerrain`, `TileMap_SetTerrain`), reloading saved files in development runs |
 | `camera_tools.odin` | **Camera tools**: `ParallaxLayer` (an image and children following the camera by a factor, tiled across the screen), `CameraZone` (rooms bounding the camera, sliding between them: `Scene.cameraZones`), `Camera2D_ZoomTo` (smooth zoom: `Camera2D.zoomMove`), `CameraView` (another Camera's view drawn into a rectangle: split screen, minimaps) |
 | `camera_tools_test.odin` | Tests: a parallax layer moving by its factor, zone bounds and the slide between rooms, a smooth zoom, a camera view's pixels (its scene's background inside, its border) |
-| `state_machine.odin` | **State machines**: `StateMachine` (`StateMachineSettings`: parameters Float / Bool / Trigger, states with an animation, transitions with a condition, `after`, `onFinished`, `*` from any state), `StateMachine_SetFloat` / `SetBool` / `SetTrigger`, `Current`, `Is`, `Travel`, `TimeInState`, `StateMachine_ConditionProblem` (for editors); `onStateEntered`, `onStateExited`; the `state` property |
-| `state_machine_test.odin` | Tests: parameters moving it (and back), a trigger spent once from any state, waiting for an attack animation's end, `after`, travel, the state read and written as a property, events, conditions checked |
+| `state_machine.odin` | **State machines**: `StateMachine` (`StateMachineSettings`: parameters Float / Bool / Trigger; states with an animation, `speed`, `loop`, an exit guard `canExit`, `enterEvent` / `exitEvent`; transitions with a condition, a `guard`, `priority`, `after`, `onFinished`, `interrupts`, `*` from any state), conditions (`and`, `or`, `not`, parentheses, comparisons, code guards `name()`), code guards (`StateMachineGuard`, `StateMachine_RegisterGuard`, `StateMachine_SetGuard`, `HasGuard`), `StateMachine_SetFloat` / `SetBool` / `SetTrigger` / `ResetTrigger`, `Current`, `Previous`, `Is`, `TimeInState`, `CanExit`, `Travel`, `TryTravel`, `TransitionStatus`, `OnEnter` / `OnExit`; for editors `StateMachine_ConditionProblem`, `SplitCondition` / `JoinCondition` (`StateMachineClause`), `ClauseHolds`, `StateMachine_LiveJSON` (the live link's `machine`); `onStateEntered`, `onStateExited`, `onTransition`, `onStateEvent`; the `state` property |
+| `state_machine_test.odin` | Tests: parameters moving it (and back), a trigger spent once from any state, waiting for an attack animation's end, `after`, travel, the state read and written as a property, events, conditions checked; priorities, compound conditions, a transition's guard keeping its trigger, an exit guard and an interrupt, code guards (registered, a machine's own, missing), statuses, `onTransition` / `onStateEvent` / `OnEnter` / `OnExit`, speed and loop, flat conditions both ways, the live JSON; a player's loop rule |
 | `scene_flow.odin` | **Scene changes**: transitions (`Transition`, `Game_ChangeScene`: a fade, wipes, a circle over the switch), scenes over scenes (`Game_PushScene` / `PopScene` / `TopScene`, pausing what's under them), the loading screen (`Game.flow.loadingScene`: scenes built when entered, their assets loaded a few a frame, `Game_LoadingProgress`), `Game_RunAction` (`scene:`, `push:`, `pop`, `quit` for Menus and Buttons) |
 | `scene_flow_test.odin` | Tests: a fade's halves with the switch under the cover, actions, scenes pushed over others pausing them (or not) and popped, a scene change closing them, pushed scenes built afresh and deaf to the press that opened them, a loading scene shown at least its minimum while an unbuilt scene loads, then built |
-| `live.odin`, `live_native.odin`, `live_web.odin` | **The live link** with an editor (the player's `--live`): commands on stdin read by a thread (`LiveLink_Start`), run at the start of each update (`LiveLink_Process`: watch, select, set, pause, resume, step, snapshot, shapes, fields), replies on stdout as `@@live` JSON lines (stats with `paused` and `shapes`, the scene's tree with each node's scripts, a node's properties, a script's watched fields: `LiveLink_FieldText`); `GameProfile` (`Game.profile`: update, physics, draw times; nodes, drawn); `Node_WriteProperty` / `Node_Properties` (animator.odin) |
+| `live.odin`, `live_native.odin`, `live_web.odin` | **The live link** with an editor (the player's `--live`): commands on stdin read by a thread (`LiveLink_Start`), run at the start of each update (`LiveLink_Process`: watch, select, set, pause, resume, step, snapshot, shapes, fields, machine), replies on stdout as `@@live` JSON lines (stats with `paused` and `shapes`, the scene's tree with each node's scripts, a node's properties, a script's watched fields: `LiveLink_FieldText`); `GameProfile` (`Game.profile`: update, physics, draw times; nodes, drawn); `Node_WriteProperty` / `Node_Properties` (animator.odin) |
 | `live_test.odin` | Tests: watch (stats and the tree), select (a node's properties), set (and a refused value), pause holding the game, a step of 1/60 s, resume, the debug shapes shown and hidden (`shapes on` / `off`, the stats saying so), the tree's scripts and a script's fields watched (`fields`: any field, a string quoted, a missing one left out, sent with the stats, stopped) |
 | `navigation.odin` | **Navigation**: `NavRegion` (a `NavGrid` over an area, blocked by static bodies' shapes grown by an agent radius: `NavRegion_Rebuild`, `NavGrid_BlockStaticBodies`, `NavGrid_SetBlocked`), A* paths straightened by line of sight (`NavGrid_FindPath`, `NavRegion_FindPath`, `Scene_FindNavRegion`), `NavAgent` (`NavAgent_SetTarget` / `Stop`, `velocity` with arrival and separation, moving its parent; `onArrived`, `onPathFailed`) |
 | `navigation_test.odin` | Tests: paths around a wall through a gap (clear legs, straightened), targets in walls, walled off, no corner cutting; a scene file's region blocked by a static body, an agent walking around it and arriving, failing outside any region |
@@ -834,14 +834,30 @@ through the draw transform (at most 4096). A **CameraView** draws its scene agai
 target through its camera (centered, zoom × the view's zoom) with a thread-local guard against
 drawing views inside views, and frees the target in its node's `destroy`.
 
-**State machines** (state_machine.odin; its doc comment has the details): conditions are parsed
-once into clauses (a parameter's index, an operator, a number; Bools are 1 / 0, an unknown
-parameter makes a clause that never holds, logged), transitions keep their states' indices. The
-first update enters the start state; each later one takes the first transition that holds (one
-per update), spending the Triggers it read. The target AnimatedSprite is found lazily (its path
-from the machine, "" its parent) and checked by id; its player's `onAnimationEnded` sets
-`animationFinished` for `onFinished` transitions. The file attribute is `when`, the field
-`condition` (`when` is an Odin keyword).
+**State machines** (state_machine.odin; its doc comment has the details): conditions (a
+transition's `condition` and `guard`, a state's `canExit`) are text in files and settings and are
+compiled once per machine into a flat tree in its arena (`CondNode`: Never, Param, Guard, Not,
+And, Or; a recursive-descent parser over `tokenize`'s tokens, `and` binding tighter than `or`).
+An unknown parameter compiles to a Never node (logged); a condition that doesn't parse never
+holds (logged); a missing code guard never holds (logged once per node, `warned`). Transitions
+keep their states' indices and are **stable-sorted by priority** at creation (`index` keeps
+their place in the settings: events, `TransitionStatus`, the live link). Each update tries them
+in that order through `transitionStatus` (from-state, exit time, condition, guard, then the exit
+guard unless it `interrupts`; the exit guard is asked at most once per update) and takes the
+first Ready one (one per update), spending the Triggers its condition and guard read (listed at
+creation). A Trigger whose transition's guard fails stays set. **Code guards**: a registry
+(`StateMachine_RegisterGuard`, contextless like Script_Register, a mutex: tests register from
+several threads) and a machine's own (`StateMachine_SetGuard`, the typed `proc(^T) -> bool`
+stored untyped as scripts' hooks are), the machine's first. Entering a state: the exit event and
+`onStateExited`, then the animation (`AnimationPlayer_Play`, then the state's `loop` as the
+player's `loopRule`, its `speed` only when it isn't 1 or a state before changed it: `speedSet`),
+then `onTransition` (not for the start), the enter event, `onStateEntered`. `speed` 0 counts as 1
+(zero-initialized states). No crossfades: an AnimatedSprite shows one animation. Editors read
+flat conditions as rows (`StateMachine_SplitCondition` / `JoinCondition`). The target
+AnimatedSprite is found lazily (its path from the machine, "" its parent) and checked by id; its
+player's `onAnimationEnded` sets `animationFinished` for `onFinished` transitions. The file
+attribute is `when`, the field `condition` (`when` is an Odin keyword; so are the runtime's
+`condition` names).
 
 **Scene changes** (scene_flow.odin; its doc comment has the details): `Game.flow` holds the
 project's transition and loading scene, the change under way (a phase machine: covering,
@@ -898,6 +914,9 @@ draw list's items.
   one watch per script name, only the fields asked for. The tree's nodes list their scripts
   (`scripts`, the node type's first), so the editor knows which nodes run a script. Both tested
   in live_test.odin (one test: `liveOutput` is the package's).
+- **A StateMachine for the States tab** (`machine <id>`, one at a time): its state, time, whether
+  it can exit, each clause's result and each transition's status (`StateMachine_LiveJSON`, which
+  calls code guards), sent with each stats; tested in state_machine_test.odin through the JSON.
 
 **Navigation** (navigation.odin; its doc comment has the details): a region's grid is built on
 its first update (every node exists then) from CollisionShape nodes under StaticBody ancestors,
@@ -1230,7 +1249,11 @@ comment. What was needed, and why:
   (a Slider's `step`, a CheckBox's `checked`, read only for those kinds) and themes'
   `checkColor`: an older reader takes the unknown kind for a custom node type with no base kind
   and builds a plain Node2D in its place (the rest of the scene loads), so no bump. The parser's
-  `isControl` is the range `.Panel ..= .CheckBox` of `SceneNodeKind`: keep new controls in it. Attribute names are global across kinds
+  `isControl` is the range `.Panel ..= .CheckBox` of `SceneNodeKind`: keep new controls in it.
+  Also **StateMachine guards and transition logic** (no bump): `<state>`'s `canExit`, `speed`,
+  `loop`, `onEnter`, `onExit`, `<transition>`'s `guard`, `priority`, `interrupts`, and
+  conditions with `or`, `not`, parentheses and `name()`; an older reader ignores the attributes and
+  its parser never holds the new conditions (logged). Attribute names are global across kinds
   (the parser reads every one for every node), so they avoid the others' (`deadzone` is a touch
   control's).
 - **Format version 13** adds every node's `processMode`, `blendMode`, `zIndex`, `ySort` and

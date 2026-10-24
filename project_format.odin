@@ -158,7 +158,11 @@ Version history:
   (ui_controls.odin), with a Slider's `step` and a CheckBox's `checked` (beside the controls'
   `value`, `min`, `max`, `showValue`, `disabled`, `text`); an older reader takes their unknown
   kind for a custom node type without a base kind and builds a plain Node2D in their place, so
-  the rest of the scene loads as before. Themes' `checkColor`.
+  the rest of the scene loads as before. Themes' `checkColor`. StateMachine guards and transition
+  logic (state_machine.odin): `<state>`'s `canExit` (its exit guard), `speed`, `loop`, `onEnter`,
+  `onExit`; `<transition>`'s `guard`, `priority`, `interrupts`; conditions with `or`, `not` and
+  parentheses and code guards (`name()`). An older reader ignores the attributes (its machine
+  takes no guard into account) and can't read the new conditions (they never hold there).
 - 13: every node's `processMode`, `blendMode`, `zIndex`, `ySort` and `groups`; CollisionShape
   `oneWay`; the project's window: `fullscreen`, `vsync` (default true), `highDPI`; assets of
   kind "Translation" (CSV tables: localization.odin), the project's `locale` and `icon`, and the
@@ -186,7 +190,7 @@ Version history:
   `touchMouse`, `touchColor`, `touchOpacity`; a button's label `text`: touch.odin); ParallaxLayer (`factorX`, `factorY`, `repeatX`,
   `repeatY`), CameraZone (`width`, `height`, `zoneTransition`) and CameraView (`width`, `height`,
   `viewCamera`, `viewZoom`, `border`) nodes (camera_tools.odin); StateMachine nodes (`start`, `animates`, `<param>`,
-  `<state>`, `<transition>`: state_machine.odin); UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText
+  `<state>`, `<transition>`: state_machine.odin; guards added in 14); UI controls (Panel, Button, ProgressBar, TextField, ScrollBox, RichText
   (Slider and CheckBox added in 14):
   `width`, `height`, `anchor`, `margin`, `layout`, `align`, `justify`, `columns`, `padding`,
   `spacing`, `expand`, `disabled`, `value`, `min`, `max`, `direction`, `showValue`, `maxLength`,
@@ -682,8 +686,8 @@ SceneNodeData :: struct {
 	// (navigation.odin)
 	nav: NavSettings,
 	// StateMachine: `start`, `animates` (its AnimatedSprite's path), and `<param name type value>`,
-	// `<state name animation x y>`, `<transition from to when after onFinished>` children
-	// (state_machine.odin)
+	// `<state name animation x y canExit speed loop onEnter onExit>`, `<transition from to when
+	// after onFinished guard priority interrupts>` children (state_machine.odin)
 	stateMachine: StateMachineSettings,
 	// ParallaxLayer (`factorX`, `factorY`, `repeatX`, `repeatY`; its image `texture`), CameraZone
 	// (`width`, `height`, `zoneTransition`), CameraView (`width`, `height`, `viewCamera`,
@@ -2046,6 +2050,11 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 				name = cloneAttr(doc, child, "name", ""),
 				animation = cloneAttr(doc, child, "animation", ""),
 				position = {attrF32(doc, child, "x", 0), attrF32(doc, child, "y", 0)},
+				canExit = cloneAttr(doc, child, "canExit", ""),
+				speed = max(attrF32(doc, child, "speed", 1), 0),
+				loop = attrEnum(doc, child, "loop", AnimationLoopRule.As_Made),
+				enterEvent = cloneAttr(doc, child, "onEnter", ""),
+				exitEvent = cloneAttr(doc, child, "onExit", ""),
 			})
 		case "transition":
 			append(&scene.nodes[index].stateMachine.transitions, StateMachineTransition{
@@ -2054,6 +2063,9 @@ parseNode :: proc(doc: ^xml.Document, element: xml.Element_ID, parent: int, scen
 				condition = cloneAttr(doc, child, "when", ""),
 				after = max(attrF32(doc, child, "after", 0), 0),
 				onFinished = attrBool(doc, child, "onFinished", false),
+				guard = cloneAttr(doc, child, "guard", ""),
+				priority = attrInt(doc, child, "priority", 0),
+				interrupts = attrBool(doc, child, "interrupts", false),
 			})
 		case "entity":
 			append(&scene.nodes[index].ldtk.entityComponents, LDtkEntityComponent{

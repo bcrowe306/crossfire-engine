@@ -23,6 +23,8 @@ The channel is the game's standard input and output, one line per message:
   - `pause`, `resume`, `step` (one frame of 1/60 s while paused)
   - `shapes on`, `shapes off`: shows or hides the physics debug shapes (`Physics_SetDebugDraw`,
     what F9 toggles in development runs); the next stats come at once and say so
+  - `machine <id>`: send that StateMachine's state with each stats (its guards and conditions:
+    an editor's States tab while it plays); `machine` alone stops it
   - `fields <Script> <id> <field> <field>...`: send those fields of that script on that node with
     each stats (any field of the struct, exported or not: what a code editor shows beside the
     declarations). One watch per script name: `fields <Script>` alone stops it, `fields` alone
@@ -34,6 +36,10 @@ The channel is the game's standard input and output, one line per message:
     (`scripts`: the scripts the node runs, its node type's first; left out when none)
   - `{"type":"node","id":"..","properties":[{"name":"..","value":".."}, ...]}`
   - `{"type":"set","ok":true,"id":"..","property":".."}`
+  - `{"type":"machine","id":"..","state":"..","previous":"..","time":..,"canExit":..,"exit":[..],"params":[{"name":"..","value":".."}],"transitions":[{"status":"Ready","when":[true,false],"guard":[]}, ...]}`
+    (a watched machine: `exit`, `when` and `guard` say whether each clause of the current state's
+    exit guard and of each transition's condition and guard holds, for flat conditions; a
+    transition's `status` is a `StateMachineTransitionStatus`; code guards are called)
   - `{"type":"fields","script":"..","id":"..","values":[{"name":"..","value":".."}, ...]}` (a
     watched script's fields, `fmt`'s `%v` of each, strings quoted, a node pointer as its node's
     name, at most LIVE_FIELD_TEXT bytes; a field the struct doesn't have is left out; nothing
@@ -60,6 +66,8 @@ LiveLink :: struct {
 	statsTimer, treeTimer: f32,
 	// The script fields being sent with the stats (`fields`; strings owned)
 	fieldWatches: [dynamic]LiveFieldWatch,
+	// The StateMachine whose state is sent with the stats (`machine`; "": none; owned)
+	machine: string,
 }
 
 // A script's fields an editor watches on a node (`fields <Script> <id> <field>...`)
@@ -118,6 +126,7 @@ LiveLink_Process :: proc(game: ^Game, deltaTime: f64) -> bool {
 			link.statsTimer = 0.25
 			liveSendStats(game)
 			for w in link.fieldWatches do liveSendFields(game, w)
+			if link.machine != "" do liveSendMachine(game, link.machine)
 		}
 		if link.treeTimer <= 0 {
 			link.treeTimer = 0.5
@@ -159,6 +168,7 @@ LiveLink_Destroy :: proc(game: ^Game) {
 	delete(link.incoming)
 	sync.mutex_unlock(&link.lock)
 	delete(link.selected)
+	delete(link.machine)
 	for &w in link.fieldWatches do liveFieldWatchFree(&w)
 	delete(link.fieldWatches)
 	// The reader thread may still hold it (it's blocked on stdin): it isn't freed
@@ -237,6 +247,10 @@ liveCommand :: proc(game: ^Game, line: string) {
 		for name, i in words[2:] do w.fields[i] = strings.clone(name)
 		append(&link.fieldWatches, w)
 		liveSendFields(game, w)
+	case "machine":
+		delete(link.machine)
+		link.machine = strings.clone(strings.trim_space(rest))
+		if link.machine != "" do liveSendMachine(game, link.machine)
 	case "set":
 		id, _, more := strings.partition(rest, " ")
 		property, _, value := strings.partition(more, " ")
@@ -298,6 +312,18 @@ liveSendNode :: proc(game: ^Game, id: string) {
 		fmt.sbprintf(&b, `{{"name":%q,"value":%q}}`, property, value)
 	}
 	strings.write_string(&b, "]}")
+	liveOutput(strings.to_string(b))
+}
+
+// A watched StateMachine's state (nothing when the node is gone or isn't one)
+@(private="file")
+liveSendMachine :: proc(game: ^Game, id: string) {
+	node := Scene_GetNodeByText(game.currentScene, id)
+	if node == nil || !Node_Is(node, StateMachine) do return
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, `%s{{"type":"machine","id":%q,`, LIVE_PREFIX, id)
+	StateMachine_LiveJSON(cast(^StateMachine)node, &b)
+	strings.write_byte(&b, '}')
 	liveOutput(strings.to_string(b))
 }
 
