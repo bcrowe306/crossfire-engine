@@ -2,6 +2,7 @@ package crossfire
 
 import "core:log"
 import "core:mem"
+import "core:slice"
 import "core:strings"
 import sdl "vendor:sdl3"
 
@@ -197,6 +198,11 @@ SpriteSheetAnimation :: struct {
 	// Each cell's size in pixels (0: the sheet divided into columns x rows; set by
 	// `CreateSheetAnimation` for a grid of cell sizes)
 	cellSize: [2]f32,
+	// Pixels from the sheet's top-left corner to the grid (beyond the margin; `SheetGrid.offset`)
+	offset: [2]f32,
+	// The sheet's cells as rectangles in texture pixels, instead of the grid (a sheet of uneven
+	// sprites: `CreateRectSheetAnimation`; owned, with `allocator`). Empty: the grid's cells
+	rects: []sdl.FRect,
 }
 
 /*
@@ -295,10 +301,62 @@ CreateSheetAnimation :: proc(
 	animation.rows = rows
 	animation.margin = grid.margin
 	animation.spacing = grid.spacing
+	animation.offset = grid.offset
 	if grid.mode == .Size do animation.cellSize = cell
 	animation.sourceFrameCount = spriteSheetFrameCount
 	animation.frameSize = spriteSheetFrameSize
 	animation.drawFrame = spriteSheetDrawFrame
+	initAnimation(animation, name, fps, loop, startFrame, endFrame, playMode, allocator)
+	return animation
+}
+
+/*
+Creates an animation whose frames are rectangles of a sprite sheet, each its own size: a sheet of
+uneven sprites (an editor's slicer finds them: `Sheet_FindSprites`). The rectangles are the
+sheet's cells, numbered in their order; a frame is drawn at its rectangle's size.
+
+Inputs:
+- name: Name used to play the animation from an AnimationPlayer
+- texture: The sprite sheet
+- rects: The cells, in texture pixels (copied)
+- fps: Frames per second
+- loop: Restart after the last frame instead of ending
+- startFrame: First cell played, inclusive
+- endFrame: Last cell played, inclusive. -1 means the last cell
+- playMode: Forward, Reverse, PingPong or PingPongReverse
+- allocator: Allocator for the animation. Use the owning node's (`Node_GetAllocator`) to free it with the node
+
+Returns:
+- The new animation. Add it to a player with `AnimationPlayer_Add`
+
+Example:
+	rm := &game.resourceManager
+	sheet := rm->loadTexture("slime.png")
+	hop := e.CreateRectSheetAnimation("hop", sheet, {{0, 4, 20, 12}, {24, 0, 18, 16}, {46, 2, 19, 14}}, fps = 10, loop = true)
+*/
+CreateRectSheetAnimation :: proc(
+	name: string,
+	texture: ^sdl.Texture,
+	rects: []sdl.FRect,
+	fps: f32,
+	loop := false,
+	startFrame := 0,
+	endFrame := -1,
+	playMode := AnimationPlayMode.Forward,
+	allocator := context.allocator,
+) -> ^SpriteSheetAnimation {
+	animation := new(SpriteSheetAnimation, allocator)
+	animation.texture = texture
+	animation.columns = max(len(rects), 1)
+	animation.rows = 1
+	if len(rects) > 0 {
+		animation.rects = make([]sdl.FRect, len(rects), allocator)
+		copy(animation.rects, rects)
+	}
+	animation.sourceFrameCount = spriteSheetFrameCount
+	animation.frameSize = spriteSheetFrameSize
+	animation.drawFrame = spriteSheetDrawFrame
+	animation.destroyData = spriteSheetDestroyData
 	initAnimation(animation, name, fps, loop, startFrame, endFrame, playMode, allocator)
 	return animation
 }
@@ -315,9 +373,10 @@ SheetGridMode :: enum {
 
 /*
 How a sprite sheet is cut into cells: `columns` x `rows`, or cells of `cellSize` pixels (`mode`),
-`margin` pixels around them and `spacing` between them. Cells are numbered left to right, then
-top to bottom, from 0. The other mode's values are worked out from the sheet's size
-(`SheetGrid_Layout`). The zero value is one cell (columns and rows below 1 count as 1).
+`margin` pixels around them and `spacing` between them, starting `offset` pixels from the sheet's
+top-left corner. Cells are numbered left to right, then top to bottom, from 0. The other mode's
+values are worked out from the sheet's size (`SheetGrid_Layout`). The zero value is one cell
+(columns and rows below 1 count as 1).
 */
 SheetGrid :: struct {
 	// Which values cut the sheet: columns x rows, or the cell size
@@ -330,6 +389,10 @@ SheetGrid :: struct {
 	margin: f32,
 	// Pixels between neighboring cells
 	spacing: f32,
+	// Pixels from the sheet's top-left corner to where the grid (its margin) starts: a sheet whose
+	// first cell isn't at the corner (a title or a row of other sprites above it). The grid then
+	// shares, or fills, what's right of and below it
+	offset: [2]f32,
 }
 
 // One cell: the whole sheet
@@ -355,15 +418,15 @@ SheetGrid_Layout :: proc(grid: SheetGrid, sheetSize: [2]f32) -> (columns, rows: 
 	case .Cells:
 		columns, rows = max(grid.columns, 1), max(grid.rows, 1)
 		cells := [2]f32{f32(columns), f32(rows)}
-		cell = (sheetSize - grid.margin * 2 - grid.spacing * (cells - 1)) / cells
+		cell = (sheetSize - grid.offset - grid.margin * 2 - grid.spacing * (cells - 1)) / cells
 	case .Size:
 		cell = grid.cellSize
 		fit :: proc(sheet, cell, margin, spacing: f32) -> int {
 			if cell <= 0 || sheet <= 0 do return 1
 			return max(int((sheet - margin * 2 + spacing) / (cell + spacing)), 1)
 		}
-		columns = fit(sheetSize.x, cell.x, grid.margin, grid.spacing)
-		rows = fit(sheetSize.y, cell.y, grid.margin, grid.spacing)
+		columns = fit(sheetSize.x - grid.offset.x, cell.x, grid.margin, grid.spacing)
+		rows = fit(sheetSize.y - grid.offset.y, cell.y, grid.margin, grid.spacing)
 	}
 	return
 }
@@ -389,7 +452,7 @@ SheetGrid_Leftover :: proc(grid: SheetGrid, sheetSize: [2]f32) -> [2]f32 {
 	if grid.mode != .Size || sheetSize.x <= 0 || sheetSize.y <= 0 do return {}
 	columns, rows, cell := SheetGrid_Layout(grid, sheetSize)
 	counts := [2]f32{f32(columns), f32(rows)}
-	used := grid.margin * 2 + counts * cell + (counts - 1) * grid.spacing
+	used := grid.offset + grid.margin * 2 + counts * cell + (counts - 1) * grid.spacing
 	return {max(sheetSize.x - used.x, 0), max(sheetSize.y - used.y, 0)}
 }
 
@@ -423,7 +486,46 @@ SheetGrid_CellRect :: proc(grid: SheetGrid, sheetSize: [2]f32, frame: int) -> sd
 	columns, _, cell := SheetGrid_Layout(grid, sheetSize)
 	column := frame % columns
 	row := frame / columns
-	return {grid.margin + f32(column) * (cell.x + grid.spacing), grid.margin + f32(row) * (cell.y + grid.spacing), cell.x, cell.y}
+	origin := grid.offset + grid.margin
+	return {origin.x + f32(column) * (cell.x + grid.spacing), origin.y + f32(row) * (cell.y + grid.spacing), cell.x, cell.y}
+}
+
+/*
+How many cells a sheet has: its rectangles when it has them (a sliced sheet of uneven sprites),
+else its grid's cells.
+
+Inputs:
+- grid: The grid (used without rectangles)
+- rects: The cells as rectangles (empty: the grid's)
+- sheetSize: The sheet's size in pixels
+
+Returns:
+- The cells (at least 1)
+
+Example:
+	count := e.Sheet_CellCount(e.DEFAULT_SHEET_GRID, {{0, 0, 16, 16}, {20, 0, 12, 16}}, {64, 16})
+	// 2
+*/
+Sheet_CellCount :: proc(grid: SheetGrid, rects: []sdl.FRect, sheetSize: [2]f32) -> int {
+	if len(rects) > 0 do return len(rects)
+	return SheetGrid_CellCount(grid, sheetSize)
+}
+
+/*
+A cell's rectangle in a sheet: its rectangle when the sheet has them, else the grid's cell.
+
+Inputs:
+- grid: The grid (used without rectangles)
+- rects: The cells as rectangles (empty: the grid's)
+- sheetSize: The sheet's size in pixels
+- frame: The cell (clamped to the rectangles)
+
+Returns:
+- The cell's rectangle in texture pixels
+*/
+Sheet_CellRect :: proc(grid: SheetGrid, rects: []sdl.FRect, sheetSize: [2]f32, frame: int) -> sdl.FRect {
+	if len(rects) > 0 do return rects[clamp(frame, 0, len(rects) - 1)]
+	return SheetGrid_CellRect(grid, sheetSize, frame)
 }
 
 /*
@@ -437,12 +539,14 @@ Returns:
 - The cell's rectangle in texture pixels
 */
 SpriteSheetAnimation_FrameRect :: proc(animation: ^SpriteSheetAnimation, frame: int) -> sdl.FRect {
+	if len(animation.rects) > 0 do return animation.rects[clamp(frame, 0, len(animation.rects) - 1)]
 	size := spriteSheetFrameSize(animation, frame)
 	column := frame % animation.columns
 	row := frame / animation.columns
+	origin := animation.offset + animation.margin
 	return {
-		animation.margin + f32(column) * (size.x + animation.spacing),
-		animation.margin + f32(row) * (size.y + animation.spacing),
+		origin.x + f32(column) * (size.x + animation.spacing),
+		origin.y + f32(row) * (size.y + animation.spacing),
 		size.x,
 		size.y,
 	}
@@ -470,17 +574,28 @@ SpriteSheet_CellRect :: proc(sheetSize: [2]f32, columns, rows: int, margin, spac
 @(private="file")
 spriteSheetFrameCount :: proc(animation: ^Animation) -> int {
 	sheet := cast(^SpriteSheetAnimation)animation
+	if len(sheet.rects) > 0 do return len(sheet.rects)
 	return sheet.columns * sheet.rows
 }
 
 @(private="file")
 spriteSheetFrameSize :: proc(animation: ^Animation, frame: int) -> [2]f32 {
 	sheet := cast(^SpriteSheetAnimation)animation
+	if len(sheet.rects) > 0 {
+		r := sheet.rects[clamp(frame, 0, len(sheet.rects) - 1)]
+		return {r.w, r.h}
+	}
 	if sheet.cellSize.x > 0 && sheet.cellSize.y > 0 do return sheet.cellSize
 	if sheet.texture == nil do return {}
-	usable := [2]f32{f32(sheet.texture.w), f32(sheet.texture.h)} - sheet.margin * 2
+	usable := [2]f32{f32(sheet.texture.w), f32(sheet.texture.h)} - sheet.offset - sheet.margin * 2
 	cells := [2]f32{f32(sheet.columns), f32(sheet.rows)}
 	return (usable - sheet.spacing * (cells - 1)) / cells
+}
+
+// Frees a rectangle sheet's rectangles (CreateRectSheetAnimation)
+@(private="file")
+spriteSheetDestroyData :: proc(animation: ^Animation) {
+	delete((cast(^SpriteSheetAnimation)animation).rects, animation.allocator)
 }
 
 @(private="file")
@@ -605,6 +720,207 @@ frameAnimationDrawFrame :: proc(animation: ^Animation, renderer: ^sdl.Renderer, 
 @(private="file")
 frameAnimationDestroyData :: proc(animation: ^Animation) {
 	delete((cast(^FrameAnimation)animation).frames, animation.allocator)
+}
+
+
+// FINDING SPRITES
+
+/*
+How `Sheet_FindSprites` tells sprites from the background, and which islands of pixels make one
+sprite.
+*/
+SpriteSearch :: struct {
+	// The least alpha that counts as part of a sprite (1-255)
+	threshold: u8,
+	// Islands this many pixels apart or closer (between their boxes) are one sprite: a sword a
+	// pixel away from its hand, a speck of dust beside a jump. 0: only touching pixels
+	mergeDistance: int,
+	// Boxes smaller than this many pixels both ways are dropped (stray pixels)
+	minSize: int,
+	// Pixels of `key`'s color count as background (a sheet without transparency); see
+	// `Sheet_BackgroundKey`
+	useKey: bool,
+	// The background color (RGB), when `useKey`
+	key: [3]u8,
+}
+
+// Alpha at least 128, islands 2 px apart merged, boxes under 4 px dropped
+DEFAULT_SPRITE_SEARCH :: SpriteSearch{threshold = 128, mergeDistance = 2, minSize = 4}
+
+/*
+The background color of a sheet without transparency: its top-left pixel, when that pixel is
+opaque (a transparent corner means the sheet has transparency, which is what `Sheet_FindSprites`
+looks at then).
+
+Inputs:
+- pixels: RGBA8 rows, `width * height * 4` bytes
+- width, height: The sheet's size
+- threshold: The least alpha that counts as opaque
+
+Returns:
+- The color, and whether there is one
+
+Example:
+	// Given: pixels: []u8
+	search := e.DEFAULT_SPRITE_SEARCH
+	search.key, search.useKey = e.Sheet_BackgroundKey(pixels, 64, 32, search.threshold)
+*/
+Sheet_BackgroundKey :: proc(pixels: []u8, width, height: int, threshold: u8 = 128) -> (key: [3]u8, ok: bool) {
+	if width <= 0 || height <= 0 || len(pixels) < width * height * 4 || pixels[3] < max(threshold, 1) do return {}, false
+	return {pixels[0], pixels[1], pixels[2]}, true
+}
+
+/*
+Finds the sprites on a sheet of uneven sprites: the islands of its opaque pixels (touching
+sideways or at a corner), islands close together merged into one, specks dropped, each sprite's
+bounding box in reading order (rows top to bottom, each row left to right; boxes overlapping
+vertically are one row). Fast on big sheets: it works on runs of opaque pixels (a 4096 x 4096
+sheet takes a fraction of a second optimized), but editors run it on a worker.
+
+Inputs:
+- pixels: RGBA8 rows, `width * height * 4` bytes
+- width, height: The sheet's size
+- search: What counts as a sprite (`DEFAULT_SPRITE_SEARCH`)
+- allocator: For the result
+
+Returns:
+- The boxes, in texture pixels (empty for an empty sheet)
+
+Example:
+	// Given: pixels: []u8
+	boxes := e.Sheet_FindSprites(pixels, 256, 64, {threshold = 128, mergeDistance = 3, minSize = 4})
+	defer delete(boxes)
+*/
+Sheet_FindSprites :: proc(pixels: []u8, width, height: int, search := DEFAULT_SPRITE_SEARCH, allocator := context.allocator) -> []sdl.FRect {
+	if width <= 0 || height <= 0 || len(pixels) < width * height * 4 do return nil
+	Run :: struct { x0, x1, y: i32 }
+	runs := make([dynamic]Run, 0, 1024, context.allocator)
+	defer delete(runs)
+	parent := make([dynamic]i32, 0, 1024, context.allocator)
+	defer delete(parent)
+	find :: proc(parent: []i32, i: i32) -> i32 {
+		i := i
+		for parent[i] != i {
+			parent[i] = parent[parent[i]]
+			i = parent[i]
+		}
+		return i
+	}
+	union_ :: proc(parent: []i32, a, b: i32) {
+		ra, rb := find(parent, a), find(parent, b)
+		if ra != rb do parent[max(ra, rb)] = min(ra, rb)
+	}
+	threshold := max(search.threshold, 1)
+	key := search.key
+	previous, previousEnd := 0, 0
+	for y in 0 ..< height {
+		rowStart := len(runs)
+		row := pixels[y * width * 4:][:width * 4]
+		x := 0
+		for x < width {
+			// Skip the background, then take the run of sprite pixels
+			for x < width && !spritePixel(row, x, threshold, search.useKey, key) do x += 1
+			if x >= width do break
+			start := x
+			for x < width && spritePixel(row, x, threshold, search.useKey, key) do x += 1
+			append(&runs, Run{i32(start), i32(x - 1), i32(y)})
+			append(&parent, i32(len(runs) - 1))
+		}
+		// Join this row's runs to the last row's they touch (corners too)
+		p := previous
+		for r in rowStart ..< len(runs) {
+			for p < previousEnd && runs[p].x1 < runs[r].x0 - 1 do p += 1
+			for q := p; q < previousEnd && runs[q].x0 <= runs[r].x1 + 1; q += 1 do union_(parent[:], i32(q), i32(r))
+		}
+		previous, previousEnd = rowStart, len(runs)
+	}
+	// Each island's box (inclusive pixel bounds)
+	Box :: struct { x0, y0, x1, y1: i32 }
+	boxes := make([dynamic]Box, context.allocator)
+	defer delete(boxes)
+	{
+		at := make(map[i32]int, allocator = context.allocator)
+		defer delete(at)
+		for run, i in runs {
+			root := find(parent[:], i32(i))
+			if b, found := at[root]; found {
+				box := &boxes[b]
+				box.x0, box.x1 = min(box.x0, run.x0), max(box.x1, run.x1)
+				box.y0, box.y1 = min(box.y0, run.y), max(box.y1, run.y)
+			} else {
+				at[root] = len(boxes)
+				append(&boxes, Box{run.x0, run.y, run.x1, run.y})
+			}
+		}
+	}
+	// Islands close together become one, until none are left close
+	distance := i32(max(search.mergeDistance, 0))
+	for len(boxes) > 1 {
+		slice.sort_by(boxes[:], proc(a, b: Box) -> bool { return a.x0 < b.x0 })
+		resize(&parent, len(boxes))
+		for i in 0 ..< len(boxes) do parent[i] = i32(i)
+		for a, i in boxes {
+			for j in i + 1 ..< len(boxes) {
+				b := boxes[j]
+				if b.x0 - a.x1 - 1 > distance do break
+				gapY := max(a.y0, b.y0) - min(a.y1, b.y1) - 1
+				if gapY <= distance do union_(parent[:], i32(i), i32(j))
+			}
+		}
+		merged := make([dynamic]Box, 0, len(boxes), context.allocator)
+		at := make(map[i32]int, allocator = context.allocator)
+		for box, i in boxes {
+			root := find(parent[:], i32(i))
+			if m, found := at[root]; found {
+				into := &merged[m]
+				into^ = {min(into.x0, box.x0), min(into.y0, box.y0), max(into.x1, box.x1), max(into.y1, box.y1)}
+			} else {
+				at[root] = len(merged)
+				append(&merged, box)
+			}
+		}
+		delete(at)
+		done := len(merged) == len(boxes)
+		delete(boxes)
+		boxes = merged
+		if done do break
+	}
+	// Specks go
+	minSize := i32(max(search.minSize, 0))
+	#reverse for box, i in boxes {
+		if box.x1 - box.x0 + 1 < minSize && box.y1 - box.y0 + 1 < minSize do unordered_remove(&boxes, i)
+	}
+	// Reading order: rows of boxes that overlap vertically, each left to right
+	slice.sort_by(boxes[:], proc(a, b: Box) -> bool { return a.y0 < b.y0 || (a.y0 == b.y0 && a.x0 < b.x0) })
+	rowOf := make([]i32, len(boxes), context.allocator)
+	defer delete(rowOf)
+	row, bottom := i32(-1), i32(min(i32))
+	for box, i in boxes {
+		if row < 0 || box.y0 > bottom {
+			row += 1
+			bottom = box.y1
+		} else {
+			bottom = max(bottom, box.y1)
+		}
+		rowOf[i] = row
+	}
+	Ordered :: struct { box: Box, row: i32 }
+	ordered := make([]Ordered, len(boxes), context.allocator)
+	defer delete(ordered)
+	for box, i in boxes do ordered[i] = {box, rowOf[i]}
+	slice.sort_by(ordered, proc(a, b: Ordered) -> bool { return a.row < b.row || (a.row == b.row && a.box.x0 < b.box.x0) })
+	result := make([]sdl.FRect, len(ordered), allocator)
+	for o, i in ordered do result[i] = {f32(o.box.x0), f32(o.box.y0), f32(o.box.x1 - o.box.x0 + 1), f32(o.box.y1 - o.box.y0 + 1)}
+	return result
+}
+
+// Whether pixel x of an RGBA8 row belongs to a sprite: alpha at least the threshold, and not the
+// background key's color
+@(private="file")
+spritePixel :: #force_inline proc(row: []u8, x: int, threshold: u8, useKey: bool, key: [3]u8) -> bool {
+	p := row[x * 4:][:4]
+	if p[3] < threshold do return false
+	return !useKey || p[0] != key[0] || p[1] != key[1] || p[2] != key[2]
 }
 
 

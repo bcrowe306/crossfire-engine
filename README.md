@@ -5,7 +5,7 @@
 [![Build](https://github.com/bcrowe306/crossfire-engine/actions/workflows/build.yml/badge.svg)](https://github.com/bcrowe306/crossfire-engine/actions/workflows/build.yml)
 
 Crossfire (this repository: `odin_sdl_engine`) is a 2D game engine in [Odin](https://odin-lang.org) on SDL3: scenes of nodes with transforms, sprites
-and animation, text and menus, a camera (following a node by itself, with limits, look-ahead and shake), Box2D physics (bodies, areas, ray casts, joints, a
+and animation (sprite sheets cut by a grid or into rectangles, and their sprites found by their opaque pixels), text and menus, a camera (following a node by itself, with limits, look-ahead and shake), Box2D physics (bodies, areas, ray casts, joints, a
 character mover), particle emitters (with color ramps), sound (sound, positional sound and streamed music nodes, mix
 buses), input actions (keys, mouse and gamepads, like Godot's
 input map, rebindable and saved, with rumble), components (reusable node trees, instanced in

@@ -15,9 +15,10 @@ set of animations (a hero's idle, run, jump) is made once and used anywhere.
   or, without tags, one "default" animation of every frame.
 - **Scene files:** an AnimatedSprite's `animations="assets/hero.aseprite"` plays the set instead
   of its own animations; its `autoplay` (when set) picks the first one.
-- **Sheets:** every animation has its own (`AnimationData.sheet` and `grid`), loaded through the
-  resource manager (shared by the animations and sprites that use it); one that names an Aseprite
-  file gives the sprite that file's slices while it plays (`Animation.source`).
+- **Sheets:** every animation has its own (`AnimationData.sheet` and `grid`, or `rects` for a sheet
+  of uneven sprites), loaded through the resource manager (shared by the animations and sprites
+  that use it); one that names an Aseprite file gives the sprite that file's slices while it
+  plays (`Animation.source`).
 - **Code:** `AnimatedSprite_UseAnimations(sprite, ANIMATION_HERO)` switches a sprite to a set.
 - `Game_LoadAnimationSet` reads each file once (`Game.animationSets`, in the game's arena);
   editors fill that map with their in-memory sets before building, as they do components.
@@ -175,7 +176,8 @@ animatedSpriteAdd :: proc(sprite: ^AnimatedSprite, animations: []AnimationData, 
 			loaded = false
 			if a.sheet != "" do log.warnf("%s: animation '%s' can't load its sheet %s", sprite.name, a.name, a.sheet)
 		}
-		animation := CreateSheetAnimation(a.name, texture, a.grid, a.fps, a.loop, a.start, a.end, a.playMode, allocator)
+		// A sheet of uneven sprites: its cells are rectangles (an editor's slicer)
+		animation := len(a.rects) > 0 ? CreateRectSheetAnimation(a.name, texture, a.rects[:], a.fps, a.loop, a.start, a.end, a.playMode, allocator) : CreateSheetAnimation(a.name, texture, a.grid, a.fps, a.loop, a.start, a.end, a.playMode, allocator)
 		animation.repeat = a.repeat
 		if len(a.durations) > 0 do Animation_SetDurations(animation, a.durations[:])
 		if len(a.events) > 0 do Animation_SetEvents(animation, a.events[:])

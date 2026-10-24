@@ -191,6 +191,7 @@ animation_set_files_and_sprites_using_them :: proc(t: ^testing.T) {
 		<node kind="AnimatedSprite" name="Two" autoplay="frames">
 			<animation name="frames" sheet="tags3.aseprite#sheet" columns="4" rows="3" end="3" loop="true"/>
 			<animation name="cells" sheet="tags3.aseprite" grid="Size" cellWidth="2" cellHeight="2" loop="true"/>
+			<animation name="sliced" sheet="tags3.aseprite" rects="0,0,2,2 1,1,3,2 bad 0,0,0,4" end="-1"/>
 		</node>
 	</scene>`)
 	defer SceneData_Destroy(&twoData)
@@ -217,6 +218,14 @@ animation_set_files_and_sprites_using_them :: proc(t: ^testing.T) {
 	testing.expect_value(t, AnimationPlayer_Current(&two.animation)->sourceFrameCount(), 4)
 	file, frames = AnimatedSprite_Source(two)
 	testing.expect(t, file != "" && !frames, "the file's first frame in cells")
+	// A sliced sheet's cells are its rectangles (the unreadable and empty ones left out), each its own size
+	testing.expect(t, AnimationPlayer_Play(&two.animation, "sliced"), "the sliced sheet")
+	sliced := cast(^SpriteSheetAnimation)AnimationPlayer_Current(&two.animation)
+	testing.expect_value(t, sliced->sourceFrameCount(), 2)
+	testing.expect_value(t, sliced.endFrame, 1)
+	testing.expect_value(t, AnimationPlayer_FrameSize(&two.animation), [2]f32{2, 2})
+	testing.expect_value(t, SpriteSheetAnimation_FrameRect(sliced, 1), sdl.FRect{1, 1, 3, 2})
+	testing.expect_value(t, sliced->frameSize(1), [2]f32{3, 2})
 	// Read once
 	testing.expect_value(t, len(game.animationSets), 1)
 

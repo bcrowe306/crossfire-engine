@@ -100,7 +100,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `easing.odin` | `Ease(EaseType, t)`, 18 curves |
 | `render_target.odin` | **Render targets**: `RenderTarget_Create` / `Destroy`, `RenderTarget_Begin` / `End` (draw into its texture; the game's logical presentation is off meanwhile and restored after), `Scene_DrawToTarget` (a scene through its camera fitted to the target, or a given view) |
 | `tween.odin` | **Tweens**: `Tween_Create(owner)` / `Scene_CreateTween`, steps `Tween_To` / `Tween_FromTo` (f32, [2]f32, sdl.Color), `Tween_Delay`, `Tween_Call`, `Tween_Parallel`, `Tween_SetLoops`, pause, kill; updated by `Scene_Update` after the nodes |
-| `animation.odin` | `Animation` base (its Aseprite `source`), `SpriteSheetAnimation` (`CreateSpriteSheetAnimation`, `CreateSheetAnimation` from a `SheetGrid`), `FrameAnimation`; **sheet grids**: `SheetGrid` / `SheetGridMode` (columns x rows, or cells of a size), `SheetGrid_Layout` / `CellCount` / `CellRect` / `Leftover` |
+| `animation.odin` | `Animation` base (its Aseprite `source`), `SpriteSheetAnimation` (`CreateSpriteSheetAnimation`, `CreateSheetAnimation` from a `SheetGrid`, `CreateRectSheetAnimation` from rectangles), `FrameAnimation`; **sheet grids**: `SheetGrid` / `SheetGridMode` (columns x rows, or cells of a size; margin, spacing, `offset`), `SheetGrid_Layout` / `CellCount` / `CellRect` / `Leftover`, `Sheet_CellCount` / `Sheet_CellRect` (a grid's cells or rectangles); **finding sprites**: `Sheet_FindSprites` (`SpriteSearch`: islands of opaque pixels, merged, specks dropped, reading order), `Sheet_BackgroundKey` |
 | `animation_player.odin` | Plays animations by name or index, with events; `loopRule` (`AnimationLoopRule`: an animation looping as made, always, or once; reset by Play) |
 | `event.odin` | `EventSubject`: subscribe / unsubscribe / notify |
 | `node_events.odin` | **Node events for tools and scene files**: `NodeType_Events` / `SceneNodeKind_Events` (a type's EventSubject fields tagged `event:"..."`, with `data:"..."` hints), `Node_FindEvent`, `Node_AddListener`, `Script_Listener` (a script's handlers by name), binding scene files' `<listener>`s before ready |
@@ -146,7 +146,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `physics_test.odin`, `physics2_test.odin` | Tests: falling and landing, events, layers, Areas, ray casts, the mover (landing, walls, pushing), shapes with baked transforms, removal, scene files, debug drawing; smoothing at 144 fps, areas seen from bodies, one event per body pair, exits on removal, every joint kind |
 | `lifecycle_test.odin` | Tests: nodes made, added (twice, late, during onEnter), found, removed (queued, parent and child together, twice, unknown, by exit handlers); scene destroy order and ownership; the camera's removal; cross-scene parenting refused; Scene_Clear; listeners changing during notify; Timer, Ticker; game switch and teardown |
 | `core_test.odin` | Tests: visibility in the tree, screen positions (camera, screen layers), drawing through a view (layer order, screen layers, position-only nodes, draw state reset), game scaling and window-to-game coordinates on a software renderer, the application's game swap |
-| `animation_test.odin` | Tests: AnimationPlayer frames in each play mode, looping and ending, speed, pause / resume / stop / seek, events, restart, names; Camera2D follow modes, dead zone, speed cap, bounds, timed pans, screen / world round trips |
+| `animation_test.odin` | Tests: AnimationPlayer frames in each play mode, looping and ending, speed, pause / resume / stop / seek, events, restart, names; Camera2D follow modes, dead zone, speed cap, bounds, timed pans, screen / world round trips; grids with offsets, sheets cut into rectangles and their format; sprites found (merging, specks, reading order, a background color, a 4096 x 4096 sheet timed) |
 | `nodes_test.odin` | Tests: process modes and pausing (physics too), the time scale (hitstops in real time), groups, z-index / y-sort / blend order, format 13 attributes parsed and built |
 | `component_test.odin` | Tests: component files, instances in scene files (names, transforms, under parents, nested), `Scene_Instantiate` |
 | `input.odin` | **Input**: keyboard, mouse and gamepad state (`Input_IsKeyPressed`, `Input_IsMouseButtonJustPressed`, `Input_GetMousePosition`, `Input_GetGamepadAxis`...) through the engine's own `Key`, `MouseButton`, `GamepadButton`, `GamepadAxis`; **actions** like Godot's input map (`Input_IsActionPressed` / `JustPressed` / `JustReleased`, `Input_GetActionStrength`, `Input_GetAxis`, `Input_GetVector`); bindings' text format; `Game.input`, updated first in `Game_Update` |
@@ -793,6 +793,20 @@ savedFields).
   load leaves its animation drawing nothing (logged). A Size grid's leftover pixels
   (`SheetGrid_Leftover`, which editors show) are ignored:
   frames are `cellSize` (`SpriteSheetAnimation.cellSize`).
+- **Grids start somewhere and sheets can be rectangles** (2026-10-24, for the editor's sprite sheet
+  slicer; format 14 without a version: an older reader plays the grid instead): `SheetGrid.offset`
+  (`offsetX` / `offsetY`: where the grid starts, before its margin) and `AnimationData.rects`
+  (`rects="x,y,w,h ..."`, `ParseSheetRects` / `FormatSheetRects`): a sheet of uneven sprites,
+  its cells the rectangles in order (`start` / `end` count them), each frame drawn at its own
+  size (`CreateRectSheetAnimation`, `SpriteSheetAnimation.rects`, owned: `destroyData` frees
+  them). `animatedSpriteAdd` picks it when an animation has rects. Rectangles, not atlas regions:
+  an animation's sheet stays one image, cut another way.
+- **Finding sprites** (`Sheet_FindSprites`, editors run it on a worker): runs of opaque pixels per
+  row, joined to the last row's they touch (corners too) by a union-find, so a 4096 x 4096 sheet
+  is a few hundred ms in a debug build; boxes merged within `mergeDistance` (sorted by x, swept)
+  until none are close, boxes under `minSize` both ways dropped, then reading order (rows of
+  vertically overlapping boxes, each left to right). An opaque top-left pixel is the background
+  color (`Sheet_BackgroundKey`).
 - **Aseprite per animation:** `Animation.source` / `sourceFrames` (a `#sheet`: the file's frames)
   replace the sprite's old `source` fields; `AnimatedSprite_Source` reads the playing one, so slices,
   pivots and hitboxes follow whichever file the current animation shows.

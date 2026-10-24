@@ -94,7 +94,9 @@ and scale are relative to its parent:
 An AnimatedSprite's `<animation>` elements are its animations (`AnimationData`), each on its own
 sprite sheet: `sheet` (an image), cut into `columns` x `rows` cells, or with `grid="Size"` into
 cells of `cellWidth` x `cellHeight` pixels (as many as fit), `margin` pixels around the grid and
-`spacing` between cells (`SheetGrid`). Cells are numbered left to right, top to bottom from 0;
+`spacing` between cells, the grid starting `offsetX`, `offsetY` pixels from the sheet's corner
+(`SheetGrid`); or, for a sheet of uneven sprites, cut into `rects` (`x,y,w,h` rectangles apart by
+spaces, cells in their order; the grid is then unused). Cells are numbered left to right, top to bottom from 0;
 an animation plays `start` to `end` (inclusive; `end` -1 is the last cell) at its `fps`, `loop`
 and `playMode`. `autoplay` names the one it plays from the start (else the first). An
 animation's `durations` (milliseconds per frame) override its fps, and `repeat` plays a
@@ -148,7 +150,9 @@ Version history:
   their own (older files' `texture`, `columns`, `rows`, `margin` and `spacing` become every
   animation's, and a node without animations gets its "default" one, when parsed). Also, added
   without a version of their own (older readers ignore them; a file without them means what it
-  did): a Camera's follow target and settings (camera.odin): `target` (a path from it to the
+  did): an `<animation>`'s `offsetX` / `offsetY` (where its sheet's grid starts) and `rects` (its
+  sheet's cells as rectangles: a sheet of uneven sprites, sliced in an editor; an older reader
+  cuts the sheet by the grid instead); a Camera's follow target and settings (camera.odin): `target` (a path from it to the
   node it follows by itself), `followMode`, `smoothing`, `smoothTime`, `followSpeed`,
   `maxSpeed`, `deadzoneX`, `deadzoneY`, `targetOffsetX`, `targetOffsetY`, `lookAheadX`,
   `lookAheadY`, `lookAheadSmoothing`, `limitLeft`, `limitTop`, `limitRight`, `limitBottom`
@@ -733,10 +737,13 @@ sprite sheet.
 
 	<animation name="walk" sheet="assets/walk.png" columns="8" start="0" end="3" fps="10" loop="true"/>
 	<animation name="hit" sheet="assets/hit.png" grid="Size" cellWidth="32" cellHeight="32"
-	           margin="1" spacing="2" start="4" end="6" durations="100 60 200" repeat="2"/>
+	           margin="1" spacing="2" offsetY="16" start="4" end="6" durations="100 60 200" repeat="2"/>
+	<animation name="hop" sheet="assets/slime.png" rects="0,4,20,12 24,0,18,16 46,2,19,14" fps="10"/>
 
 The sheet is cut by `grid` (`SheetGrid`: `columns` x `rows`, or with `grid="Size"` cells of
-`cellWidth` x `cellHeight` pixels; `margin`, `spacing`). `durations` (milliseconds per frame,
+`cellWidth` x `cellHeight` pixels; `margin`, `spacing`, `offsetX`, `offsetY`), or by `rects`
+(each cell's rectangle, `x,y,w,h` in pixels: a sheet of uneven sprites; `start` and `end` count
+them). `durations` (milliseconds per frame,
 format 13) override fps for the frames they cover; `repeat` plays a non-looping animation that
 many times (a ping-pong's: that many passes, one way each, as Aseprite counts them; 0 is two,
 there and back). The sheet and grid are format 14's: before it they were the node's (or the animation
@@ -749,8 +756,11 @@ AnimationData :: struct {
 	// sheet of every frame ends in ASEPRITE_SHEET_SUFFIX; the plain file is its first frame)
 	sheet: string,
 	// How the sheet is cut into cells: `grid` (Cells, the default, or Size), `columns`, `rows`,
-	// `cellWidth`, `cellHeight`, `margin`, `spacing`
+	// `cellWidth`, `cellHeight`, `margin`, `spacing`, `offsetX`, `offsetY`
 	grid: SheetGrid,
+	// `rects`: the sheet's cells as rectangles in pixels, instead of the grid's (a sheet of
+	// uneven sprites, sliced in an editor: `Sheet_FindSprites`); empty: the grid's cells
+	rects: [dynamic]sdl.FRect,
 	// First and last cell played, inclusive; end -1 is the sheet's last cell
 	start: int,
 	// The last cell played (inclusive; -1, the default: the sheet's last cell)
@@ -846,6 +856,7 @@ AnimationData_Destroy :: proc(a: ^AnimationData, allocator := context.allocator)
 	context.allocator = allocator
 	delete(a.name)
 	delete(a.sheet)
+	delete(a.rects)
 	delete(a.durations)
 	for event in a.events do delete(event)
 	delete(a.events)
@@ -854,6 +865,58 @@ AnimationData_Destroy :: proc(a: ^AnimationData, allocator := context.allocator)
 
 // An animation's frames per second when its file doesn't say
 DEFAULT_ANIMATION_FPS :: 8
+
+/*
+Reads an `<animation>`'s `rects`: rectangles `x,y,w,h` apart by spaces. Rectangles that don't
+read, or have no area, are left out.
+
+Inputs:
+- text: The attribute's value
+- allocator: For the list
+
+Returns:
+- The rectangles
+
+Example:
+	rects := e.ParseSheetRects("0,4,20,12 24,0,18,16")
+	defer delete(rects)
+*/
+ParseSheetRects :: proc(text: string, allocator := context.allocator) -> [dynamic]sdl.FRect {
+	rects := make([dynamic]sdl.FRect, allocator)
+	for part in strings.fields(text, context.temp_allocator) {
+		numbers := strings.split(part, ",", context.temp_allocator)
+		if len(numbers) != 4 do continue
+		r: [4]f32
+		ok := true
+		for n, i in numbers {
+			v, parsed := strconv.parse_f32(strings.trim_space(n))
+			if !parsed do ok = false
+			r[i] = v
+		}
+		if ok && r[2] > 0 && r[3] > 0 do append(&rects, sdl.FRect{max(r[0], 0), max(r[1], 0), r[2], r[3]})
+	}
+	return rects
+}
+
+/*
+Writes rectangles as an `<animation>`'s `rects` (`ParseSheetRects` reads it back).
+
+Inputs:
+- rects: The rectangles
+- allocator: For the text
+
+Returns:
+- "x,y,w,h x,y,w,h ..."
+
+Example:
+	text := e.FormatSheetRects({{0, 4, 20, 12}, {24, 0, 18, 16}}, context.temp_allocator)
+	// "0,4,20,12 24,0,18,16"
+*/
+FormatSheetRects :: proc(rects: []sdl.FRect, allocator := context.allocator) -> string {
+	b := strings.builder_make(allocator)
+	for r, i in rects do fmt.sbprintf(&b, "%s%v,%v,%v,%v", i > 0 ? " " : "", r.x, r.y, r.w, r.h)
+	return strings.to_string(b)
+}
 
 // A sheet an `<animation>` element takes when it doesn't name its own (an older file's: the
 // node's or the set's; the path borrowed from the document)
@@ -892,6 +955,7 @@ parseAnimation :: proc(doc: ^xml.Document, element: xml.Element_ID, inherited: A
 			cellSize = {max(attrF32(doc, element, "cellWidth", g.cellSize.x), 0), max(attrF32(doc, element, "cellHeight", g.cellSize.y), 0)},
 			margin = max(attrF32(doc, element, "margin", g.margin), 0),
 			spacing = max(attrF32(doc, element, "spacing", g.spacing), 0),
+			offset = {max(attrF32(doc, element, "offsetX", g.offset.x), 0), max(attrF32(doc, element, "offsetY", g.offset.y), 0)},
 		},
 		start = max(attrInt(doc, element, "start", 0), 0),
 		end = attrInt(doc, element, "end", -1),
@@ -905,6 +969,9 @@ parseAnimation :: proc(doc: ^xml.Document, element: xml.Element_ID, inherited: A
 		for part in strings.fields(value, context.temp_allocator) {
 			if ms, ok := strconv.parse_f32(part); ok && ms >= 0 do append(&a.durations, ms / 1000)
 		}
+	}
+	if value, found := xml.find_attribute_val_by_key(doc, element, "rects"); found {
+		a.rects = ParseSheetRects(value)
 	}
 	if value, found := xml.find_attribute_val_by_key(doc, element, "events"); found {
 		a.events = make([dynamic]string)
