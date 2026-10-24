@@ -81,6 +81,9 @@ AnimationPlayer :: struct {
 	finished: bool,
 	// Playback speed multiplier. 1 is normal, 2 double speed, 0 frozen
 	speed: f32,
+	// Whether the playing animation loops: as it was made, or overridden (a StateMachine
+	// state's `loop`). `AnimationPlayer_Play` sets it back to `.As_Made`: set it after playing
+	loopRule: AnimationLoopRule,
 
 	// Seconds spent on the current frame
 	elapsed: f32,
@@ -107,6 +110,16 @@ AnimationPlayer :: struct {
 
 	// Allocator of its lists and event listeners (`AnimationPlayer_Init`)
 	allocator: mem.Allocator,
+}
+
+// Whether a player's animation loops (`AnimationPlayer.loopRule`)
+AnimationLoopRule :: enum {
+	// As the animation says (its `loop`)
+	As_Made,
+	// Loops whatever it says
+	Loop,
+	// Plays once (its `repeat` passes) whatever it says
+	Once,
 }
 
 /*
@@ -236,6 +249,7 @@ AnimationPlayer_PlayByIndex :: proc(player: ^AnimationPlayer, index: int, restar
 
 	animation := player.animations[index]
 	player.playing = true
+	player.loopRule = .As_Made
 	player.finished = false
 	player.elapsed = 0
 	player.cycles = 0
@@ -530,7 +544,7 @@ advanceFrame :: proc(player: ^AnimationPlayer, animation: ^Animation) {
 			player.direction = 1
 			next = 1
 		}
-		wrapped = next == 0 && player.direction == -1 && (animation.loop || player.cycles + 1 < pingPongPasses(animation))
+		wrapped = next == 0 && player.direction == -1 && (loops(player, animation) || player.cycles + 1 < pingPongPasses(animation))
 	case .PingPongReverse:
 		// The same from the end: end -> start -> end
 		if next < 0 {
@@ -542,7 +556,7 @@ advanceFrame :: proc(player: ^AnimationPlayer, animation: ^Animation) {
 			player.direction = -1
 			next = last - 1
 		}
-		wrapped = next == last && player.direction == 1 && (animation.loop || player.cycles + 1 < pingPongPasses(animation))
+		wrapped = next == last && player.direction == 1 && (loops(player, animation) || player.cycles + 1 < pingPongPasses(animation))
 	}
 
 	changed := next != player.frame
@@ -572,9 +586,20 @@ sendFrameEvents :: proc(player: ^AnimationPlayer, animation: ^Animation) {
 // Whether an animation goes on at the end of a cycle: it loops, or it has repeats left
 @(private="file")
 playsOn :: proc(player: ^AnimationPlayer, animation: ^Animation) -> bool {
-	if animation.loop do return true
+	if loops(player, animation) do return true
 	player.cycles += 1
 	return player.cycles < max(animation.repeat, 1)
+}
+
+// Whether the playing animation loops: its own `loop`, unless the player's rule overrides it
+@(private="file")
+loops :: proc(player: ^AnimationPlayer, animation: ^Animation) -> bool {
+	switch player.loopRule {
+	case .Loop: return true
+	case .Once: return false
+	case .As_Made:
+	}
+	return animation.loop
 }
 
 // How many passes (one way each) a non-looping ping-pong plays: its repeat, else 2 (there and back)
@@ -586,7 +611,7 @@ pingPongPasses :: proc(animation: ^Animation) -> int {
 // A ping-pong reached an end: whether it turns and plays on (counting the pass it finished)
 @(private="file")
 passesOn :: proc(player: ^AnimationPlayer, animation: ^Animation) -> bool {
-	if animation.loop do return true
+	if loops(player, animation) do return true
 	player.cycles += 1
 	return player.cycles < pingPongPasses(animation)
 }
