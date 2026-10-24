@@ -1343,7 +1343,8 @@ The benchmarks time single costs; a Spall trace (https://gravitymoth.com/spall/)
 frame. **Build with `-define:SPALL=true`** and the engine's spans are recorded: `frame` (one
 `Application_Frame`) holding `events`, `update` (`Game_Update`: `input`, `audio`, `globals`,
 `scene_update`: `physics`, `nodes_update`, `tweens` (with IK), `camera`), `draw` (`scene_draw`:
-`draw_order`, `nodes_draw`, `lighting`) and `present`. Without the define every `Trace_*`
+`draw_order`, `nodes_draw`, `lighting`: `light_visibility`, `light_draw`, `light_map`) and
+`present`. Without the define every `Trace_*`
 procedure is empty (the optimizer drops them); the browser build has none (`trace_web.odin`).
 - **Where the file goes:** the player starts the trace (`Player_Run`), named by `SPALL_TRACE`
   (default `trace.spall`), and stops it when the game ends. Ticks are nanoseconds
@@ -1364,13 +1365,17 @@ procedure is empty (the optimizer drops them); the browser build has none (`trac
   of the project for `--seconds` in a Spall build of the player (with the project's scripts when
   it has them), headless (offscreen video, dummy audio, its own XDG_DATA_HOME: saves stay in the
   run's folder), on pinned CPUs, `--runs` times; keeps the median run's report and trace in
-  `build/profile_game/results/`, and `--save-baseline` / `--compare` (exit 1 past `--threshold`).
+  `build/profile_game/results/` (the report over all runs, the median run's trace), and
+  `--save-baseline` / `--compare` (exit 1 past `--threshold`).
   Nobody presses keys: the scene plays as it starts.
 - **Reading a trace** (`tools/spall_report`): per span name on a thread (default `main`): count,
   total (a name nested in itself counted once), self (without children), mean, max, per frame
   (frames: `frame` spans, the first `-skip` warm-up); other threads' busy time; `-from` / `-to`
   restrict it to the frames between two `mark:<name>` spans (the editor's driver writes them);
-  `-json` for `compare`. The editor's `task profile` uses the same tool.
+  `-json` for `compare`. Several traces make one report, their frames and spans pooled (the
+  harnesses report all their runs together). `compare` gates on the mean frame (frames with
+  and without a timer's render alternate, so the median jumps) and prints each span's time per
+  frame and per call. The editor's `task profile` uses the same tool.
 
 **SDL's software renderer** (the editor's fallback, headless runs): each tile layer is drawn once,
 tile by tile and unscaled, into a texture of its size (`LDtkTileLayer.cache`, at most

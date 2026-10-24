@@ -351,7 +351,9 @@ Lighting_Apply :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D
 		if s.radius <= 0 || s.energy <= 0 do continue
 		center := Node_GetWorldPosition(light)
 		base := node.layer in scene.screenLayers ? TRANSFORM2D_IDENTITY : view
+		Trace_Begin("light_visibility")
 		ring := Light_Visibility(light, context.temp_allocator)
+		Trace_End()
 		if len(ring) < 2 do continue
 		bright := sdl.FColor{min(f32(s.color.r) / 255 * s.energy, 1), min(f32(s.color.g) / 255 * s.energy, 1), min(f32(s.color.b) / 255 * s.energy, 1), 1}
 		vertices := make([dynamic]sdl.Vertex, 0, len(ring) + 1, context.temp_allocator)
@@ -368,6 +370,7 @@ Lighting_Apply :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D
 		last := s.kind == .Spot ? n - 1 : n
 		for i in 0..<last do append(&indices, 0, i + 1, (i + 1) % n + 1)
 		// Drawn alone (overwriting), then added to the map
+		Trace_Scope("light_draw")
 		sdl.SetRenderTarget(renderer, l.scratch.texture)
 		sdl.SetRenderDrawColor(renderer, 0, 0, 0, 255)
 		sdl.RenderClear(renderer)
@@ -378,11 +381,13 @@ Lighting_Apply :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D
 	}
 	sdl.SetRenderDrawBlendMode(renderer, sdl.BLENDMODE_BLEND)
 	sdl.SetTextureBlendMode(l.scratch.texture, sdl.BLENDMODE_BLEND)
+	Trace_Begin("light_map")
 	RenderTarget_End(renderer, l.target)
 	sdl.SetTextureBlendMode(l.target.texture, sdl.BLENDMODE_MOD)
 	dst := sdl.FRect{0, 0, size.x, size.y}
 	sdl.RenderTexture(renderer, l.target.texture, nil, &dst)
 	sdl.SetTextureBlendMode(l.target.texture, sdl.BLENDMODE_BLEND)
+	Trace_End()
 }
 
 // Frees the scene's light map (Scene_Destroy)

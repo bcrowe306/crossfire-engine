@@ -5,13 +5,13 @@
 #
 #   tools/profile_game.sh [options] <project folder> [scene...]   (default: the start scene)
 #     --seconds <s>       how long each run plays (default 10; the first 60 frames are warm-up)
-#     --runs <n>          runs per scene (default 3; the run with the median frame is kept)
+#     --runs <n>          runs per scene (default 3; reported together, their frames pooled)
 #     --renderer <name>   the player's --renderer (default gpu; software, vulkan, opengl...)
 #     --cpus <list>       taskset's CPU list (default 2-5; "" for none)
 #     --auto              build with SPALL_AUTO (every procedure: slow, for finding hot spots)
 #     --no-build          use the last build
 #     --save-baseline     keep the results as the baseline (build/profile_game/baseline/)
-#     --compare           compare with the baseline; exit 1 if a scene's median or mean frame got
+#     --compare           compare with the baseline; exit 1 if a scene's mean frame got
 #                         slower by more than --threshold percent (default 5)
 #     --threshold <pct>
 #
@@ -142,13 +142,16 @@ for scene in "${SCENES[@]}"; do
 		echo "[$scene $run/$RUNS] median frame $p50 ms"
 	done
 	[[ ${#medians[@]} -gt 0 ]] || continue
+	# The report pools every run's frames and spans; the trace kept for Spall's viewer is the run
+	# with the median frame
+	traces=()
+	for m in "${medians[@]}"; do traces+=("$OUT/runs/$scene/${m#* }/trace.spall"); done
+	"$REPORT" "${traces[@]}" -skip=60 -json="$OUT/results/$scene.json" >"$OUT/results/$scene.txt" 2>&1 || status=1
 	kept=$(printf '%s\n' "${medians[@]}" | sort -g | awk -v n=${#medians[@]} 'NR == int((n + 1) / 2) { print $2 }')
-	dir=$OUT/runs/$scene/$kept
-	cp "$dir/report.txt" "$OUT/results/$scene.txt"
-	cp "$dir/report.json" "$OUT/results/$scene.json"
-	cp "$dir/trace.spall" "$OUT/results/$scene.spall"
+	cp "$OUT/runs/$scene/$kept/trace.spall" "$OUT/results/$scene.spall"
 	all=$(printf '%s\n' "${medians[@]}" | cut -d' ' -f1 | sort -g | tr '\n' ' ')
-	summary+=("$(printf '%-14s kept run %s; median frame per run (ms): %s' "$scene" "$kept" "$all")")
+	pooled=$(grep -o '"mean_ms": *[0-9.e+-]*' "$OUT/results/$scene.json" | head -1 | sed 's/.*: *//' | xargs printf '%.3f')
+	summary+=("$(printf '%-14s mean frame %s ms over %s runs; median per run (ms): %s' "$scene" "$pooled" "${#medians[@]}" "$all")")
 	if [[ $SAVE -eq 1 ]]; then
 		mkdir -p "$OUT/baseline"
 		cp "$OUT/results/$scene.json" "$OUT/baseline/$scene.json"
