@@ -80,7 +80,7 @@ Shader_Compile :: proc(tools: ShaderTools, source, name, scratch: string, stage 
 	if os.write_entire_file(input, transmute([]byte)source) != nil do return {}, fmt.tprintf("%s: couldn't write %s", name, input), false
 
 	run :: proc(command: []string) -> (output: string, ok: bool) {
-		state, stdout, stderr, err := os.process_exec({command = command}, context.temp_allocator)
+		state, stdout, stderr, err := Process_Exec({command = command}, context.temp_allocator)
 		if err != nil do return fmt.tprintf("couldn't run %s: %v", command[0], err), false
 		text := strings.trim_space(fmt.tprintf("%s\n%s", string(stdout), string(stderr)))
 		return text, state.exited && state.exit_code == 0

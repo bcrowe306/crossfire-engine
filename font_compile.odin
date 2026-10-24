@@ -47,7 +47,7 @@ Font_MakeMSDF :: proc(tools: ShaderTools, font, scratch: string, charset := MSDF
 	_ = os.make_directory_all(scratch)
 	charsetFile := JoinPath(scratch, "msdf_charset.txt")
 	if os.write_entire_file(charsetFile, transmute([]byte)charset) != nil do return fmt.tprintf("couldn't write %s", charsetFile), false, false
-	state, stdout, stderr, err := os.process_exec({command = {
+	state, stdout, stderr, err := Process_Exec({command = {
 		tools.msdfAtlasGen, "-font", font, "-charset", charsetFile, "-type", "msdf", "-format", "bmp",
 		"-imageout", image, "-json", layout, "-size", fmt.tprint(size), "-pxrange", fmt.tprint(MSDF_DEFAULT_RANGE),
 	}}, context.temp_allocator)

@@ -125,6 +125,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `player_web.odin` | The browser player: `odin_web_main` (called by `web/main.c`), `Web_Context` (Emscripten's malloc, a per-frame temp arena, console logger), `Player_StartWeb` (Emscripten's main loop drives `Application_Frame`) |
 | `web/` | Files the web export links: `main.c` (C `main`), `odin_env.js` and `odin_env_pre.js` (what Odin's js runtime imports from "odin_env") |
 | `paths.odin` | `JoinPath` ("/"-separated, works everywhere) |
+| `process_exec.odin` | `Process_Exec`: runs a program and reads its output and errors (`os.process_exec` without its lost output); the shader and font tools and every program the editor runs go through it; native only |
+| `process_exec_test.odin` | Tests: a program that prints to both streams and exits at once, 4800 times on eight threads: every byte read, the exit code right |
 | `globals.odin` | **Global scripts**: scripts listed in project.xml (`<global>`), one instance per run, before the scenes; `Global(T)`; ready / update / draw (screen space, `hidden`) / sceneChanged / destroy |
 | `data.odin` | **Data resources**: `Data_Register(T)`, `.data.json` files (`ParseDataResource` / `FormatDataResource`), `Data(T, asset)` (loaded once, shared) |
 | `save.odin` | **Saves**: `Save_Game` / `Load_Game` / `Save_Exists` / `Save_Delete`: every global's fields as JSON (`save:"-"` skips one); desktop files in SDL's pref path, web localStorage; `--dev` runs save apart |
@@ -163,9 +165,9 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `asset_import.odin` | **Import settings**: `TextureFilter` (Default, Smooth, Pixel), `ResourceManager_SetImportSettings` (a project's assets: filters, MSDF fonts; `Game_LoadProject` calls it), `ResourceManager_SetTextureFilter` (changes loaded textures too), `ResourceManager_TextureFilter` |
 | `atlas.odin` | **Texture atlases**: `AtlasData` (`.atlas.xml`: `ParseAtlas` / `FormatAtlas` / clone / destroy / equal), `Atlas_Pack` (power-of-two shelf packing with padding), `Game_LoadAtlas` (`Game.atlases`), `Game_AtlasRegion`, `Sprite_SetRegion`; Sprites' `region` (`Sprite.region`, drawn as `src`) |
 | `fonts.odin` | **Bitmap and MSDF fonts** behind `DrawText` / `MeasureText`: `ParseBMFont` (text and XML), `GlyphFont` (glyph pictures, kerning, pages), the engine's own layout (wrapping, kerning), quads through the draw transform; MSDF fonts (`ResourceManager_SetFontMSDF`, `<font>.msdf.json` / `.msdf.bmp`) through shaders/text/msdf.frag on the GPU renderer, TrueType elsewhere |
-| `font_compile.odin` | `Font_MakeMSDF`: an MSDF atlas beside a font with msdf-atlas-gen (`ShaderTools.msdfAtlasGen`); native only |
+| `font_compile.odin` | `Font_MakeMSDF`: an MSDF atlas beside a font with msdf-atlas-gen (`ShaderTools.msdfAtlasGen`) run by `Process_Exec`; native only |
 | `asset_import_test.odin` | Tests: filters from project files and changed while loaded; packing (inside, apart), atlas files, a scene Sprite drawing its region (pixels), `Sprite_SetRegion`; a BMFont read (both formats), measured (kerning, sizes, wrapping) and drawn (pixels, two pages); an MSDF atlas made, measured like the TrueType font and drawn sharp (GPU; skipped without one or the tool) |
-| `shader_compile.odin` | Compiling GLSL with the shader tools (`ShaderTools_Find`, `Shader_Compile`, `Shader_CompileFile`: `<file>.frag.shader` beside it); native only |
+| `shader_compile.odin` | Compiling GLSL with the shader tools (`ShaderTools_Find`, `Shader_Compile`, `Shader_CompileFile`: `<file>.frag.shader` beside it); the tools run by `Process_Exec`; native only |
 | `shaders/builtin/`, `tools/compile_shaders/`, `tools/build_shader_tools.sh` | The seven built-in effects (GLSL and their committed `.frag.shader`), the program compiling them, and the script building glslang + SDL_shadercross from `third_party/` |
 | `shaders_test.odin` | Tests: params and std140 offsets, bundles, built-ins load; a node's shader, Animator tracks, scene files; drawing with an offscreen GPU renderer (skipped without a GPU): the hit flash, a screen effect with and without the screen layers, hidden; the hit flash without the GPU renderer; compiling (skipped without the tools) |
 | `touch.odin` | **Touch input and on-screen controls**: `Touch` (`Input_GetTouches` / `GetTouchCount` / `IsTouchScreen`: fingers in game coordinates, pressed / released / claimed), `VirtualJoystick` and `TouchButton` nodes (`TouchControl`: `TouchControlSettings`, actions; `CreateVirtualJoystick`, `CreateTouchButton`, `VirtualJoystick_GetVector`, `TouchButton_IsPressed`), pushing input actions |
@@ -246,6 +248,16 @@ the target's, so a target of another format (they were RGBA32) drew with pipelin
 incompatible render pass (Vulkan validation's `VUID-vkCmdDraw-renderPass-02684`, found by the
 editor, whose viewport draws with SDL's Vulkan renderer). Make new targets with it, and convert
 pixels read back (`sdl.ConvertSurface`) rather than assume an order.
+
+**Running programs goes through `Process_Exec`** (process_exec.odin), never `os.process_exec`:
+Odin's stops reading a pipe when `poll` says the writer hung up with nothing to read, and Linux's
+pipe poll checks "data?" and "writers?" one after the other without a lock, so a program that
+writes and exits between the two seems to have printed nothing (about one run in 1000-3000 of a
+quick program under load: an empty `git status` in the editor, a shader compile's messages
+gone). `Process_Exec` reads after a hang-up until `read` says it's the end, and sleeps a
+millisecond when nothing came instead of spinning. The editor's `Process_Exec` is this one. The
+upstream report's draft, with a repro: docs/upstream/odin_process_exec.md. Test:
+`process_exec_keeps_quick_output` (it caught `os.process_exec` in 5 of 10 runs).
 
 **Renderer** (render_backend.odin): the window's SDL renderer comes from the project's
 `renderer` (`Application_Setup`'s `backend`), or the player's `--renderer <name>`. It used to be
