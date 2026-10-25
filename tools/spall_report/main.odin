@@ -3,7 +3,7 @@ Reads Spall traces (`.spall`, the binary format of `core:prof/spall`) and says w
 as text and JSON, so performance work can be measured without Spall's viewer.
 
 	spall_report <trace.spall>... [-skip=<frames>] [-from=<mark>] [-to=<mark>] [-top=<n>] [-json=<file>]
-	             [-thread=<name>] [-frame=<scope>]
+	             [-thread=<name>] [-frame=<scope>] [-callers=<name>]
 	spall_report compare <before.json> <after.json> [-threshold=<percent>]
 
 The report:
@@ -18,6 +18,8 @@ The report:
   nested in itself counts once), the self time (without its children), the mean and the longest,
   and both per frame. Sorted by self time; `-top` limits the rows (default 40).
 - **Threads:** each other thread's busy time (its top-level spans).
+- **Who calls a span:** `-callers=<name>` lists the spans directly enclosing it, by the time they
+  hold (with SPALL_AUTO: the calling procedures).
 - **Several traces** (runs of one scenario) make one report: their frames and spans are pooled
   (intervals within each run), which steadies the numbers more than keeping one run.
 
@@ -64,6 +66,8 @@ Span :: struct {
 	child: f64,
 	// Depth on its thread's stack (0: top level)
 	depth: int,
+	// The enclosing span's name (-1 at the top level)
+	parent: int,
 	// Whether a span of the same name encloses it (its time is already in that one's total)
 	nested: bool,
 }
@@ -166,6 +170,7 @@ reportMain :: proc(args: []string) -> int {
 	threadName := option(args, "thread", "main")
 	frameName := option(args, "frame", "frame")
 	jsonPath := option(args, "json", "")
+	callers := option(args, "callers", "")
 
 	traces := make([dynamic]^Trace, context.temp_allocator)
 	for path in paths {
@@ -185,6 +190,7 @@ reportMain :: proc(args: []string) -> int {
 	report, found := makeReport(traces[:], strings.join(paths[:], " "), threadName, frameName, skip, from, to)
 	if !found do return 1
 	printReport(report, top)
+	if callers != "" do printCallers(traces[:], threadName, callers, top)
 	if jsonPath != "" {
 		out, merr := json.marshal(report, {pretty = true, use_spaces = true, spaces = 2})
 		if merr != nil || os.write_entire_file(jsonPath, out) != nil {
@@ -261,7 +267,8 @@ parseEvents :: proc(trace: ^Trace, thread: ^Thread, events: []u8) {
 			id := nameId(trace, name)
 			nested := false
 			for s in thread.stack do if s.name == id { nested = true; break }
-			append(&thread.stack, Span{name = id, start = ts, depth = len(thread.stack), nested = nested})
+			parent := len(thread.stack) > 0 ? thread.stack[len(thread.stack) - 1].name : -1
+			append(&thread.stack, Span{name = id, start = ts, depth = len(thread.stack), nested = nested, parent = parent})
 			i += 11 + nameLen + argsLen
 		case .End:
 			if i + 9 > len(events) do return
@@ -510,6 +517,36 @@ readReport :: proc(path: string) -> (r: Report, ok: bool) {
 		return
 	}
 	return r, true
+}
+
+// The spans that directly enclose the named one (-callers=<name>), by how much of its time they hold
+printCallers :: proc(traces: []^Trace, threadName, name: string, top: int) {
+	Caller :: struct { name: string, count: int, total: f64 }
+	byParent := make(map[string]Caller, context.temp_allocator)
+	for trace in traces {
+		id, found := trace.nameIds[name]
+		if !found do continue
+		for _, t in trace.threads {
+			if t.name != threadName do continue
+			for s in t.spans do if s.name == id {
+				parent := s.parent >= 0 ? trace.names[s.parent] : "(top level)"
+				c := byParent[parent]
+				c.name = parent
+				c.count += 1
+				c.total += (s.end - s.start) / 1e6
+				byParent[parent] = c
+			}
+		}
+	}
+	list := make([dynamic]Caller, context.temp_allocator)
+	for _, c in byParent do append(&list, c)
+	slice.sort_by(list[:], proc(a, b: Caller) -> bool { return a.total > b.total })
+	fmt.printfln("\nCallers of %q (the span enclosing each call):", name)
+	fmt.printfln("%-44s %10s %12s", "caller", "calls", "total ms")
+	for c, i in list {
+		if i >= top do break
+		fmt.printfln("%-44s %10s %12s", c.name, fmt.tprint(c.count), num(c.total, 3))
+	}
 }
 
 // When the first span of that name on the thread starts, at or after `after`

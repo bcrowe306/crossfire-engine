@@ -1407,7 +1407,9 @@ procedure is empty (the optimizer drops them); the browser build has none (`trac
   total (a name nested in itself counted once), self (without children), mean, max, per frame
   (frames: `frame` spans, the first `-skip` warm-up); other threads' busy time; `-from` / `-to`
   restrict it to the frames between two `mark:<name>` spans (the editor's driver writes them);
-  `-json` for `compare`. Several traces make one report, their frames and spans pooled (the
+  `-json` for `compare`; `-callers=<name>` lists the spans enclosing a span (with SPALL_AUTO, its
+  calling procedures). SPALL_AUTO's hooks cost every call, so tiny procedures called thousands of
+  times look far bigger than they are: confirm in a normal build. Several traces make one report, their frames and spans pooled (the
   harnesses report all their runs together). `compare` gates on the mean frame (frames with
   and without a timer's render alternate, so the median jumps) and prints each span's time per
   frame and per call. The editor's `task profile` uses the same tool.
