@@ -1,11 +1,12 @@
 #+build !js
 package crossfire
 
-import "core:mem"
-import "core:os"
-import "core:sync"
+// Used only off Windows (the test has nothing to run there): required, so -vet-unused accepts them
+@(require) import "core:mem"
+@(require) import "core:os"
+@(require) import "core:sync"
 import "core:testing"
-import "core:thread"
+@(require) import "core:thread"
 
 // How many programs run at once, and how many times each, in process_exec_keeps_quick_output
 @(private="file")
