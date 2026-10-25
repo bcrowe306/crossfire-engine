@@ -415,10 +415,13 @@ Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 	// Physics steps before nodes update: they see this frame's positions and collisions
 	if !scene.paused {
 		physicsStart := sdl.GetPerformanceCounter()
+		Trace_Begin("physics")
 		Physics_Update(scene, deltaTime)
+		Trace_End()
 		if scene.game != nil && scene.game.currentScene == scene do profileAdd(&scene.game.profile.physics, physicsStart)
 	}
 
+	Trace_Begin("nodes_update")
 	for node in scene.nodes {
 		if !Node_CanProcess(node) do continue
 		if node.update != nil {
@@ -432,7 +435,9 @@ Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 		}
 		for s in node.moreScripts do if s.info.update != nil do s.info.update(s.data, events, deltaTime)
 	}
+	Trace_End()
 
+	Trace_Begin("tweens")
 	if len(scene.tweens) > 0 do Scene_UpdateTweens(scene, deltaTime)
 	// Bones aimed by IK chains, after the Animator and tweens moved them (skeleton.odin)
 	if len(scene.ikChains) > 0 do Scene_SolveIK(scene)
@@ -440,11 +445,14 @@ Scene_Update :: proc(scene: ^Scene, events: []sdl.Event, deltaTime: f64) {
 	// After nodes have moved (the camera's follow target too), the camera follows its target,
 	// advances any pan and stays inside its bounds
 	// Camera zones and zooms (camera_tools.odin), then the clamp, then parallax layers follow
+	Trace_End()
+	Trace_Begin("camera")
 	CameraTools_Update(scene, deltaTime)
 	if scene.camera != nil && scene.game != nil {
 		Camera2D_Update(scene.camera, scene.game.size, deltaTime)
 	}
 	CameraTools_Parallax(scene)
+	Trace_End()
 }
 
 /*
@@ -515,12 +523,15 @@ Inputs:
 */
 Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D, screenLayersUseView := false, positionOnlyScale: f32 = 1) {
 	scene.ui.stamp += 1
+	Trace_Scope("scene_draw")
 	defer { SetDrawState(TRANSFORM2D_IDENTITY); drawState().material = nil }
 	shaderTime := scene.game != nil ? f32(scene.game.time) : 0
 	// Shapes blend with the node's blend mode; afterwards normal alpha blending again
 	defer if renderer != nil do sdl.SetRenderDrawBlendMode(renderer, sdl.BLENDMODE_BLEND)
 
+	Trace_Begin("draw_order")
 	layers := drawOrder(scene)
+	Trace_End()
 	// Lighting multiplies the light map over the world after its last lit layer (screen layers
 	// aren't lit)
 	lastLit := -1
@@ -546,10 +557,13 @@ Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transfo
 		size := screenEffectsSize(renderer)
 		if effectsEnd < 0 || size.x <= 0 || !screenEffectsBegin(scene, renderer, size) do effects = nil
 	}
+	Trace_Begin("nodes_draw")
 	for &items, layer in layers {
 		if lastLit >= 0 && !litDone && int(layer) > lastLit {
 			drawState().material = nil
+			Trace_Begin("lighting")
 			Lighting_Apply(scene, renderer, view)
+			Trace_End()
 			litDone = true
 		}
 		if len(effects) > 0 && int(layer) == effectsEnd + 1 {
@@ -574,8 +588,12 @@ Scene_DrawWithView :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transfo
 			for s in node.moreScripts do if s.info.draw != nil do s.info.draw(s.data, renderer)
 		}
 	}
+	Trace_End()
 	drawState().material = nil
-	if lastLit >= 0 && !litDone do Lighting_Apply(scene, renderer, view)
+	if lastLit >= 0 && !litDone {
+		Trace_Scope("lighting")
+		Lighting_Apply(scene, renderer, view)
+	}
 	if len(effects) > 0 do screenEffectsEnd(scene, renderer, effects, shaderTime)
 	if scene.physics != nil && scene.physics.settings.debugDraw do Physics_DrawDebug(scene, renderer, view)
 	if len(scene.debugShapes) > 0 do debugDrawShapes(scene, renderer, view)

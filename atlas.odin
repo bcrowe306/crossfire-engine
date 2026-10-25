@@ -60,7 +60,7 @@ AtlasRegion :: struct {
 
 // Whether a path is an atlas file
 Atlas_IsFile :: proc(path: string) -> bool {
-	return strings.has_suffix(strings.to_lower(path, context.temp_allocator), ATLAS_EXTENSION)
+	return hasSuffixFold(path, ATLAS_EXTENSION)
 }
 
 /*

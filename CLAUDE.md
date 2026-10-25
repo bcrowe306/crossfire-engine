@@ -27,6 +27,8 @@ odin test . -vet-unused -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true   # unit tests
 odin check player -vet-unused               # type-check the player program
 odin check . -no-entry-point -vet-unused -target:js_wasm32   # the browser build (web export)
 odin build player -out:player_bin           # build the player: player_bin <project folder>
+tools/profile_game.sh <project> [scene...]  # profile a game's scenes (Spall, headless): build/profile_game/results/
+odin run tools/spall_report -o:speed -- <trace.spall>   # where a Spall trace's time went (and `compare a.json b.json`)
 ```
 
 To run something, build a game that uses it. In the workspace root, `odin run .` runs asteroids.
@@ -92,6 +94,8 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `camera_test.odin` | Tests: following a moving target (snapping on first, trailing, pans pausing it, a removed target), offset and look-ahead (still, both ways, eased, a zero delta), per-side limits with zoom (one side, centered between two, freeing, SetBounds), a scene file's camera (settings parsed and built, a second camera following, a missing target, limits, shake settings with a frequency) |
 | `localization.odin` | **Localization**: CSV translation tables (assets of kind "Translation", Godot's layout: `key,en,fr`), `Tr(key)`, `Tr_Text` ("@key" Labels and Menu items translate as they draw), `Locale_Set` / `Get` / `List` / `System`, the project's `locale` |
 | `localization_test.odin` | Tests: tables (quotes, comments, line breaks), merging, fallbacks, region matching, "@" text, a project's tables and locale |
+| `trace.odin`, `trace_native.odin`, `trace_web.odin`, `trace_clock_*.odin` | **Profiling with Spall** (`-define:SPALL=true`; nothing without it, nothing in the browser): `Trace_Scope` / `Begin` / `End`, `Trace_Start` / `Stop` (the player's: `SPALL_TRACE` names the file), `Trace_Share` (record through a program's begin and end: the editor passes Skald's), `SPALL_CLOCK=cpu` (each thread's CPU time: `trace_clock_posix.odin` / `trace_clock_other.odin`), `Trace_ThreadEnd`, `Trace_NameThread`, `Trace_AutoEnter` / `Exit` (a main package's instrumentation hooks with `SPALL_AUTO`) |
+| `tools/spall_report/`, `tools/profile_game.sh` | **Reading traces and profiling games**: `spall_report` (a `.spall` file's frames and spans: per frame, self and total time, other threads; `-from` / `-to` marks, `-json`, `compare` with a threshold), `profile_game.sh` (a project's scenes played headless in a Spall build of the player, runs, the median kept, a baseline to compare with) |
 | `debug.odin` | **Debug drawing**: `Debug_Line` / `Rect` / `Circle` / `Text` (world space, over the scene, for a frame or `seconds`), `Debug_Clear`; the **debug overlay** (`Game.debugOverlay`, F10 with dev keys: fps, frame times, the scene's counts), `Game_GetFrameStats` |
 | `debug_test.odin` | Tests: debug shapes' lifetimes and freeing, drawing through the view, frame stats and the overlay |
 | `logging.odin` | **Logging for games**: `LogLevel` (Debug, Info, Warning, Error), `Log_Debug` / `Log_Info` / `Log_Warning` / `Log_Error` (fmt text, `category =`, "game" by default), `Log(level, category, ...)`, `LogSink` and `Log_CreateLogger` (the `core:log` logger the player installs), `Log_SetLevel` / `Log_GetLevel`, the line format (`Log_FormatLine` / `Log_ParseLine`: `[WARN ] [player] text`), `Log_HookSDL` (SDL's messages, category "SDL") |
@@ -952,8 +956,21 @@ light map after the last layer the camera draws (`Lighting_Apply`; screen layers
 unlit, the background before it is lit). The map is a render target the screen's size (the
 logical presentation's, else the viewport's: the editor's preview), cleared to the ambient
 color; each light's visibility polygon is a triangle fan whose vertex colors carry a linear
-falloff, drawn **alone into a scratch target with no blending, then added** to the map: added
-straight, SDL's software renderer drew shared triangle edges twice and left bright seams. The
+falloff. **On GPU renderers each fan is added straight into the map** (`BLENDMODE_ADD`): one
+target switch into the map and one out for the whole map, where drawing each light in a scratch
+target first cost two more switches a light, and on SDL's Vulkan renderer a switch can wait on
+the GPU (measured 2026-10-24, the demo's title scene with two lights, `profile_game.sh
+--renderer vulkan`: 1.15 ms a light, the frame 9.3 -> 5.7 ms mean). **SDL's software renderer
+still draws each fan alone into the scratch target with no blending, then adds it**: added
+straight, it drew shared triangle edges twice and left bright seams (`isSoftwareRenderer`).
+`lit_scenes_draw_alike_on_the_gpu` compares the two paths' pictures (shadow edges may differ
+by a pixel: the renderers round triangle edges differently).
+**On SDL's Vulkan renderer the frame's first render target switch waits for the GPU**
+(`target_switch` in `RenderTarget_Begin`, measured 2026-10-24 on the title scene: 4.2 ms): SDL
+submits and waits (VULKAN_IssueBatch) for the previous frame's work, so the wait is the GPU's
+time for a frame (an Intel UHD 620 here), not the switch. Drawing the light map before the world
+didn't change it (tried and dropped); without any switch the wait moves to `present`, as on SDL's
+GPU renderer (present 1.6 ms, the whole frame 3.1 ms there). The
 map is drawn with `BLENDMODE_MOD`. Rays hit occluder edges with a little tolerance past their
 ends, or a ray through a corner slipped between two edges (a bright sliver). Both targets live
 on `Scene.lighting` and are freed by `Scene_Destroy`.
@@ -1330,12 +1347,76 @@ machine: Intel UHD 620 laptop, -o:speed):
 | LDtk: the demo's Forest level (2026-10-23: 210 x 30, no tree layers), software: a screenful (3x) / the whole level | | 11.7 ms / 5.9 ms |
 | text: 30 centered labels a frame (software) | 0.36 ms | (no cache needed) |
 
+**Font paths were lowercased for every string drawn or measured** (2026-10-24, found by a
+SPALL_AUTO run of the demo's forest level: `Font_IsBitmap` made a lowercase copy of the font's
+path to test its extension, `glyphFontFor` asks it on every `DrawText` / `MeasureText`; 58 773
+`to_lower` calls a frame). `hasSuffixFold` compares the suffix ignoring case without a copy
+(`Atlas_IsFile` too). Measured ABBA on the CPU clock on a quiet machine (four runs each, 8 s):
+the forest's frame 1.65 -> 0.89 ms, `nodes_update` 0.93 -> 0.29 ms; spans neither build changed
+agreed within 1% (`present` 0.325 / 0.322 ms).
+
 Measured and left alone (not worth it at these numbers): particles' `#soa` layout and update
 (0.1 ms for 4000 particles), physics multithreading (0.3 ms for 1000 bodies), EventSubject's
 proc fields (notify is cheap), Node struct reordering (update over 20000 nodes is 0.46 ms), a
 text-layout cache (30 labels a frame: 0.36 ms).
 Worth doing later if games need it: particle collisions on a grid (O(n²) now: 2 ms for 4 x 500),
 LDtk culling by grid for very large levels (it tests every tile; fine for the forest).
+
+### Profiling with Spall (trace.odin, tools/profile_game.sh, tools/spall_report)
+
+The benchmarks time single costs; a Spall trace (https://gravitymoth.com/spall/) shows a whole
+frame. **Build with `-define:SPALL=true`** and the engine's spans are recorded: `frame` (one
+`Application_Frame`) holding `events`, `update` (`Game_Update`: `input`, `audio`, `globals`,
+`scene_update`: `physics`, `nodes_update`, `tweens` (with IK), `camera`), `draw` (`scene_draw`:
+`draw_order`, `nodes_draw`, `lighting`: `light_visibility`, `light_draw`, `light_map`) and
+`present`. Without the define every `Trace_*`
+procedure is empty (the optimizer drops them); the browser build has none (`trace_web.odin`).
+- **Where the file goes:** the player starts the trace (`Player_Run`), named by `SPALL_TRACE`
+  (default `trace.spall`), and stops it when the game ends. Timestamps are nanoseconds
+  (`context_create_with_scale(.., false, 1)`: no two-second clock calibration).
+- **The clock** (`SPALL_CLOCK`): wall time by default; `cpu` stamps events with each thread's
+  CPU time (`threadCPUNanoseconds`: POSIX's thread CPU clock, trace_clock_posix.odin; wall time
+  elsewhere), which leaves out time the thread was descheduled (another program's load), its
+  GPU waits and sleeps: for comparing CPU work on a busy machine. The engine writes its events and
+  buffers itself (`traceBufferWrite`): spall's `buffer_flush` adds a "flush" event stamped with
+  the wall clock, which in a CPU-clock trace would be a span of nonsense.
+- **Threads:** each thread records into its own buffer, made on first use (a thread-local), freed
+  by `Trace_ThreadEnd` or `Trace_Stop`. While a buffer is made or freed the thread records
+  nothing (`traceBusy`): allocating runs instrumented procedures under SPALL_AUTO, which would
+  ask for the buffer again or write into one being freed.
+- **One trace for a program and the engine:** the editor's trace is Skald's;
+  `Trace_Share(skald.prof_begin, skald.prof_end)` sends the engine's spans through Skald's
+  procedures, into the same per-thread buffers on the same clock, so the viewport's `scene_draw`
+  nests inside the editor's `Preview_Render`.
+- **Every procedure** (`-define:SPALL_AUTO=true` with SPALL): Odin calls the program's
+  `@(instrumentation_enter)` / `_exit` hooks around every procedure not marked
+  `@(no_instrumentation)`. **The trace's own procedures must not be instrumented, and here the
+  `#+no-instrumentation` file tag didn't do it** (the build still put the hooks in
+  `Trace_Begin`, which then called itself until the stack ran out): every procedure of
+  trace_native.odin and the clock files carries `@(no_instrumentation)`; the ones slicing a
+  buffer are `#no_bounds_check` (the runtime's bounds-check helpers are inlined *with* the hooks:
+  `slice_expr_error_lo_hi` called back into `Trace_Begin`); the clocks are foreign calls
+  (`clock_gettime`, `QueryPerformanceCounter`), since core:time is instrumented; writing a buffer
+  holds `traceBusy`. The hooks must be in one package of the program: the player's main
+  defines them (`player/main.odin`, and profile_game.sh's generated main) and calls
+  `Trace_AutoEnter` / `Exit`. trace_native.odin is `#+no-instrumentation`.
+- **The game harness** (`tools/profile_game.sh <project> [scene...]`): plays each scene of a copy
+  of the project for `--seconds` in a Spall build of the player (with the project's scripts when
+  it has them), headless (offscreen video, dummy audio, its own XDG_DATA_HOME: saves stay in the
+  run's folder), on pinned CPUs, `--runs` times; keeps the median run's report and trace in
+  `build/profile_game/results/` (the report over all runs, the median run's trace), and
+  `--save-baseline` / `--compare` (exit 1 past `--threshold`).
+  Nobody presses keys: the scene plays as it starts.
+- **Reading a trace** (`tools/spall_report`): per span name on a thread (default `main`): count,
+  total (a name nested in itself counted once), self (without children), mean, max, per frame
+  (frames: `frame` spans, the first `-skip` warm-up); other threads' busy time; `-from` / `-to`
+  restrict it to the frames between two `mark:<name>` spans (the editor's driver writes them);
+  `-json` for `compare`; `-callers=<name>` lists the spans enclosing a span (with SPALL_AUTO, its
+  calling procedures). SPALL_AUTO's hooks cost every call, so tiny procedures called thousands of
+  times look far bigger than they are: confirm in a normal build. Several traces make one report, their frames and spans pooled (the
+  harnesses report all their runs together). `compare` gates on the mean frame (frames with
+  and without a timer's render alternate, so the median jumps) and prints each span's time per
+  frame and per call. The editor's `task profile` uses the same tool.
 
 **SDL's software renderer** (the editor's fallback, headless runs): each tile layer is drawn once,
 tile by tile and unscaled, into a texture of its size (`LDtkTileLayer.cache`, at most

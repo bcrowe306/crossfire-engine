@@ -1346,8 +1346,8 @@ ldtkTileLayerDestroy :: proc(node: ^Node) {
 	dropTileCache(cast(^LDtkTileLayer)node)
 }
 
-// Whether a renderer is SDL's software renderer
-@(private="file")
+// Whether a renderer is SDL's software renderer (the tile layers' and the light map's own paths)
+@(private)
 isSoftwareRenderer :: proc(renderer: ^sdl.Renderer) -> bool {
 	name := sdl.GetRendererName(renderer)
 	return name != nil && string(name) == "software"

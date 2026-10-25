@@ -70,6 +70,9 @@ Player_Run :: proc(args: []string) -> int {
 		return 0
 	}
 
+	// A Spall trace when built with SPALL (trace.odin): SPALL_TRACE names the file
+	traced := Trace_Start()
+	defer if traced do Trace_Stop()
 	app := Application{}
 	if !Player_Setup(options, &app) do return 1
 	defer ProjectData_Destroy(&playerProject)

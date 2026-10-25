@@ -372,8 +372,12 @@ Inputs:
 */
 Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 	// Input first: everything this frame sees the same state
+	Trace_Begin("input")
 	Input_Update(&game.input, events)
+	Trace_End()
+	Trace_Begin("audio")
 	Audio_Update(game)
+	Trace_End()
 	for &event in events {
 		if event.type == .WINDOW_RESIZED {
 			game.windowSize = {f32(event.window.data1), f32(event.window.data2)}
@@ -446,12 +450,15 @@ Game_Update :: proc(game: ^Game, events: []sdl.Event, deltaTime: f64) {
 	// A scene change's cover and loading (scene_flow.odin)
 	SceneFlow_Update(game, realDeltaTime)
 	// Globals first: the scene's nodes see what they changed this frame
+	Trace_Begin("globals")
 	Globals_Update(game, events, deltaTime)
+	Trace_End()
 
 	// No scene yet (before the first switch) is fine: nothing to update. Scenes opened over it
 	// update after it; one that pauses what's under it stops the ones below
 	base, from := SceneFlow_Updating(game)
 	if base && game.currentScene != nil && game.currentScene.update != nil {
+		Trace_Scope("scene_update")
 		game.currentScene->update(events, deltaTime)
 	}
 	for o in game.flow.overlays[from:] do if o.scene.update != nil do o.scene->update(events, deltaTime)
