@@ -97,7 +97,16 @@ BMFontKerning :: struct {
 
 // Whether a font path is a bitmap font
 Font_IsBitmap :: proc(path: string) -> bool {
-	return strings.has_suffix(strings.to_lower(path, context.temp_allocator), BMFONT_EXTENSION)
+	return hasSuffixFold(path, BMFONT_EXTENSION)
+}
+
+// Whether a path ends with a suffix, ignoring case, without making a lowercase copy: text drawing
+// and measuring ask this of a font's path for every string (`glyphFontFor`), and lowercasing the
+// whole path each time was most of a label-heavy frame (profiled 2026-10-24: 58 773 to_lower
+// calls a frame in the demo's forest level, 87% of its time under full instrumentation)
+@(private)
+hasSuffixFold :: proc(s, suffix: string) -> bool {
+	return len(s) >= len(suffix) && strings.equal_fold(s[len(s) - len(suffix):], suffix)
 }
 
 /*

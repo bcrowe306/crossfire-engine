@@ -6,8 +6,11 @@ import "base:runtime"
 @(require) import "core:os"
 import "core:prof/spall"
 import "core:sync"
-import "core:time"
 
+// Every procedure here is @(no_instrumentation) (the file tag alone left them instrumented), and
+// the ones slicing a buffer are #no_bounds_check: the runtime's bounds-check helpers are inlined
+// with SPALL_AUTO's hooks, which would call back into Trace_Begin forever (spall's own code says
+// so too)
 // The trace's state (trace.odin): the engine's own trace, or a program's shared one
 @(private="file") traceCtx: spall.Context
 @(private="file") traceRunning: bool
@@ -40,6 +43,7 @@ Example:
 	traced := e.Trace_Start("game.spall")
 	defer if traced do e.Trace_Stop()
 */
+@(no_instrumentation)
 Trace_Start :: proc(path := "") -> bool {
 	when SPALL {
 		if traceRunning || sharedBegin != nil do return true
@@ -63,6 +67,7 @@ Trace_Start :: proc(path := "") -> bool {
 Stops the engine's trace: every thread's buffer is written and freed, and the file closed.
 Threads still recording must have finished. A shared trace is its owner's to stop.
 */
+@(no_instrumentation)
 Trace_Stop :: proc() {
 	when SPALL {
 		if !traceRunning do return
@@ -92,6 +97,7 @@ Inputs:
 - begin: The program's begin-a-span procedure
 - end: Its end-the-innermost-span procedure
 */
+@(no_instrumentation)
 Trace_Share :: proc(begin: TraceBeginProc, end: TraceEndProc) {
 	when SPALL {
 		sharedBegin = begin
@@ -105,6 +111,7 @@ Whether a trace is being written (the engine's own or a shared one).
 Returns:
 - true while recording
 */
+@(no_instrumentation)
 Trace_Running :: proc "contextless" () -> bool {
 	when SPALL do return traceRunning || sharedBegin != nil
 	else do return false
@@ -112,15 +119,17 @@ Trace_Running :: proc "contextless" () -> bool {
 
 // The engine's own trace's clock: nanoseconds of wall time, or of the thread's CPU time
 @(private="file")
+@(no_instrumentation)
 traceNow :: proc "contextless" () -> u64 {
 	if traceCPUClock {
 		if ns, ok := threadCPUNanoseconds(); ok do return ns
 	}
-	return u64(time.tick_now()._nsec)
+	return wallNanoseconds()
 }
 
 // The calling thread's buffer in the engine's own trace, made the first time (nil without one)
 @(private="file")
+@(no_instrumentation)
 traceThreadBuffer :: proc "contextless" () -> ^spall.Buffer {
 	when SPALL {
 		if traceBusy do return nil
@@ -148,6 +157,7 @@ Writes and frees the calling thread's buffer in the engine's own trace: call it 
 that recorded ends. The thread gets a new buffer if it records again. (A shared trace's buffers
 are its owner's.)
 */
+@(no_instrumentation)
 Trace_ThreadEnd :: proc "contextless" () {
 	when SPALL {
 		b := traceBuffer
@@ -174,7 +184,8 @@ owner).
 Inputs:
 - name: The thread's name
 */
-Trace_NameThread :: proc "contextless" (name: string) {
+@(no_instrumentation)
+Trace_NameThread :: proc "contextless" (name: string) #no_bounds_check {
 	when SPALL {
 		if sharedBegin != nil do return
 		if b := traceThreadBuffer(); b != nil {
@@ -192,7 +203,8 @@ Inputs:
 - name: The span's name in the trace
 - args: Extra text shown with it
 */
-Trace_Begin :: proc "contextless" (name: string, args := "") {
+@(no_instrumentation)
+Trace_Begin :: proc "contextless" (name: string, args := "") #no_bounds_check {
 	when SPALL {
 		if sharedBegin != nil {
 			sharedBegin(name, args)
@@ -206,7 +218,8 @@ Trace_Begin :: proc "contextless" (name: string, args := "") {
 }
 
 // Trace_End ends the calling thread's innermost span.
-Trace_End :: proc "contextless" () {
+@(no_instrumentation)
+Trace_End :: proc "contextless" () #no_bounds_check {
 	when SPALL {
 		if sharedEnd != nil {
 			sharedEnd()
@@ -227,11 +240,13 @@ the procedure's location.
 Inputs:
 - loc: The entered procedure's location
 */
+@(no_instrumentation)
 Trace_AutoEnter :: proc "contextless" (loc: runtime.Source_Code_Location) {
 	when SPALL do Trace_Begin(loc.procedure)
 }
 
 // Trace_AutoExit is what a main package's `@(instrumentation_exit)` hook calls: the span's end.
+@(no_instrumentation)
 Trace_AutoExit :: proc "contextless" () {
 	when SPALL do Trace_End()
 }
@@ -239,8 +254,13 @@ Trace_AutoExit :: proc "contextless" () {
 // Writes a buffer's events to the file and empties it (spall's buffer_flush, without the
 // wall-clock "flush" event it adds)
 @(private="file")
-traceBufferWrite :: proc "contextless" (b: ^spall.Buffer) {
+@(no_instrumentation)
+traceBufferWrite :: proc "contextless" (b: ^spall.Buffer) #no_bounds_check {
 	if len(b.data) == 0 || b.head <= size_of(spall.Manual_Buffer_Header) do return
+	// Locking and writing run instrumented procedures (SPALL_AUTO): no recording meanwhile
+	was := traceBusy
+	traceBusy = true
+	defer traceBusy = was
 	hdr := (^spall.Manual_Buffer_Header)(raw_data(b.data))
 	hdr.size = u32le(b.head - size_of(spall.Manual_Buffer_Header))
 	hdr.pid = u32le(b.pid)
@@ -255,6 +275,7 @@ traceBufferWrite :: proc "contextless" (b: ^spall.Buffer) {
 }
 
 @(private="file")
+@(no_instrumentation)
 traceBufferFree :: proc "contextless" (b: ^spall.Buffer) {
 	context = Platform_DefaultContext()
 	delete(b.data, heapAllocator())

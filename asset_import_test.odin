@@ -287,3 +287,14 @@ msdf_fonts_are_made_and_drawn :: proc(t: ^testing.T) {
 	testing.expectf(t, stroke & 0xff > 0xc0, "the stroke: %08x", stroke)
 	testing.expectf(t, beside & 0xff < 0x40, "clear beside it: %08x", beside)
 }
+
+@(test)
+font_and_atlas_paths_are_told_apart_ignoring_case :: proc(t: ^testing.T) {
+	testing.expect(t, Font_IsBitmap("fonts/pixel.fnt"), "a .fnt file")
+	testing.expect(t, Font_IsBitmap("Fonts/PIXEL.FNT"), "upper case")
+	testing.expect(t, !Font_IsBitmap("fonts/OpenSans.ttf"), "a TrueType font")
+	testing.expect(t, !Font_IsBitmap("fnt"), "shorter than the extension")
+	testing.expect(t, Atlas_IsFile("atlases/ui.atlas.xml"), "an atlas")
+	testing.expect(t, Atlas_IsFile("atlases/UI.ATLAS.XML"), "an atlas in upper case")
+	testing.expect(t, !Atlas_IsFile("scenes/Main.scene.xml"), "a scene")
+}

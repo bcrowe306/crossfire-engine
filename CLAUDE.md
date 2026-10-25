@@ -1343,6 +1343,14 @@ machine: Intel UHD 620 laptop, -o:speed):
 | LDtk: the demo's Forest level (2026-10-23: 210 x 30, no tree layers), software: a screenful (3x) / the whole level | | 11.7 ms / 5.9 ms |
 | text: 30 centered labels a frame (software) | 0.36 ms | (no cache needed) |
 
+**Font paths were lowercased for every string drawn or measured** (2026-10-24, found by a
+SPALL_AUTO run of the demo's forest level: `Font_IsBitmap` made a lowercase copy of the font's
+path to test its extension, `glyphFontFor` asks it on every `DrawText` / `MeasureText`; 58 773
+`to_lower` calls a frame). `hasSuffixFold` compares the suffix ignoring case without a copy
+(`Atlas_IsFile` too). Measured ABBA on the CPU clock on a quiet machine (four runs each, 8 s):
+the forest's frame 1.65 -> 0.89 ms, `nodes_update` 0.93 -> 0.29 ms; spans neither build changed
+agreed within 1% (`present` 0.325 / 0.322 ms).
+
 Measured and left alone (not worth it at these numbers): particles' `#soa` layout and update
 (0.1 ms for 4000 particles), physics multithreading (0.3 ms for 1000 bodies), EventSubject's
 proc fields (notify is cheap), Node struct reordering (update over 20000 nodes is 0.46 ms), a
@@ -1378,7 +1386,14 @@ procedure is empty (the optimizer drops them); the browser build has none (`trac
   nests inside the editor's `Preview_Render`.
 - **Every procedure** (`-define:SPALL_AUTO=true` with SPALL): Odin calls the program's
   `@(instrumentation_enter)` / `_exit` hooks around every procedure not marked
-  `@(no_instrumentation)`. The hooks must be in one package of the program: the player's main
+  `@(no_instrumentation)`. **The trace's own procedures must not be instrumented, and here the
+  `#+no-instrumentation` file tag didn't do it** (the build still put the hooks in
+  `Trace_Begin`, which then called itself until the stack ran out): every procedure of
+  trace_native.odin and the clock files carries `@(no_instrumentation)`; the ones slicing a
+  buffer are `#no_bounds_check` (the runtime's bounds-check helpers are inlined *with* the hooks:
+  `slice_expr_error_lo_hi` called back into `Trace_Begin`); the clocks are foreign calls
+  (`clock_gettime`, `QueryPerformanceCounter`), since core:time is instrumented; writing a buffer
+  holds `traceBusy`. The hooks must be in one package of the program: the player's main
   defines them (`player/main.odin`, and profile_game.sh's generated main) and calls
   `Trace_AutoEnter` / `Exit`. trace_native.odin is `#+no-instrumentation`.
 - **The game harness** (`tools/profile_game.sh <project> [scene...]`): plays each scene of a copy
