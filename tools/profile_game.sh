@@ -161,6 +161,8 @@ waitQuiet() {
 status=0
 summary=()
 for scene in "${SCENES[@]}"; do
+	# A failed run must not leave the last results looking like this one's
+	rm -rf "$OUT/runs/$scene" "$OUT/results/$scene".*
 	medians=()
 	for run in $(seq 1 "$RUNS"); do
 		dir=$OUT/runs/$scene/$run
