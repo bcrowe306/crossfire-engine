@@ -15,8 +15,12 @@ package crossfire
 //     (default `trace.spall`), and stops it when the game ends (`Trace_Stop`).
 //   - Each thread writes into its own buffer, made the first time it records something and
 //     written when full, when the thread ends (`Trace_ThreadEnd`) or when the trace stops.
-//   - A program with its own trace (the editor: Skald's) hands it over with `Trace_Share`, and the
-//     engine records into that trace and that thread's buffer, so one thread's events nest.
+//   - **The clock:** wall time by default; with `SPALL_CLOCK=cpu` each thread's CPU time (time
+//     spent descheduled, waiting on the GPU or sleeping isn't counted: CPU work compares while
+//     other programs load the machine). POSIX's thread CPU clock; wall time on Windows.
+//   - A program with its own trace (the editor: Skald's) hands over its begin and end with
+//     `Trace_Share`, and the engine's spans go through them: one thread's events nest in one
+//     buffer, on one clock.
 //   - `-define:SPALL_AUTO=true` records every procedure: a program's main package defines the
 //     instrumentation hooks and calls `Trace_AutoEnter` / `Trace_AutoExit` (the player does).
 //
@@ -31,11 +35,11 @@ SPALL_AUTO :: #config(SPALL_AUTO, false)
 // TRACE_BUFFER_SIZE is the size of each thread's buffer: a full buffer is written to the file.
 TRACE_BUFFER_SIZE :: 1 << 20
 
-/*
-A procedure giving the calling thread's trace buffer (a `^spall.Buffer`, untyped: the browser
-build has no Spall), for `Trace_Share`.
-*/
-TraceBufferProc :: #type proc "contextless" () -> rawptr
+// A program's begin-a-span procedure, for `Trace_Share` (Skald's `prof_begin`)
+TraceBeginProc :: #type proc "contextless" (name: string, args: string = "")
+
+// A program's end-the-innermost-span procedure, for `Trace_Share` (Skald's `prof_end`)
+TraceEndProc :: #type proc "contextless" ()
 
 /*
 A span from here to the end of the enclosing block, named `name` (nothing without SPALL).

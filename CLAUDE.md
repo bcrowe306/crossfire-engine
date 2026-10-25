@@ -94,7 +94,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `camera_test.odin` | Tests: following a moving target (snapping on first, trailing, pans pausing it, a removed target), offset and look-ahead (still, both ways, eased, a zero delta), per-side limits with zoom (one side, centered between two, freeing, SetBounds), a scene file's camera (settings parsed and built, a second camera following, a missing target, limits, shake settings with a frequency) |
 | `localization.odin` | **Localization**: CSV translation tables (assets of kind "Translation", Godot's layout: `key,en,fr`), `Tr(key)`, `Tr_Text` ("@key" Labels and Menu items translate as they draw), `Locale_Set` / `Get` / `List` / `System`, the project's `locale` |
 | `localization_test.odin` | Tests: tables (quotes, comments, line breaks), merging, fallbacks, region matching, "@" text, a project's tables and locale |
-| `trace.odin`, `trace_native.odin`, `trace_web.odin` | **Profiling with Spall** (`-define:SPALL=true`; nothing without it, nothing in the browser): `Trace_Scope` / `Begin` / `End`, `Trace_Start` / `Stop` (the player's: `SPALL_TRACE` names the file), `Trace_Share` (record into a program's own trace: the editor shares Skald's), `Trace_ThreadEnd`, `Trace_NameThread`, `Trace_AutoEnter` / `Exit` (a main package's instrumentation hooks with `SPALL_AUTO`) |
+| `trace.odin`, `trace_native.odin`, `trace_web.odin`, `trace_clock_*.odin` | **Profiling with Spall** (`-define:SPALL=true`; nothing without it, nothing in the browser): `Trace_Scope` / `Begin` / `End`, `Trace_Start` / `Stop` (the player's: `SPALL_TRACE` names the file), `Trace_Share` (record through a program's begin and end: the editor passes Skald's), `SPALL_CLOCK=cpu` (each thread's CPU time: `trace_clock_posix.odin` / `trace_clock_other.odin`), `Trace_ThreadEnd`, `Trace_NameThread`, `Trace_AutoEnter` / `Exit` (a main package's instrumentation hooks with `SPALL_AUTO`) |
 | `tools/spall_report/`, `tools/profile_game.sh` | **Reading traces and profiling games**: `spall_report` (a `.spall` file's frames and spans: per frame, self and total time, other threads; `-from` / `-to` marks, `-json`, `compare` with a threshold), `profile_game.sh` (a project's scenes played headless in a Spall build of the player, runs, the median kept, a baseline to compare with) |
 | `debug.odin` | **Debug drawing**: `Debug_Line` / `Rect` / `Circle` / `Text` (world space, over the scene, for a frame or `seconds`), `Debug_Clear`; the **debug overlay** (`Game.debugOverlay`, F10 with dev keys: fps, frame times, the scene's counts), `Game_GetFrameStats` |
 | `debug_test.odin` | Tests: debug shapes' lifetimes and freeing, drawing through the view, frame stats and the overlay |
@@ -1360,15 +1360,22 @@ frame. **Build with `-define:SPALL=true`** and the engine's spans are recorded: 
 `present`. Without the define every `Trace_*`
 procedure is empty (the optimizer drops them); the browser build has none (`trace_web.odin`).
 - **Where the file goes:** the player starts the trace (`Player_Run`), named by `SPALL_TRACE`
-  (default `trace.spall`), and stops it when the game ends. Ticks are nanoseconds
+  (default `trace.spall`), and stops it when the game ends. Timestamps are nanoseconds
   (`context_create_with_scale(.., false, 1)`: no two-second clock calibration).
+- **The clock** (`SPALL_CLOCK`): wall time by default; `cpu` stamps events with each thread's
+  CPU time (`threadCPUNanoseconds`: POSIX's thread CPU clock, trace_clock_posix.odin; wall time
+  elsewhere), which leaves out time the thread was descheduled (another program's load), its
+  GPU waits and sleeps: for comparing CPU work on a busy machine. The engine writes its events and
+  buffers itself (`traceBufferWrite`): spall's `buffer_flush` adds a "flush" event stamped with
+  the wall clock, which in a CPU-clock trace would be a span of nonsense.
 - **Threads:** each thread records into its own buffer, made on first use (a thread-local), freed
   by `Trace_ThreadEnd` or `Trace_Stop`. While a buffer is made or freed the thread records
   nothing (`traceBusy`): allocating runs instrumented procedures under SPALL_AUTO, which would
   ask for the buffer again or write into one being freed.
-- **One trace for a program and the engine:** the editor's trace is Skald's; `Trace_Share(ctx,
-  bufferProc)` makes the engine record into it, into the same per-thread buffers, so the
-  viewport's `scene_draw` nests inside the editor's `Preview_Render`.
+- **One trace for a program and the engine:** the editor's trace is Skald's;
+  `Trace_Share(skald.prof_begin, skald.prof_end)` sends the engine's spans through Skald's
+  procedures, into the same per-thread buffers on the same clock, so the viewport's `scene_draw`
+  nests inside the editor's `Preview_Render`.
 - **Every procedure** (`-define:SPALL_AUTO=true` with SPALL): Odin calls the program's
   `@(instrumentation_enter)` / `_exit` hooks around every procedure not marked
   `@(no_instrumentation)`. The hooks must be in one package of the program: the player's main

@@ -8,6 +8,12 @@
 #     --runs <n>          runs per scene (default 3; reported together, their frames pooled)
 #     --renderer <name>   the player's --renderer (default gpu; software, vulkan, opengl...)
 #     --cpus <list>       taskset's CPU list (default 2-5; "" for none)
+#     --clock <wall|cpu>  the trace's clock (default wall): cpu is each thread's CPU time, which
+#                         leaves out time the thread was descheduled (other programs' load), its
+#                         GPU waits and sleeps: for comparing CPU work on a busy machine
+#     --wait-quiet <s>    before each run, wait up to that long (default 300; 0: don't) for the
+#                         machine's CPU use to drop under --quiet-busy percent (default 20): a
+#                         compile or another program sharing the CPUs slows a run by 10-60%
 #     --auto              build with SPALL_AUTO (every procedure: slow, for finding hot spots)
 #     --no-build          use the last build
 #     --save-baseline     keep the results as the baseline (build/profile_game/baseline/)
@@ -36,6 +42,9 @@ SECONDS_=10
 RUNS=3
 RENDERER=gpu
 CPUS=2-5
+CLOCK=wall
+WAIT_QUIET=300
+QUIET_BUSY=20
 AUTO=0
 BUILD=1
 SAVE=0
@@ -50,12 +59,15 @@ while [[ $# -gt 0 ]]; do
 		--runs) RUNS=$2; shift 2 ;;
 		--renderer) RENDERER=$2; shift 2 ;;
 		--cpus) CPUS=$2; shift 2 ;;
+		--clock) CLOCK=$2; shift 2 ;;
+		--wait-quiet) WAIT_QUIET=$2; shift 2 ;;
+		--quiet-busy) QUIET_BUSY=$2; shift 2 ;;
 		--auto) AUTO=1; shift ;;
 		--no-build) BUILD=0; shift ;;
 		--save-baseline) SAVE=1; shift ;;
 		--compare) COMPARE=1; shift ;;
 		--threshold) THRESHOLD=$2; shift 2 ;;
-		-h|--help) sed -n '2,31p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,39p' "$0"; exit 0 ;;
 		-*) echo "profile_game.sh: unknown option $1" >&2; exit 2 ;;
 		*) if [[ -z $PROJECT ]]; then PROJECT=$1; else SCENES+=("$1"); fi; shift ;;
 	esac
@@ -115,6 +127,37 @@ fi
 pin=()
 [[ -n $CPUS ]] && command -v taskset >/dev/null && pin=(taskset -c "$CPUS")
 
+# The machine's CPU use (percent of all CPUs) over one second, from /proc/stat
+cpuBusy() {
+	local a b
+	read -r -a a < <(grep '^cpu ' /proc/stat)
+	sleep 1
+	read -r -a b < <(grep '^cpu ' /proc/stat)
+	local idle=$(( (b[4] + b[5]) - (a[4] + a[5]) ))
+	local total=0 i
+	for i in 1 2 3 4 5 6 7 8; do total=$(( total + b[i] - a[i] )); done
+	(( total > 0 )) || { echo 0; return; }
+	echo $(( 100 * (total - idle) / total ))
+}
+
+# Waits (at most $WAIT_QUIET seconds) until the machine's CPU use is under $QUIET_BUSY percent,
+# so a run doesn't share the CPUs with other work; says when it gave up
+waitQuiet() {
+	(( WAIT_QUIET > 0 )) || return 0
+	local waited=0 busy
+	while :; do
+		busy=$(cpuBusy)
+		(( busy < QUIET_BUSY )) && return 0
+		if (( waited >= WAIT_QUIET )); then
+			echo "  (the machine stayed busy: ${busy}% of its CPUs in use; running anyway)"
+			return 0
+		fi
+		(( waited == 0 )) && echo "  waiting for the machine to be quiet (${busy}% of its CPUs in use)..."
+		sleep 4
+		waited=$(( waited + 5 ))
+	done
+}
+
 status=0
 summary=()
 for scene in "${SCENES[@]}"; do
@@ -125,9 +168,10 @@ for scene in "${SCENES[@]}"; do
 		mkdir -p "$dir/data"
 		# The project as it is, without build output
 		(cd "$PROJECT" && tar -c --exclude=./build --exclude=./export --exclude=./.git .) | (mkdir -p "$dir/project" && tar -x -C "$dir/project")
+		waitQuiet
 		echo "[$scene $run/$RUNS] playing ${SECONDS_} s ($RENDERER)"
 		if ! env SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy XDG_DATA_HOME="$dir/data" \
-			SPALL_TRACE="$dir/trace.spall" timeout $((SECONDS_ + 120)) "${pin[@]}" "$PLAYER" "$dir/project" \
+			SPALL_TRACE="$dir/trace.spall" SPALL_CLOCK="$CLOCK" timeout $((SECONDS_ + 120)) "${pin[@]}" "$PLAYER" "$dir/project" \
 			--scene "$scene" --quit-after "$SECONDS_" --renderer "$RENDERER" >"$dir/log.txt" 2>&1; then
 			echo "[$scene $run/$RUNS] the player failed: $dir/log.txt"
 			tail -5 "$dir/log.txt"
