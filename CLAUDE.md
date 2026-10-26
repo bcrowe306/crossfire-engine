@@ -215,7 +215,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `navigation_test.odin` | Tests: paths around a wall through a gap (clear legs, straightened), targets in walls, walled off, no corner cutting; a scene file's region blocked by a static body, an agent walking around it and arriving, failing outside any region |
 | `lighting.odin` | **2D lighting**: `Light2D` (`LightSettings`: point or spot, color, energy, radius, cone, shadows), `LightOccluder` (a CollisionShape's shapes), `SceneLighting` (`Scene.lighting`: `Scene_SetLighting`, ambient, static bodies' shadows), `Light_Visibility` (the polygon a light reaches), the light map (`Lighting_Apply`) |
 | `lighting_test.odin` | Tests: occluders stopping rays, lights without shadows, spot cones turned with the node, scene files; pixels: bright at a light, fading, dark past its reach and behind an occluder, screen layers unlit |
-| `ui_controls.odin` | **UI controls**: `Control` (settings `UISettings`, laid-out `size`, `offset` from its anchor) and its types `Panel`, `Button`, `ProgressBar`, `TextField`, `ScrollBox`, `RichText`, `Slider`, `CheckBox`; anchors (`UIAnchor`), layouts (`UILayout`: Row, Column, Grid; align, justify, expand), the mouse, focus moved by the ui_* actions or keys, typing, scroll boxes, rich text (`RichText_Layout`: tags, wrapping, each line aligned by `textAlign`), sliders (dragged; left / right while focused, snapped to `step`), check boxes, 9-patch images; `Create*`, `Control_SetText`, `ProgressBar_SetValue`, `Slider_SetValue`, `CheckBox_SetChecked`, `Control_Focus`, `Control_GetRect`, `Control_Theme` |
+| `ui_controls.odin` | **UI controls**: `Control` (settings `UISettings`, laid-out `size`, `offset` from its anchor) and its types `Panel`, `Button`, `ProgressBar`, `TextField`, `ScrollBox`, `RichText`, `Slider`, `CheckBox`; anchors (`UIAnchor`), layouts (`UILayout`: Row, Column, Grid; align, justify, expand), the mouse, focus moved by the ui_* actions or keys, typing, scroll boxes, rich text (`RichText_Layout`: tags, wrapping, each line aligned by `textAlign`; a RichText keeps its last layouts, `RichText.layouts`), sliders (dragged; left / right while focused, snapped to `step`), check boxes, 9-patch images; `Create*`, `Control_SetText`, `ProgressBar_SetValue`, `Slider_SetValue`, `CheckBox_SetChecked`, `Control_Focus`, `Control_GetRect`, `Control_Theme` |
 | `ui_theme.odin` | **UI themes**: `UITheme` (tagged fields for editors; `checkColor` for check boxes: `UITheme_Fields` / `Get` / `Set`), `DEFAULT_UI_THEME`, `.theme.xml` files (`ParseTheme`, `FormatTheme`), `Game_LoadTheme` (`Game.themes`), the project's `uiTheme` |
 | `ui_controls_test.odin` | Tests: a scene file's controls laid out (a stretched column, a row with an expanding child, a corner with an offset, a scroll box hiding what doesn't fit), mouse presses, focus by keys, typing with a limit, the wheel, offsets; themes' text round trip (the check mark's color too); rich text tags, wrapping and alignment; a scroll box of rows (their buttons hidden with them, the keys scrolling to a hidden one); sliders and check boxes from a scene file (`step` and `checked` only for their kinds), a slider pressed and dragged outside it (clamped, snapped, its events), moved by Left / Right or ui_left / ui_right while up / down still move the focus, check boxes ticked by clicks, Enter, Space and ui_accept, disabled ones ignoring input, changes from code sending no event |
 | `animator.odin` | **Animator nodes**: keyframe clips (`AnimatorSettings` / `AnimatorClipData` / `AnimatorTrackData` / `AnimatorKeyData`: scene files' `<clip>` / `<track>` / `<key>`) of any node's properties (`ANIMATOR_PROPERTIES`, `script.<field>`), eased (`EaseType`) or stepping; event tracks (`onEvent`), `onFinished`; `Animator_Play` / `Stop` / `Pause` / `Seek` / `Apply` (editors' scrubbing), `Animator_SetClips`, value text (`Animator_ParseValue` / `FormatValue` / `ReadProperty`), settings clone / destroy / equal |
@@ -963,6 +963,8 @@ the GPU (measured 2026-10-24, the demo's title scene with two lights, `profile_g
 --renderer vulkan`: 1.15 ms a light, the frame 9.3 -> 5.7 ms mean). **SDL's software renderer
 still draws each fan alone into the scratch target with no blending, then adds it**: added
 straight, it drew shared triangle edges twice and left bright seams (`isSoftwareRenderer`).
+The occluders' outlines are gathered once a frame for every light (`lightOutlines`); a light's
+rays are its evenly spaced ones (in order already) merged with its corners' (sorted).
 `lit_scenes_draw_alike_on_the_gpu` compares the two paths' pictures (shadow edges may differ
 by a pixel: the renderers round triangle edges differently).
 **On SDL's Vulkan renderer the frame's first render target switch waits for the GPU**
@@ -1355,10 +1357,39 @@ path to test its extension, `glyphFontFor` asks it on every `DrawText` / `Measur
 the forest's frame 1.65 -> 0.89 ms, `nodes_update` 0.93 -> 0.29 ms; spans neither build changed
 agreed within 1% (`present` 0.325 / 0.322 ms).
 
+**The demo's frames, round 2** (2026-10-26; the 8.4 ms `nodes_update` in the editor's TODO was
+the font path bug on a busy machine: 0.6 ms by now). A SPALL_AUTO run of the forest put the rest
+in its HUD's RichText controls: every measure and draw laid them out again (123 layouts, about
+400 words measured a frame), and every measure formatted the font's size into a "path@size" map
+key (`fmt.aprintf` of a float). Lighting (the hollow's ten lights) went to sorting each light's
+rays. Fixed: fonts are keyed by a struct (`FontKey`: path and size, no formatting); a RichText
+keeps its last layout per use (`RichText.layouts`: measured, drawn) until its text, font, size,
+width, alignment or the fonts (`ResourceManager.fontGeneration`) change; `Light_Visibility` sorts
+only the corners' rays and merges them with the evenly spaced ones (already in order); the
+occluders' outlines are gathered once a frame for all lights (`lightOutlines`), not by each
+light walking the scene. Each change measured alone, ABBA, CPU clock, quiet machine
+(`profile_game.sh --clock cpu --runs 2 --seconds 8`, a warm-up run first: the first phase of a
+series ran 2-3x slow), all kept. The whole round, before -> after (mean frame / p95, then per
+call):
+
+| Scene | Mean frame | p95 | `nodes_update` | `lighting` | `light_visibility` per light |
+|---|---|---|---|---|---|
+| ForestScene | 0.89 -> 0.68 ms | 0.99 -> 0.76 | 0.30 -> 0.12 ms | (unlit) | |
+| HollowScene | 1.64 -> 1.31 ms | 1.76 -> 1.40 | 0.38 -> 0.21 ms | 0.52 -> 0.42 ms | 25.6 -> 15.6 µs (10 lights) |
+| LairScene | 1.04 -> 0.74 ms | 1.21 -> 0.80 | 0.35 -> 0.10 ms | 0.18 -> 0.17 ms | 5.8 -> 3.0 µs |
+| TitleScene | 0.71 -> 0.63 ms | 0.78 -> 0.70 | 0.066 -> 0.035 ms | 0.155 -> 0.151 ms | 4.7 -> 2.5 µs |
+
+Steps: the font key cut `nodes_update` 0.30 -> 0.21 ms (forest), 0.38 -> 0.29 (hollow), 0.35 ->
+0.23 (lair); the layout cache 0.21 -> 0.12-0.16, 0.29 -> 0.20, 0.23 -> 0.10; the ray sort the
+hollow's `light_visibility` 25.8 -> 19.0 µs a light; gathering outlines once its `lighting` 0.45
+-> 0.42 ms. On the wall clock most of a frame is now `present` and the first render target
+switch (the GPU's own time: see "2D lighting" above). What's left on the CPU is small and
+spread out: particles' update and draw, `draw_order`, physics (0.01-0.06 ms each).
+
 Measured and left alone (not worth it at these numbers): particles' `#soa` layout and update
 (0.1 ms for 4000 particles), physics multithreading (0.3 ms for 1000 bodies), EventSubject's
 proc fields (notify is cheap), Node struct reordering (update over 20000 nodes is 0.46 ms), a
-text-layout cache (30 labels a frame: 0.36 ms).
+text-layout cache for Labels (30 labels a frame: 0.36 ms; RichText has one since round 2, above).
 Worth doing later if games need it: particle collisions on a grid (O(n²) now: 2 ms for 4 x 500),
 LDtk culling by grid for very large levels (it tests every tile; fine for the forest).
 

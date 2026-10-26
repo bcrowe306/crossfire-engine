@@ -227,6 +227,24 @@ ui_themes_and_rich_text :: proc(t: ^testing.T) {
 	testing.expect_value(t, right.size.x, long)
 	testing.expect_value(t, right.runs[0].at.x, math.round(long - short))
 	testing.expect_value(t, right.runs[1].at.x, f32(0))
+
+	// A RichText keeps its layout (`RichText.layouts`) until its text, size or the fonts change
+	scene := game->createScene("Rich")
+	rich := CreateRichText(scene, "ab")
+	Scene_ProcessQueues(scene)
+	Scene_Update(scene, nil, 1.0 / 60)
+	testing.expect_value(t, rich.size.x, short)
+	Control_SetText(rich, "abcdef")
+	Scene_Update(scene, nil, 1.0 / 60)
+	testing.expect_value(t, rich.size.x, long)
+	Scene_Update(scene, nil, 1.0 / 60)
+	testing.expect_value(t, rich.size.x, long)
+	rich.settings.textSize = 40
+	Scene_Update(scene, nil, 1.0 / 60)
+	testing.expect_value(t, rich.size.x, MeasureText(rm, "abcdef", DEFAULT_FONT, 40).x)
+	generation := rm.fontGeneration
+	ResourceManager_ForgetGlyphFont(rm, "fonts/none.fnt")
+	testing.expect(t, rm.fontGeneration != generation, "forgetting a font lays text out again")
 	free_all(context.temp_allocator)
 }
 

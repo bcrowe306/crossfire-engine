@@ -45,8 +45,8 @@ ResourceManager :: struct {
 	textureTimes: map[string]i64,
 	// Loaded sounds, by path (the keys are owned)
 	audio: map[string]^mix.Audio,
-	// Loaded fonts, by "path@size" (the keys are owned)
-	fonts: map[string]^ttf.Font,
+	// Loaded fonts, by path and point size (the keys' paths are owned)
+	fonts: map[FontKey]^ttf.Font,
 	// Images' filtering by path, as loadTexture is given it (asset_import.odin: the project's
 	// assets; keys owned), and the filtering of the rest (Default: Smooth, Aseprite files Pixel)
 	textureFilters: map[string]TextureFilter,
@@ -57,6 +57,9 @@ ResourceManager :: struct {
 	msdfFonts: map[string]struct {},
 	// The shader MSDF fonts draw with (fonts.odin; made on first use)
 	msdfProgram: ^ShaderProgram,
+	// Counts the fonts unloaded or read again (`unloadFont`, `ResourceManager_ForgetGlyphFont`,
+	// `ResourceManager_SetFontMSDF`): text laid out with an older count is laid out again
+	fontGeneration: u64,
 	// The embedded font at DEFAULT_FONT_SIZE, loaded by ResourceManager_Init
 	defaultFont: ^ttf.Font,
 	// Draws text through the renderer, caching glyphs in a GPU atlas. Used by the text primitives
@@ -95,7 +98,7 @@ ResourceManager_Init :: proc(rm: ^ResourceManager, renderer: ^sdl.Renderer, mixe
 	rm.mixer = mixer
 	rm.textures = make(map[string]^sdl.Texture)
 	rm.audio = make(map[string]^mix.Audio)
-	rm.fonts = make(map[string]^ttf.Font)
+	rm.fonts = make(map[FontKey]^ttf.Font)
 	rm.loadTexture = ResourceManager_loadTexture
 	rm.loadAudio = ResourceManager_loadAudio
 	rm.loadFont = ResourceManager_loadFont
@@ -233,8 +236,7 @@ ResourceManager_loadAudio :: proc(rm: ^ResourceManager, filePath: string, predec
 // Fonts are cached per point size, so the same file can be loaded at several sizes
 @(private)
 ResourceManager_loadFont :: proc(rm: ^ResourceManager, filePath: string, size: f32) -> ^ttf.Font {
-	key := fontKey(filePath, size, context.temp_allocator)
-	if font, ok := rm.fonts[key]; ok {
+	if font, ok := rm.fonts[FontKey{filePath, size}]; ok {
 		return font
 	}
 
@@ -255,7 +257,7 @@ ResourceManager_loadFont :: proc(rm: ^ResourceManager, filePath: string, size: f
 		return nil
 	}
 
-	rm.fonts[strings.clone(key)] = font
+	rm.fonts[FontKey{strings.clone(filePath), size}] = font
 	return font
 }
 
@@ -278,12 +280,13 @@ ResourceManager_unloadAudio :: proc(rm: ^ResourceManager, filePath: string) {
 
 @(private)
 ResourceManager_unloadFont :: proc(rm: ^ResourceManager, filePath: string, size: f32) {
-	lookup := fontKey(filePath, size, context.temp_allocator)
+	lookup := FontKey{filePath, size}
 	if lookup not_in rm.fonts do return
 	key, font := delete_key(&rm.fonts, lookup)
+	rm.fontGeneration += 1
 	if font == rm.defaultFont do rm.defaultFont = nil
 	ttf.CloseFont(font)
-	delete(key)
+	delete(key.path)
 }
 
 @(private)
@@ -318,12 +321,16 @@ ResourceManager_destroy :: proc(rm: ^ResourceManager) {
 
 	for key, font in rm.fonts {
 		ttf.CloseFont(font)
-		delete(key)
+		delete(key.path)
 	}
 	delete(rm.fonts)
 }
 
-@(private="file")
-fontKey :: proc(filePath: string, size: f32, allocator := context.allocator) -> string {
-	return fmt.aprintf("%s@%v", filePath, size, allocator = allocator)
+// A loaded font's key in `ResourceManager.fonts`: its file and point size. A struct, not a
+// formatted "path@size" string: fonts are looked up for every string measured or drawn, and
+// formatting the size cost more than the measuring (2026-10-26: 400 formats a frame in the forest)
+@(private)
+FontKey :: struct {
+	path: string,
+	size: f32,
 }

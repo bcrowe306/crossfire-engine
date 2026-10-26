@@ -188,10 +188,21 @@ Returns:
   cone to the other; the light's position isn't included)
 */
 Light_Visibility :: proc(light: ^Light2D, allocator := context.allocator) -> [][2]f32 {
+	outlines: []LightOutline
+	if light.settings.shadows && light.scene != nil do outlines = lightOutlines(light.scene)
+	return lightVisibility(light, outlines, allocator)
+}
+
+// INTERNAL
+
+// What a light reaches (Light_Visibility), its shadows from outlines gathered already
+// (`lightOutlines`: Lighting_Apply gathers them once a frame for all its lights)
+@(private="file")
+lightVisibility :: proc(light: ^Light2D, outlines: []LightOutline, allocator := context.allocator) -> [][2]f32 {
 	center := Node_GetWorldPosition(light)
 	s := light.settings
 	segments := make([dynamic][2][2]f32, context.temp_allocator)
-	if s.shadows && light.scene != nil do lightSegments(light.scene, center, s.radius, &segments)
+	if s.shadows do lightSegments(outlines, center, s.radius, &segments)
 	// The rays: evenly around (or across the cone), plus just either side of every corner
 	angles := make([dynamic]f32, context.temp_allocator)
 	spot := s.kind == .Spot
@@ -207,6 +218,7 @@ Light_Visibility :: proc(light: ^Light2D, allocator := context.allocator) -> [][
 	} else {
 		for i in 0..<LIGHT_SEGMENTS do append(&angles, f32(i) * math.TAU / LIGHT_SEGMENTS)
 	}
+	even := len(angles)
 	for seg in segments do for p in seg {
 		a := math.atan2(p.y - center.y, p.x - center.x)
 		for d in ([3]f32{-0.0005, 0, 0.0005}) {
@@ -220,7 +232,26 @@ Light_Visibility :: proc(light: ^Light2D, allocator := context.allocator) -> [][
 	rays := make([]Ray, len(angles), context.temp_allocator)
 	for a, i in angles do rays[i] = {key(a, start), a}
 	if spot do for &r in rays do if r.key > 2 * half + 0.001 do r.key -= math.TAU
-	slice.sort_by(rays, proc(a, b: Ray) -> bool { return a.key < b.key })
+	// The evenly spaced rays are in order already: only the corners' are sorted, then the two
+	// runs merged (2026-10-26: sorting every ray was most of a light's time; rays with equal keys
+	// point the same way, so the order among them doesn't change the polygon)
+	byKey :: proc(a, b: Ray) -> bool { return a.key < b.key }
+	if !slice.is_sorted_by(rays[:even], byKey) do slice.sort_by(rays[:even], byKey)
+	slice.sort_by(rays[even:], byKey)
+	if even > 0 && even < len(rays) {
+		merged := make([]Ray, len(rays), context.temp_allocator)
+		i, j := 0, even
+		for k in 0..<len(merged) {
+			if j >= len(rays) || (i < even && rays[i].key <= rays[j].key) {
+				merged[k] = rays[i]
+				i += 1
+			} else {
+				merged[k] = rays[j]
+				j += 1
+			}
+		}
+		rays = merged
+	}
 	points := make([dynamic][2]f32, 0, len(rays), allocator)
 	for r in rays {
 		dir := [2]f32{math.cos(r.angle), math.sin(r.angle)}
@@ -232,8 +263,6 @@ Light_Visibility :: proc(light: ^Light2D, allocator := context.allocator) -> [][
 	}
 	return points[:]
 }
-
-// INTERNAL
 
 // Where a ray (origin + dir * t, t >= 0) meets a segment, if it does
 @(private="file")
@@ -271,31 +300,31 @@ occluderOutline :: proc(o: ^LightOccluder, world: Transform2D, allocator := cont
 	return out
 }
 
-// The edges that stop a light near `center`: occluders', and static bodies' shapes if the scene
-// says so
+// An outline that stops light, in world coordinates, and the box around it
 @(private="file")
-lightSegments :: proc(scene: ^Scene, center: [2]f32, radius: f32, out: ^[dynamic][2][2]f32) {
-	addOutline :: proc(out: ^[dynamic][2][2]f32, outline: [][2]f32, closed: bool, center: [2]f32, radius: f32) {
-		// Skip what's wholly out of reach
-		near := false
-		for p in outline do if abs(p.x - center.x) <= radius && abs(p.y - center.y) <= radius do near = true
-		if !near && len(outline) > 0 {
-			lo, hi := outline[0], outline[0]
-			for p in outline do lo, hi = {min(lo.x, p.x), min(lo.y, p.y)}, {max(hi.x, p.x), max(hi.y, p.y)}
-			near = lo.x <= center.x + radius && hi.x >= center.x - radius && lo.y <= center.y + radius && hi.y >= center.y - radius
-		}
-		if !near do return
-		n := len(outline)
-		for i in 0..<n {
-			if !closed && i == n - 1 do break
-			append(out, [2][2]f32{outline[i], outline[(i + 1) % n]})
-		}
+LightOutline :: struct {
+	points: [][2]f32,
+	closed: bool,
+	lo, hi: [2]f32,
+}
+
+// The outlines that stop light in a scene: occluders', and static bodies' shapes if the scene
+// says so (temp allocated). Gathered once for every light of a frame: each light walking the
+// scene's nodes itself was a third of its time (2026-10-26, the demo's hollow: ten lights)
+@(private="file")
+lightOutlines :: proc(scene: ^Scene) -> []LightOutline {
+	out := make([dynamic]LightOutline, context.temp_allocator)
+	add :: proc(out: ^[dynamic]LightOutline, points: [][2]f32, closed: bool) {
+		if len(points) == 0 do return
+		lo, hi := points[0], points[0]
+		for p in points do lo, hi = {min(lo.x, p.x), min(lo.y, p.y)}, {max(hi.x, p.x), max(hi.y, p.y)}
+		append(out, LightOutline{points, closed, lo, hi})
 	}
 	for node in scene.nodes {
 		if !Node_IsVisibleInTree(node) do continue
 		if Node_Is(node, LightOccluder) {
 			o := cast(^LightOccluder)node
-			addOutline(out, occluderOutline(o, Node_GetWorldTransform(o)), o.shape != .Segment, center, radius)
+			add(&out, occluderOutline(o, Node_GetWorldTransform(o)), o.shape != .Segment)
 		} else if scene.lighting.bodyShadows && Node_Is(node, CollisionShape) {
 			shape := cast(^CollisionShape)node
 			if shape.disabled || shape.oneWay do continue
@@ -304,7 +333,22 @@ lightSegments :: proc(scene: ^Scene, center: [2]f32, radius: f32, out: ^[dynamic
 			if body == nil || !Node_Is(body, StaticBody) do continue
 			o := LightOccluder{shape = shape.shape, size = shape.size, radius = shape.radius, points = shape.points}
 			if shape.shape == .Capsule do o.size = {shape.radius * 2, shape.height}
-			addOutline(out, occluderOutline(&o, Node_GetWorldTransform(shape)), shape.shape != .Segment, center, radius)
+			add(&out, occluderOutline(&o, Node_GetWorldTransform(shape)), shape.shape != .Segment)
+		}
+	}
+	return out[:]
+}
+
+// The edges that stop a light near `center`: those of the outlines whose box is in its reach
+@(private="file")
+lightSegments :: proc(outlines: []LightOutline, center: [2]f32, radius: f32, out: ^[dynamic][2][2]f32) {
+	for o in outlines {
+		// Skip what's wholly out of reach
+		if o.lo.x > center.x + radius || o.hi.x < center.x - radius || o.lo.y > center.y + radius || o.hi.y < center.y - radius do continue
+		n := len(o.points)
+		for i in 0..<n {
+			if !o.closed && i == n - 1 do break
+			append(out, [2][2]f32{o.points[i], o.points[(i + 1) % n]})
 		}
 	}
 }
@@ -350,6 +394,8 @@ Lighting_Apply :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D
 	software := isSoftwareRenderer(renderer)
 	if !software do sdl.SetRenderDrawBlendMode(renderer, sdl.BLENDMODE_ADD)
 	full := sdl.FRect{0, 0, size.x, size.y}
+	outlines: []LightOutline
+	gathered := false
 	for node in scene.nodes {
 		if !Node_Is(node, Light2D) || !Node_IsVisibleInTree(node) do continue
 		light := cast(^Light2D)node
@@ -358,7 +404,8 @@ Lighting_Apply :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D
 		center := Node_GetWorldPosition(light)
 		base := node.layer in scene.screenLayers ? TRANSFORM2D_IDENTITY : view
 		Trace_Begin("light_visibility")
-		ring := Light_Visibility(light, context.temp_allocator)
+		if s.shadows && !gathered do outlines, gathered = lightOutlines(scene), true
+		ring := lightVisibility(light, outlines, context.temp_allocator)
 		Trace_End()
 		if len(ring) < 2 do continue
 		bright := sdl.FColor{min(f32(s.color.r) / 255 * s.energy, 1), min(f32(s.color.g) / 255 * s.energy, 1), min(f32(s.color.b) / 255 * s.energy, 1), 1}

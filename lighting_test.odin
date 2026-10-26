@@ -38,6 +38,15 @@ lights_reach_what_occluders_leave :: proc(t: ^testing.T) {
 	farthest := func_nearest(ring, {50, 50}, math.PI)
 	testing.expectf(t, abs(nearest - 25) < 0.5, "stopped by the wall: %v", nearest)
 	testing.expectf(t, abs(farthest - 60) < 0.5, "free the other way: %v", farthest)
+	// In angle order: the even rays and the wall's corners' rays merged (lighting.odin)
+	testing.expectf(t, len(ring) > LIGHT_SEGMENTS, "the corners' rays added: %d", len(ring))
+	previous := f32(-1)
+	for p in ring {
+		a := math.mod(math.atan2(p.y - 50, p.x - 50) + math.TAU, math.TAU)
+		if a > math.TAU - 0.001 do a -= math.TAU
+		testing.expectf(t, a >= previous - 1e-4, "in angle order: %v after %v", a, previous)
+		previous = a
+	}
 	// Without shadows it goes through
 	lamp.settings.shadows = false
 	testing.expectf(t, abs(func_nearest(Light_Visibility(lamp, context.temp_allocator), {50, 50}, 0) - 60) < 0.5, "no shadows")

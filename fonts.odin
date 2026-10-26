@@ -214,6 +214,7 @@ Inputs:
 */
 ResourceManager_SetFontMSDF :: proc(rm: ^ResourceManager, path: string, on: bool) {
 	if on == (path in rm.msdfFonts) do return
+	rm.fontGeneration += 1
 	if on {
 		rm.msdfFonts[strings.clone(path)] = {}
 	} else {
@@ -232,6 +233,7 @@ Forgets a font's glyph pictures, so the next text reads its files again (an edit
 MSDF atlas, or saved a bitmap font).
 */
 ResourceManager_ForgetGlyphFont :: proc(rm: ^ResourceManager, path: string) {
+	rm.fontGeneration += 1
 	if key, font := delete_key(&rm.glyphFonts, path); key != "" {
 		delete(key)
 		glyphFontDestroy(font)

@@ -266,6 +266,26 @@ ScrollBox :: struct {
 // Text with colors and sizes (`[color=#ff8000]...[/color]`, `[size=28]...[/size]`), wrapped
 RichText :: struct {
 	using control: Control,
+	// Its last layouts (internal): [0] measured for the layout, [1] drawn. Laid out again only
+	// when its text, font, size, width, alignment or the fonts change
+	layouts: [2]RichLayoutCache,
+}
+
+/*
+A RichText's last layout and what it was made from (internal: `richLayout`). Layouts were made
+for every measure and draw (2026-10-26: 123 a frame in the demo's forest level, about 400
+words measured), most of them the same as the last frame's. The arrays are in the node's arena.
+*/
+RichLayoutCache :: struct {
+	// The text laid out (the runs' text points into it), and the font's path
+	text, font: [dynamic]u8,
+	size, width: f32,
+	align: UITextAlign,
+	// `ResourceManager.fontGeneration` when it was made
+	fontGeneration: u64,
+	runs: [dynamic]RichRun,
+	extent: [2]f32,
+	valid: bool,
 }
 
 // A value picked by dragging a knob along a track: volume, brightness, difficulty
@@ -827,7 +847,7 @@ measure :: proc(c: ^Control) -> [2]f32 {
 			content = {side + spacing + m.x, max(side, m.y)}
 		}
 	case .RichText:
-		lines := richLayout(c, rm, font, textSize, c.settings.size.x)
+		lines := richLayout(c, rm, font, textSize, c.settings.size.x, 0)
 		content = lines.size
 	case .Panel, .ScrollBox:
 		content = childrenSize(c, padding, spacing)
@@ -1364,7 +1384,7 @@ controlDraw :: proc(node: ^Node, renderer: ^sdl.Renderer) {
 			DrawRectangle(renderer, &caret, theme.caretColor)
 		}
 	case .RichText:
-		lines := richLayout(c, rm, font, textSize, c.size.x)
+		lines := richLayout(c, rm, font, textSize, c.size.x, 1)
 		for run in lines.runs {
 			DrawText(rm, {run.at.x, run.at.y}, run.text, font, run.size, run.color != {} ? run.color : theme.textColor)
 		}
@@ -1626,8 +1646,41 @@ RichLineSpan :: struct {
 }
 
 
+// A RichText's layout: its cached one (`RichText.layouts[slot]`) while nothing it was made from
+// changed, else laid out again into the cache. The runs stay valid until the next call
 @(private="file")
-richLayout :: proc(c: ^Control, rm: ^ResourceManager, font: string, size, width: f32) -> RichLines {
+richLayout :: proc(c: ^Control, rm: ^ResourceManager, font: string, size, width: f32, slot: int) -> RichLines {
 	if rm == nil do return {}
-	return RichText_Layout(rm, Tr_Text(c.text, c.scene.game), font, size, width, c.settings.textAlign)
+	text := Tr_Text(c.text, c.scene.game)
+	if c.kind != .RichText do return RichText_Layout(rm, text, font, size, width, c.settings.textAlign)
+	cache := &(cast(^RichText)c).layouts[slot]
+	if cache.valid && cache.size == size && cache.width == width && cache.align == c.settings.textAlign &&
+	   cache.fontGeneration == rm.fontGeneration && string(cache.text[:]) == text && string(cache.font[:]) == font {
+		return {cache.runs[:], cache.extent}
+	}
+	if cache.runs.allocator.procedure == nil {
+		allocator := Node_GetAllocator(c)
+		cache.text = make([dynamic]u8, allocator)
+		cache.font = make([dynamic]u8, allocator)
+		cache.runs = make([dynamic]RichRun, allocator)
+	}
+	clear(&cache.text)
+	append(&cache.text, text)
+	clear(&cache.font)
+	append(&cache.font, font)
+	lines := RichText_Layout(rm, string(cache.text[:]), font, size, width, c.settings.textAlign)
+	clear(&cache.runs)
+	append(&cache.runs, ..lines.runs)
+	cache^ = {
+		text           = cache.text,
+		font           = cache.font,
+		size           = size,
+		width          = width,
+		align          = c.settings.textAlign,
+		fontGeneration = rm.fontGeneration,
+		runs           = cache.runs,
+		extent         = lines.size,
+		valid          = true,
+	}
+	return {cache.runs[:], cache.extent}
 }
