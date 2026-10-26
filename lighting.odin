@@ -1,5 +1,6 @@
 package crossfire
 
+import "core:hash"
 import "core:math"
 import "core:slice"
 import sdl "vendor:sdl3"
@@ -26,7 +27,9 @@ by LightOccluder nodes (and, if the scene says so, its static bodies' shapes).
 - **How it draws:** the light map is a render target the size of the screen (`Scene.lighting`
   keeps it); lights are triangle fans over it with their brightness in the vertices' colors, added
   together, and the map is drawn over the world with multiply blending. No shaders, so it works
-  with every renderer, the software one and the web's included. Normal-mapped sprites need
+  with every renderer, the software one and the web's included. The map is drawn again only
+  when what it's made of changed (`SceneLighting.mapKey`: the view, the ambient, the lights, the
+  outlines in reach); otherwise the last one is multiplied over the world again. Normal-mapped sprites need
   shaders (a later feature).
 */
 
@@ -94,6 +97,12 @@ SceneLighting :: struct {
 	// One light at a time is drawn here, then added to the map: its triangles overwrite each other
 	// (added straight to the map, the software renderer lit their shared edges twice: bright seams)
 	scratch: ^RenderTarget,
+	// What the light map was last drawn from (`lightMapKey`: the renderer, the screen's size, the
+	// view, the ambient, every light and the outlines in reach): while it's the same the map is
+	// reused, not drawn again (0: draw it)
+	mapKey: u64,
+	// How many times the light map was drawn (tests, profiling: a reused map doesn't count)
+	mapDraws: int,
 }
 
 // A scene's ambient light when its file sets none
@@ -376,6 +385,7 @@ Lighting_Apply :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D
 		l.target, l.scratch = nil, nil
 	}
 	if l.target == nil {
+		l.mapKey = 0
 		game := scene.game
 		saved := game.renderer
 		game.renderer = renderer
@@ -385,6 +395,20 @@ Lighting_Apply :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D
 		if l.target == nil || l.scratch == nil do return
 	}
 	SetDrawState(TRANSFORM2D_IDENTITY)
+	// The map is drawn again only when what it's made of changed: drawing it switches the
+	// renderer's target twice, and on SDL's Vulkan renderer each switch submits and waits for the
+	// GPU (a still camera over still lights: the editor's viewport, a title screen)
+	outlines, gathered := lightOutlinesIfShadowed(scene)
+	key := lightMapKey(scene, renderer, size, view, outlines)
+	if key == l.mapKey {
+		dst := sdl.FRect{0, 0, size.x, size.y}
+		sdl.SetTextureBlendMode(l.target.texture, sdl.BLENDMODE_MOD)
+		sdl.RenderTexture(renderer, l.target.texture, nil, &dst)
+		sdl.SetTextureBlendMode(l.target.texture, sdl.BLENDMODE_BLEND)
+		return
+	}
+	l.mapKey = key
+	l.mapDraws += 1
 	RenderTarget_Begin(renderer, l.target, clear = true, clearColor = {l.ambient.r, l.ambient.g, l.ambient.b, 255})
 	sdl.SetTextureBlendMode(l.scratch.texture, sdl.BLENDMODE_ADD)
 	// GPU renderers add each light's fan straight into the map: two target switches for the whole
@@ -394,8 +418,6 @@ Lighting_Apply :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D
 	software := isSoftwareRenderer(renderer)
 	if !software do sdl.SetRenderDrawBlendMode(renderer, sdl.BLENDMODE_ADD)
 	full := sdl.FRect{0, 0, size.x, size.y}
-	outlines: []LightOutline
-	gathered := false
 	for node in scene.nodes {
 		if !Node_Is(node, Light2D) || !Node_IsVisibleInTree(node) do continue
 		light := cast(^Light2D)node
@@ -445,6 +467,45 @@ Lighting_Apply :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view: Transform2D
 	sdl.RenderTexture(renderer, l.target.texture, nil, &dst)
 	sdl.SetTextureBlendMode(l.target.texture, sdl.BLENDMODE_BLEND)
 	Trace_End()
+}
+
+// The outlines that stop light when a visible light casts shadows (temp allocated), and whether
+// they were gathered
+@(private="file")
+lightOutlinesIfShadowed :: proc(scene: ^Scene) -> ([]LightOutline, bool) {
+	for node in scene.nodes {
+		if !Node_Is(node, Light2D) || !Node_IsVisibleInTree(node) do continue
+		s := (cast(^Light2D)node).settings
+		if s.shadows && s.radius > 0 && s.energy > 0 do return lightOutlines(scene), true
+	}
+	return nil, false
+}
+
+/*
+A hash of everything the light map is drawn from: the renderer and the screen's size, the view,
+the ambient color, each visible light's place, facing, settings and layer kind, and the outlines
+that stop light. Equal keys draw equal maps (Lighting_Apply reuses the last one).
+*/
+@(private="file")
+lightMapKey :: proc(scene: ^Scene, renderer: ^sdl.Renderer, size: [2]f32, view: Transform2D, outlines: []LightOutline) -> u64 {
+	Head :: struct { renderer: rawptr, size: [2]f32, view: Transform2D, ambient: sdl.Color }
+	head := Head{renderer, size, view, scene.lighting.ambient}
+	h := hash.fnv64a(([^]u8)(&head)[:size_of(head)])
+	for node in scene.nodes {
+		if !Node_Is(node, Light2D) || !Node_IsVisibleInTree(node) do continue
+		light := cast(^Light2D)node
+		world := Node_GetWorldTransform(light)
+		Part :: struct { settings: LightSettings, position: [2]f32, facing: f32, screen: bool }
+		part := Part{light.settings, Node_GetWorldPosition(light), Transform2D_Rotation(world), node.layer in scene.screenLayers}
+		h = hash.fnv64a(([^]u8)(&part)[:size_of(part)], h)
+	}
+	for o in outlines {
+		closed := o.closed
+		h = hash.fnv64a(([^]u8)(&closed)[:1], h)
+		if len(o.points) > 0 do h = hash.fnv64a(([^]u8)(raw_data(o.points))[:len(o.points) * size_of(o.points[0])], h)
+	}
+	// 0 means "draw it"
+	return h == 0 ? 1 : h
 }
 
 // Frees the scene's light map (Scene_Destroy)

@@ -193,3 +193,69 @@ lit_scenes_draw_alike_on_the_gpu :: proc(t: ^testing.T) {
 	testing.expectf(t, abs(int(gpu[50][55]) - int(soft[50][55])) <= 6, "the overlap: GPU %d, software %d", gpu[50][55], soft[50][55])
 	testing.expectf(t, gpu[50][115] < 30, "behind the wall on the GPU: %d", gpu[50][115])
 }
+
+// The light map is drawn again only when what it's made of changes (Lighting_Apply's key): a
+// light moved, its settings, an occluder moved, the ambient, the view; otherwise it's reused,
+// and the picture is the same
+@(test)
+light_map_is_reused_while_nothing_changes :: proc(t: ^testing.T) {
+	surface := sdl.CreateSurface(120, 100, .RGBA32)
+	defer sdl.DestroySurface(surface)
+	renderer := sdl.CreateSoftwareRenderer(surface)
+	defer sdl.DestroyRenderer(renderer)
+	game := testGame("testdata")
+	defer { Game_Destroy(game); free(game) }
+	game.resourceManager.renderer = renderer
+	game.renderer = renderer
+	scene := game->createScene("S")
+	data, _ := ParseScene(TWO_LAMPS)
+	defer SceneData_Destroy(&data)
+	created := Scene_Build(scene, &data, "testdata", attachScripts = false)
+	Scene_ProcessQueues(scene)
+	draw :: proc(scene: ^Scene, renderer: ^sdl.Renderer, view := TRANSFORM2D_IDENTITY) -> u8 {
+		sdl.SetRenderDrawColor(renderer, 255, 255, 255, 255)
+		sdl.RenderClear(renderer)
+		Scene_DrawWithView(scene, renderer, view)
+		sdl.FlushRenderer(renderer)
+		surface := sdl.RenderReadPixels(renderer, nil)
+		defer sdl.DestroySurface(surface)
+		converted := sdl.ConvertSurface(surface, .ARGB8888)
+		defer sdl.DestroySurface(converted)
+		return u8(((cast([^]u32)converted.pixels)[50 * int(converted.pitch / 4) + 40] >> 16) & 0xff)
+	}
+	l := &scene.lighting
+	first := draw(scene, renderer)
+	testing.expect_value(t, l.mapDraws, 1)
+	testing.expect_value(t, draw(scene, renderer), first)
+	testing.expect_value(t, l.mapDraws, 1)
+	lamp := cast(^Light2D)created[0]
+	wall := cast(^LightOccluder)created[2]
+	steps := []struct { name: string, change: proc(scene: ^Scene, lamp: ^Light2D, wall: ^LightOccluder) } {
+		{"a light moved", proc(scene: ^Scene, lamp: ^Light2D, wall: ^LightOccluder) { lamp.position.x += 5 }},
+		{"a light's settings", proc(scene: ^Scene, lamp: ^Light2D, wall: ^LightOccluder) { lamp.settings.energy = 0.8 }},
+		{"a light hidden", proc(scene: ^Scene, lamp: ^Light2D, wall: ^LightOccluder) { lamp.visible = false }},
+		{"an occluder moved", proc(scene: ^Scene, lamp: ^Light2D, wall: ^LightOccluder) { wall.position.y += 4 }},
+		{"an occluder resized", proc(scene: ^Scene, lamp: ^Light2D, wall: ^LightOccluder) { wall.size.y = 20 }},
+		{"the ambient", proc(scene: ^Scene, lamp: ^Light2D, wall: ^LightOccluder) { scene.lighting.ambient = {30, 30, 30, 255} }},
+	}
+	for step, i in steps {
+		step.change(scene, lamp, wall)
+		draw(scene, renderer)
+		testing.expectf(t, l.mapDraws == 2 + i, "%s draws it again: %d draws", step.name, l.mapDraws)
+		draw(scene, renderer)
+		testing.expectf(t, l.mapDraws == 2 + i, "then it's reused: %d draws", l.mapDraws)
+	}
+	before := l.mapDraws
+	moved := TRANSFORM2D_IDENTITY
+	moved.origin = {3, 0}
+	draw(scene, renderer, moved)
+	testing.expect_value(t, l.mapDraws, before + 1)
+	draw(scene, renderer, moved)
+	testing.expect_value(t, l.mapDraws, before + 1)
+	// A reused map is the same picture as a drawn one
+	lamp.visible = true
+	drawn := draw(scene, renderer)
+	reused := draw(scene, renderer)
+	testing.expect_value(t, reused, drawn)
+	free_all(context.temp_allocator)
+}

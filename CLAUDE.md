@@ -213,7 +213,7 @@ Application (app.odin)     window, SDL renderer, mixer, SDL_ttf; main loop; conv
 | `live_test.odin` | Tests: watch (stats and the tree), select (a node's properties), set (and a refused value), pause holding the game, a step of 1/60 s, resume, the debug shapes shown and hidden (`shapes on` / `off`, the stats saying so), the tree's scripts and a script's fields watched (`fields`: any field, a string quoted, a missing one left out, sent with the stats, stopped) |
 | `navigation.odin` | **Navigation**: `NavRegion` (a `NavGrid` over an area, blocked by static bodies' shapes grown by an agent radius: `NavRegion_Rebuild`, `NavGrid_BlockStaticBodies`, `NavGrid_SetBlocked`), A* paths straightened by line of sight (`NavGrid_FindPath`, `NavRegion_FindPath`, `Scene_FindNavRegion`), `NavAgent` (`NavAgent_SetTarget` / `Stop`, `velocity` with arrival and separation, moving its parent; `onArrived`, `onPathFailed`) |
 | `navigation_test.odin` | Tests: paths around a wall through a gap (clear legs, straightened), targets in walls, walled off, no corner cutting; a scene file's region blocked by a static body, an agent walking around it and arriving, failing outside any region |
-| `lighting.odin` | **2D lighting**: `Light2D` (`LightSettings`: point or spot, color, energy, radius, cone, shadows), `LightOccluder` (a CollisionShape's shapes), `SceneLighting` (`Scene.lighting`: `Scene_SetLighting`, ambient, static bodies' shadows), `Light_Visibility` (the polygon a light reaches), the light map (`Lighting_Apply`) |
+| `lighting.odin` | **2D lighting**: `Light2D` (`LightSettings`: point or spot, color, energy, radius, cone, shadows), `LightOccluder` (a CollisionShape's shapes), `SceneLighting` (`Scene.lighting`: `Scene_SetLighting`, ambient, static bodies' shadows), `Light_Visibility` (the polygon a light reaches), the light map (`Lighting_Apply`, reused while its key `SceneLighting.mapKey` is the same) |
 | `lighting_test.odin` | Tests: occluders stopping rays, lights without shadows, spot cones turned with the node, scene files; pixels: bright at a light, fading, dark past its reach and behind an occluder, screen layers unlit |
 | `ui_controls.odin` | **UI controls**: `Control` (settings `UISettings`, laid-out `size`, `offset` from its anchor) and its types `Panel`, `Button`, `ProgressBar`, `TextField`, `ScrollBox`, `RichText`, `Slider`, `CheckBox`; anchors (`UIAnchor`), layouts (`UILayout`: Row, Column, Grid; align, justify, expand), the mouse, focus moved by the ui_* actions or keys, typing, scroll boxes, rich text (`RichText_Layout`: tags, wrapping, each line aligned by `textAlign`; a RichText keeps its last layouts, `RichText.layouts`), sliders (dragged; left / right while focused, snapped to `step`), check boxes, 9-patch images; `Create*`, `Control_SetText`, `ProgressBar_SetValue`, `Slider_SetValue`, `CheckBox_SetChecked`, `Control_Focus`, `Control_GetRect`, `Control_Theme` |
 | `ui_theme.odin` | **UI themes**: `UITheme` (tagged fields for editors; `checkColor` for check boxes: `UITheme_Fields` / `Get` / `Set`), `DEFAULT_UI_THEME`, `.theme.xml` files (`ParseTheme`, `FormatTheme`), `Game_LoadTheme` (`Game.themes`), the project's `uiTheme` |
@@ -973,7 +973,14 @@ submits and waits (VULKAN_IssueBatch) for the previous frame's work, so the wait
 time for a frame (an Intel UHD 620 here), not the switch. Drawing the light map before the world
 didn't change it (tried and dropped); without any switch the wait moves to `present`, as on SDL's
 GPU renderer (present 1.6 ms, the whole frame 3.1 ms there). The
-map is drawn with `BLENDMODE_MOD`. Rays hit occluder edges with a little tolerance past their
+map is drawn with `BLENDMODE_MOD`. **The map is reused while nothing that lights the scene
+changed** (2026-10-26, `SceneLighting.mapKey`: a hash of the renderer, the screen's size, the
+view, the ambient, every visible light's place, facing, settings and layer kind, and the
+occluders' outlines; `mapDraws` counts the draws): then `Lighting_Apply` only multiplies the
+kept map over the world, no target switch. A still camera over still lights (the editor's
+viewport, title screens) pays nothing for its lights; measured in the editor's viewport on the
+title scene (ABBA, its `idle` scenario), `lighting` 3.99 -> 0.002 ms a render, the editor's
+mean frame 11.7% less. Test: `light_map_is_reused_while_nothing_changes`. Rays hit occluder edges with a little tolerance past their
 ends, or a ray through a corner slipped between two edges (a bright sliver). Both targets live
 on `Scene.lighting` and are freed by `Scene_Destroy`.
 
